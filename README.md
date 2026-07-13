@@ -68,8 +68,10 @@ idx <- vb_fit(fit, Y, Q)
   Equation Modeling*, 32(3), 437–449.
   <https://doi.org/10.1080/10705511.2024.2432612>
 - Fit assessment and factor-number selection: Chen, J., & Jin, Y. (2026).
-  Recovering latent structures after variational Bayesian variable selection.
-  *arXiv:2607.07159*.
+  Recovering latent structures after variational Bayesian variable selection:
+  Fit assessment and factor-number selection in partially exploratory factor
+  analysis. *arXiv preprint* arXiv:2607.07159.
+  <https://arxiv.org/abs/2607.07159>
 
 See `NEWS.md` for the current feature set and roadmap.
 
