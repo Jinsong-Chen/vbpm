@@ -3,9 +3,11 @@ Type: Package
 Title: Variational Bayes Partially Confirmatory Measurement Models
 Version: 0.1.0
 Authors@R: c(
-    person("Yi", "Jin", role = c("aut"),
-           comment = "algorithm and estimator; first author of the method papers"),
-    person("Jinsong", "Chen", email = "jinsong.chen@live.com", role = c("aut", "cre")))
+    person("Jinsong", "Chen", email = "jinsong.chen@live.com",
+           role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0002-0157-5469")),
+    person("Yi", "Jin", role = "aut",
+           comment = "first author of the method papers and the estimator"))
 Description: Regularized variational Bayes estimation of partially confirmatory
     factor-analytic measurement models. Provides variational Bayes factor
     analysis (vbfa) spanning the confirmatory-exploratory continuum via
