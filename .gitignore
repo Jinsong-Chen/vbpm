@@ -1,0 +1,15 @@
+# R
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.o
+*.so
+*.dll
+src/*.o
+src/*.so
+src/*.dll
+/doc/
+/Meta/
+..Rcheck/
+*.Rcheck/
