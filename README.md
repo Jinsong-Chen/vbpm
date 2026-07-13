@@ -53,9 +53,19 @@ idx <- vbfa_fit(fit, Y, Q)
 
 ## Methods
 
-The estimator and its properties are developed in Jin & Chen (2025,
-*Structural Equation Modeling*) and companion work. See `NEWS.md` for the
-current feature set and roadmap.
+- Partially confirmatory factor analysis with the Bayesian Lasso: Chen, J.,
+  Guo, Z., Zhang, L., & Pan, J. (2021). A partially confirmatory approach to
+  scale development with the Bayesian Lasso. *Psychological Methods*, 26(2),
+  210–235. <https://doi.org/10.1037/met0000293>
+- Variational estimator: Jin, Y., & Chen, J. (2025). Regularized variational
+  approximation for partially confirmatory factor analysis. *Structural
+  Equation Modeling*, 32(3), 437–449.
+  <https://doi.org/10.1080/10705511.2024.2432612>
+- Fit assessment and factor-number selection: Chen, J., & Jin, Y. (2026).
+  Recovering latent structures after variational Bayesian variable selection.
+  *arXiv:2607.07159*.
+
+See `NEWS.md` for the current feature set and roadmap.
 
 ## License
 

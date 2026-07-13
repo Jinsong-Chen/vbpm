@@ -66,6 +66,12 @@
 #'   (default `2`).
 #'
 #' @return The selected number of factors (a scalar from `K`).
+#'
+#' @references
+#' Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
+#' Bayesian variable selection: Fit assessment and factor-number selection in
+#' partially exploratory factor analysis. *arXiv preprint* arXiv:2607.07159.
+#'
 #' @seealso [pefa_vb()]
 #' @export
 select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
@@ -109,6 +115,11 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #' @return A list with `selected_K`, the `selection` vector, the fitted model
 #'   and `fit_stats` at the selected `K`, `Q_selected`, and the full `sweep`
 #'   data frame (carrying `converged`, `pass_fit`, `eligible` flags).
+#'
+#' @references
+#' Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
+#' Bayesian variable selection: Fit assessment and factor-number selection in
+#' partially exploratory factor analysis. *arXiv preprint* arXiv:2607.07159.
 #'
 #' @seealso [vbfa()], [select_K_elbow()]
 #' @export

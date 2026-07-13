@@ -33,6 +33,11 @@ elbow prematurely: a step counts as the elbow only if the next
 \code{sustain - 1} steps are also below threshold (or it is the last step).
 \code{sustain = 1} reproduces a first-crossing rule.
 }
+\references{
+Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
+Bayesian variable selection: Fit assessment and factor-number selection in
+partially exploratory factor analysis. \emph{arXiv preprint} arXiv:2607.07159.
+}
 \seealso{
 \code{\link[=pefa_vb]{pefa_vb()}}
 }

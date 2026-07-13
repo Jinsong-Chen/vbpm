@@ -48,6 +48,16 @@
 #'   `RMSEA`, `SRMR`, `CFI`, `TLI`, `AIC`, `BIC` (hard selection), `AIC_S`,
 #'   `BIC_S` (soft selection), and `ELBO`.
 #'
+#' @references
+#' Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
+#' Bayesian variable selection: Fit assessment and factor-number selection in
+#' partially exploratory factor analysis. *arXiv preprint* arXiv:2607.07159.
+#'
+#' Jin, Y., & Chen, J. (2025). Regularized variational approximation for
+#' partially confirmatory factor analysis. *Structural Equation Modeling: A
+#' Multidisciplinary Journal*, 32(3), 437–449.
+#' \doi{10.1080/10705511.2024.2432612}
+#'
 #' @seealso [vbfa()], [pefa_vb()]
 #' @export
 vbfa_fit <- function(fit, Y, Q, tau = 0.50, gamma = 0.5,

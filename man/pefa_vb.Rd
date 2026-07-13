@@ -60,6 +60,11 @@ confirmatory backbone \code{Q0} and padding each model with fully exploratory
 columns, then selects the number of factors with the scale-free gain rule
 (\code{\link[=select_K_elbow]{select_K_elbow()}}). Raw ELBO and BIC optima are reported for reference.
 }
+\references{
+Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
+Bayesian variable selection: Fit assessment and factor-number selection in
+partially exploratory factor analysis. \emph{arXiv preprint} arXiv:2607.07159.
+}
 \seealso{
 \code{\link[=vbfa]{vbfa()}}, \code{\link[=select_K_elbow]{select_K_elbow()}}
 }

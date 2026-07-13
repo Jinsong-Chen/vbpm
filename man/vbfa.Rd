@@ -91,9 +91,15 @@ fit$flag        # 1 if converged
 
 }
 \references{
-Jin, Y. & Chen, J. (2025). Regularized variational approximation for
-partially confirmatory factor analysis. \emph{Structural Equation Modeling}.
+Chen, J., Guo, Z., Zhang, L., & Pan, J. (2021). A partially confirmatory
+approach to scale development with the Bayesian Lasso. \emph{Psychological
+Methods}, 26(2), 210–235. \doi{10.1037/met0000293}
 
-Ročková, V. & George, E. I. (2018). The spike-and-slab LASSO.
-\emph{Journal of the American Statistical Association}.
+Jin, Y., & Chen, J. (2025). Regularized variational approximation for
+partially confirmatory factor analysis. \emph{Structural Equation Modeling: A
+Multidisciplinary Journal}, 32(3), 437–449.
+\doi{10.1080/10705511.2024.2432612}
+
+Ročková, V., & George, E. I. (2018). The spike-and-slab LASSO.
+\emph{Journal of the American Statistical Association}, 113(521), 431–444.
 }
