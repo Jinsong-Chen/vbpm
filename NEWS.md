@@ -9,7 +9,7 @@ First release.
   residual / local-dependence estimation (`Qe`) via a graphical spike-and-slab
   prior solved by QUIC. A scalar `v0 = 0.001` reproduces the fixed-spike
   estimator exactly.
-* `vbfa_fit()` — SEM-like fit statistics (RMSEA, SRMR, CFI, TLI, AIC, BIC,
+* `fit_indices()` — SEM-like fit statistics (RMSEA, SRMR, CFI, TLI, AIC, BIC,
   ELBO) with hard selection as the default.
 * `pefa()` and `select_K_elbow()` — window sweep over the number of factors
   with a scale-free gain rule for factor-number selection.
@@ -20,4 +20,4 @@ First release.
 
 * Missing-data support in `vbfa()` (currently errors on `NA`).
 * ELBO under the local-dependence model (currently `NA`).
-* LD-aware `vbfa_fit()`.
+* LD-aware `fit_indices()`.

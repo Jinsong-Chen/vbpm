@@ -74,15 +74,15 @@ test_that("NA input is rejected", {
   expect_error(vbfa(Y, d$Q), "NA")
 })
 
-test_that("vbfa_fit returns the documented statistics and rejects LD fits", {
+test_that("fit_indices returns the documented statistics and rejects LD fits", {
   d <- make_dat()
   f <- vbfa(d$Y, d$Q, convChk = FALSE)
-  fs <- vbfa_fit(f, d$Y, d$Q)
+  fs <- fit_indices(f, d$Y, d$Q)
   expect_named(fs, c("t_nom", "t", "t_S", "RMSEA", "SRMR", "CFI", "TLI",
                      "AIC", "BIC", "AIC_S", "BIC_S", "ELBO"))
   Qe <- matrix(-1L, 24, 24); diag(Qe) <- 0L
   fl <- vbfa(d$Y, d$Q, Qe = Qe, convChk = FALSE, max_it = 100)
-  expect_error(vbfa_fit(fl, d$Y, d$Q), "local-dependence")
+  expect_error(fit_indices(fl, d$Y, d$Q), "local-dependence")
 })
 
 test_that("pefa selects a factor number within the window", {

@@ -4,9 +4,9 @@
 \name{vbpm-package}
 \alias{vbpm}
 \alias{vbpm-package}
-\title{vbpm: Variational Bayes Partially Confirmatory Measurement Models}
+\title{vbpm: Variational Bayes Psychometric Models}
 \description{
-Regularized variational Bayes estimation of partially confirmatory factor-analytic measurement models (Chen, Guo, Zhang, and Pan, 2021 \doi{10.1037/met0000293}; Jin and Chen, 2025 \doi{10.1080/10705511.2024.2432612}). Provides variational Bayes factor analysis (vbfa) spanning the confirmatory-exploratory continuum via spike-and-slab priors on the loadings, with an optional dynamic (warm-started) regularization path, an orthogonal bifactor parameterization, and optional sparse residual (local dependence) estimation through a graphical spike-and-slab prior solved by QUIC. The exploratory end of the continuum follows Chen (2023) \doi{10.3758/s13428-022-01884-7}. Companion tools compute SEM-like fit statistics and select the number of factors via a scale-free gain rule (Chen and Jin, 2026 \doi{10.48550/arXiv.2607.07159}).
+Variational Bayes estimation for a family of psychometric measurement models. The current release centers on variational Bayes factor analysis (vbfa), a regularized partially confirmatory factor model spanning the confirmatory-exploratory continuum via spike-and-slab priors on the loadings (Chen, Guo, Zhang, and Pan, 2021 \doi{10.1037/met0000293}; Chen, 2023 \doi{10.3758/s13428-022-01884-7}; Jin and Chen, 2025 \doi{10.1080/10705511.2024.2432612}), with an optional dynamic (warm-started) regularization path, an orthogonal bifactor parameterization, and optional sparse residual (local dependence) estimation through a graphical spike-and-slab prior solved by QUIC. Companion tools compute SEM-like fit statistics and select the number of factors via a scale-free gain rule (Chen and Jin, 2026 \doi{10.48550/arXiv.2607.07159}). Further variational Bayes psychometric models are planned for future releases.
 }
 \seealso{
 Useful links:

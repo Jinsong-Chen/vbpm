@@ -65,9 +65,9 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #' @param fit_cut Logical; if `TRUE`, gate selection on absolute fit passing
 #'   `cutoffs`. Default `FALSE`.
 #' @param cutoffs Named absolute-fit cutoffs used when `fit_cut = TRUE`.
-#' @param max_it,rseed,tau Passed to [vbfa()] / [vbfa_fit()] (`max_it` is per
+#' @param max_it,rseed,tau Passed to [vbfa()] / [fit_indices()] (`max_it` is per
 #'   stage).
-#' @param orthogonal Passed to [vbfa()] and [vbfa_fit()].
+#' @param orthogonal Passed to [vbfa()] and [fit_indices()].
 #' @param save_path Optional CSV checkpoint path (resume-safe).
 #' @param verbose Logical; print per-model progress.
 #' @param ... Further arguments passed to [vbfa()] (e.g. `v0`, `Qe`,
@@ -114,7 +114,7 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
     t0  <- Sys.time()
     fit <- vbfa(Y, pad(K), max_it = max_it, convChk = FALSE, rseed = rseed,
                 orthogonal = orthogonal, ...)
-    fs  <- vbfa_fit(fit, Y, pad(K), tau = tau, orthogonal = orthogonal)
+    fs  <- fit_indices(fit, Y, pad(K), tau = tau, orthogonal = orthogonal)
     fits[[i]] <- fit
     rows[[i]] <- data.frame(
       K = K, ELBO = as.numeric(fit$ELBO), AIC = fs["AIC"], BIC = fs["BIC"],
@@ -157,7 +157,7 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
     sel_fit <- fits[[as.character(K_sel)]]
     if (is.null(sel_fit)) sel_fit <- vbfa(Y, pad(K_sel), max_it = max_it, convChk = FALSE,
                                           rseed = rseed, orthogonal = orthogonal, ...)
-    sel_stats <- vbfa_fit(sel_fit, Y, pad(K_sel), tau = tau, orthogonal = orthogonal)
+    sel_stats <- fit_indices(sel_fit, Y, pad(K_sel), tau = tau, orthogonal = orthogonal)
   }
 
   if (verbose) {

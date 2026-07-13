@@ -1,6 +1,6 @@
 ## SEM-like fit statistics for a vbfa model. Hard selection (posterior
 ## inclusion probability >= tau) is the default for every statistic; soft
-## variants carry an "_S" suffix. See the roxygen documentation of vbfa_fit()
+## variants carry an "_S" suffix. See the roxygen documentation of fit_indices()
 ## below.
 
 #' SEM-like fit statistics for a vbfa model
@@ -43,11 +43,11 @@
 #'
 #' @seealso [vbfa()], [pefa()]
 #' @export
-vbfa_fit <- function(fit, Y, Q, tau = 0.50, gamma = 0.5,
+fit_indices <- function(fit, Y, Q, tau = 0.50, gamma = 0.5,
                      orthogonal = FALSE, rank_adjust = TRUE, rank_max_J = 100) {
     ## local-dependence fits (Qe supplied) are not supported yet
     if (is.null(fit$PsiInv))
-        stop("vbfa_fit() does not support local-dependence fits yet ",
+        stop("fit_indices() does not support local-dependence fits yet ",
              "(fit$PsiInv is NULL). Compute fit statistics on a diagonal-",
              "residual fit (Qe = NULL).", call. = FALSE)
 
