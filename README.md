@@ -21,7 +21,7 @@ Bayes psychometric models are planned for future releases.
     identity (one general + orthogonal group factors).
   - **Local dependence**: supply a residual design matrix `Qe` to estimate a
     sparse residual precision by a graphical spike-and-slab prior (QUIC).
-- **`fit_indices()`** — SEM-like fit statistics (RMSEA, SRMR, CFI, TLI, AIC, BIC,
+- **`vb_fit()`** — SEM-like fit statistics (RMSEA, SRMR, CFI, TLI, AIC, BIC,
   ELBO).
 - **`pefa()`** / **`select_K_elbow()`** — sweep the number of factors and
   select it with a scale-free gain rule.
@@ -50,7 +50,7 @@ Q <- matrix(-1, ncol(Y), 3)
 Q[1:2, ] <- 0; Q[1:2, 1] <- 1        # two anchors on factor 1, etc.
 
 fit <- vbfa(Y, Q)                    # dynamic path on by default
-idx <- fit_indices(fit, Y, Q)
+idx <- vb_fit(fit, Y, Q)
 ```
 
 ## Methods

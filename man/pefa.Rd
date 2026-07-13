@@ -37,10 +37,10 @@ pefa(
 
 \item{cutoffs}{Named absolute-fit cutoffs used when \code{fit_cut = TRUE}.}
 
-\item{max_it, rseed, tau}{Passed to \code{\link[=vbfa]{vbfa()}} / \code{\link[=fit_indices]{fit_indices()}} (\code{max_it} is per
+\item{max_it, rseed, tau}{Passed to \code{\link[=vbfa]{vbfa()}} / \code{\link[=vb_fit]{vb_fit()}} (\code{max_it} is per
 stage).}
 
-\item{orthogonal}{Passed to \code{\link[=vbfa]{vbfa()}} and \code{\link[=fit_indices]{fit_indices()}}.}
+\item{orthogonal}{Passed to \code{\link[=vbfa]{vbfa()}} and \code{\link[=vb_fit]{vb_fit()}}.}
 
 \item{save_path}{Optional CSV checkpoint path (resume-safe).}
 
