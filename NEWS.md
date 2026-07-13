@@ -11,7 +11,7 @@ First release.
   estimator exactly.
 * `vbfa_fit()` — SEM-like fit statistics (RMSEA, SRMR, CFI, TLI, AIC, BIC,
   ELBO) with hard selection as the default.
-* `pefa_vb()` and `select_K_elbow()` — window sweep over the number of factors
+* `pefa()` and `select_K_elbow()` — window sweep over the number of factors
   with a scale-free gain rule for factor-number selection.
 * `sim_fa()` — simulate factor-analytic and IRT data with cross-loadings,
   local dependence, minor factors, categorical responses, and missingness.

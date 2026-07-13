@@ -1,49 +1,6 @@
-###############################################################################
-## pefa_vb.R -- partially exploratory VB factor analysis with gain-rule K
-##              selection (vbfa_r2 stack).
-##
-## Updated companion of analysis/pefa_vb.R for the vbfa_r2 estimator
-## (2026-07-13; the analysis/ original stays untouched for the frozen P1
-## scripts). CHANGES vs analysis/pefa_vb.R:
-##   * ALWAYS sources the vbfa_r2 engine + vbfa_fit from this folder — no more
-##     `if (!exists("vbfa"))` silent-engine ambiguity.
-##   * `orthogonal` argument passed through to BOTH vbfa() and vbfa_fit().
-##   * `...` passed through to vbfa(): v0 (dynamic path / fixed spike), Qe
-##     (LD mode — note vbfa_fit rejects LD fits until r2.1), ld_control, tolVal.
-##   * fit-statistic names follow the r2 vbfa_fit convention (hard selection
-##     unsuffixed): BIC / AIC / t, with _S only for the soft variants.
-##
-## pefa_vb(Q0, Y, Kmin, Kmax, delta = 10, ...) fits vbfa over a window of
-## factor numbers K = Kmin..Kmax, holding a fixed partially confirmatory
-## backbone Q0 (K0 specified factors + markers) and padding each model with
-## (K - K0) fully exploratory columns (all -1). Selection: scale-free ELBO
-## gain rule (select_K_elbow) over eligible fits; raw ELBO / BIC picks are
-## reported alongside for reference.
-##
-## Eligibility for selection:
-##   * convergence -- flag != 1 within max_it is a FAILURE, excluded (always).
-##   * absolute fit (OPTIONAL) -- when fit_cut = TRUE, a model must pass
-##     `cutoffs` (RMSEA <=, SRMR <=, CFI >=, TLI >=) to be selectable.
-##
-## Arguments
-##   Q0       J x K0 partial specification matrix (1 required, 0 fixed-zero,
-##            -1 unspecified). K0 = ncol(Q0) is the specified-factor backbone.
-##   Y        N x J data matrix; standardized inside vbfa.
-##   Kmin,Kmax  inclusive factor-number window; Kmin >= K0.
-##   delta    gain-rule threshold, percent of the largest gain (default 10).
-##   sustain  consecutive sub-threshold steps to fire the elbow (default 2).
-##   fit_cut  logical; TRUE gates selection on absolute fit (default FALSE).
-##   cutoffs  named absolute-fit cutoffs used when fit_cut = TRUE.
-##   max_it,rseed,tau  passed to vbfa / vbfa_fit (max_it is PER STAGE in r2).
-##   orthogonal  passed to vbfa (Phi = I) and vbfa_fit (n_phi = 0).
-##   save_path  optional CSV checkpoint (resume-safe).
-##   verbose  print per-K progress.
-##   ...      further vbfa() arguments (v0, Qe, ld_control, tolVal, convChk).
-##
-## Value: list(selected_K, selection, fit, fit_stats, Q_selected, sweep, K0,
-##             delta, fit_cut, cutoffs) -- sweep carries converged/pass_fit/
-##             eligible flags.
-###############################################################################
+## Partially exploratory factor analysis: a window sweep over the number of
+## factors with a scale-free gain rule for factor-number selection. See the
+## roxygen documentation of pefa() and select_K_elbow() below.
 
 #' Scale-free gain rule for choosing the number of factors
 #'
@@ -72,7 +29,11 @@
 #' Bayesian variable selection: Fit assessment and factor-number selection in
 #' partially exploratory factor analysis. *arXiv preprint* arXiv:2607.07159.
 #'
-#' @seealso [pefa_vb()]
+#' Chen, J. (2023). Fully and partially exploratory factor analysis with
+#' bi-level Bayesian regularization. *Behavior Research Methods*, 55(4),
+#' 2125-2142. \doi{10.3758/s13428-022-01884-7}
+#'
+#' @seealso [pefa()]
 #' @export
 select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
   o <- order(K); K <- K[o]; score <- score[o]
@@ -121,9 +82,13 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #' Bayesian variable selection: Fit assessment and factor-number selection in
 #' partially exploratory factor analysis. *arXiv preprint* arXiv:2607.07159.
 #'
+#' Chen, J. (2023). Fully and partially exploratory factor analysis with
+#' bi-level Bayesian regularization. *Behavior Research Methods*, 55(4),
+#' 2125-2142. \doi{10.3758/s13428-022-01884-7}
+#'
 #' @seealso [vbfa()], [select_K_elbow()]
 #' @export
-pefa_vb <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
+pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
                     cutoffs = c(RMSEA = .06, SRMR = .10, CFI = .90, TLI = .90),
                     max_it = 10000, rseed = 12345, tau = 0.50,
                     orthogonal = FALSE, save_path = NULL, verbose = TRUE, ...) {

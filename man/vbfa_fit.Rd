@@ -62,5 +62,5 @@ Multidisciplinary Journal}, 32(3), 437–449.
 \doi{10.1080/10705511.2024.2432612}
 }
 \seealso{
-\code{\link[=vbfa]{vbfa()}}, \code{\link[=pefa_vb]{pefa_vb()}}
+\code{\link[=vbfa]{vbfa()}}, \code{\link[=pefa]{pefa()}}
 }

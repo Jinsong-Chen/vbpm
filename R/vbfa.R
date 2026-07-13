@@ -88,11 +88,11 @@ vbfa <- function(Y, Q, Qe = NULL, orthogonal = FALSE,
                  ld_control = list()) {
 
   ## ---- input checks --------------------------------------------------
-  ## r2: no NA support (see header; r2.1 = within-loop EM-style imputation)
+  ## missing data are not yet supported (a future release will impute inside
+  ## the variational loop; see NEWS)
   if (anyNA(Y))
-    stop("Y contains NA. vbfa_r2 does not support missing data; ",
-         "impute beforehand or wait for r2.1 (within-loop imputation).",
-         call. = FALSE)
+    stop("Y contains NA. vbfa() does not support missing data; ",
+         "impute beforehand.", call. = FALSE)
   Y <- as.matrix(Y)
   Q <- as.matrix(Q)
   if (nrow(Q) != ncol(Y))
@@ -145,7 +145,7 @@ vbfa <- function(Y, Q, Qe = NULL, orthogonal = FALSE,
     xi0_seq <- rep(NA_real_, n_stage)
   }
 
-  ## ---- RNG hygiene (from r1.1) ----------------------------------------
+  ## ---- RNG hygiene ---------------------------------------------------
   if (exists(".Random.seed", .GlobalEnv))
     oldseed <- .GlobalEnv$.Random.seed else oldseed <- NULL
   set.seed(rseed)
@@ -153,8 +153,8 @@ vbfa <- function(Y, Q, Qe = NULL, orthogonal = FALSE,
     if (!is.null(oldseed)) assign(".Random.seed", oldseed, envir = .GlobalEnv)
   })
 
-  ## ---- shared setup and initialization (r1.1 values) -------------------
-  Y <- scale(Y)          # both modes (fix ported into the LD branch)
+  ## ---- shared setup and initialization -------------------------------
+  Y <- scale(Y)          # standardize (both modes)
 
   flag <- 0
   xi.PHI  <- 2 * P + 1
@@ -241,7 +241,7 @@ vbfa <- function(Y, Q, Qe = NULL, orthogonal = FALSE,
       }
 
       ## standardize factor variance to 1 via the posterior second moment
-      ## E_q[eta_p^2] = mean(eta_p^2) + Var_q(eta_p)   (r1.1 fix, both modes)
+      ## E_q[eta_p^2] = mean(eta_p^2) + Var_q(eta_p)   (both modes)
       scale_k <- sqrt(colMeans(mu.q.eta^2) + diag(PHI.q.eta))
       mu.q.eta <- t(t(mu.q.eta) / scale_k)
       PHI.q.eta <- PHI.q.eta / outer(scale_k, scale_k)
@@ -294,7 +294,7 @@ vbfa <- function(Y, Q, Qe = NULL, orthogonal = FALSE,
         }
       } else {
         ## LD: loading update gains a cross-item term (tem2) because the
-        ## residual precision Psi is non-diagonal (from ld-vb_r.R)
+        ## residual precision Psi is non-diagonal
         for (j in 1:J) {
           for (p in 1:P) {
             if (Q[j, p] == 0) next
@@ -384,7 +384,7 @@ vbfa <- function(Y, Q, Qe = NULL, orthogonal = FALSE,
 
       ## -- convergence check -----------------------------------------------
       ## (the two expressions coincide when Psi is diagonal; the non-LD form
-      ## is kept verbatim from r1.1 for bit-exact reproduction)
+      ## is kept verbatim for bit-exact reproduction of the fixed-spike fit)
       if (!ld) {
         parVecHat <- c(t(t(abs(Y - mu.q.eta %*% t(mu.q.Lam))) * mu.q.psiInv))
       } else {
@@ -449,13 +449,14 @@ vbfa <- function(Y, Q, Qe = NULL, orthogonal = FALSE,
         sum(q_uns * log(q_uns) + (1 - q_uns) * log(1 - q_uns))
     )
   } else {
-    ## r2 decision: no ELBO under LD. r2.1 assembles it from: graphical-SSL
-    ## prior over Psi off-diagonals, log det Psi (via W from QUIC), q_star
-    ## entropy, Beta(tau) terms — see file header.
+    ## the ELBO is not yet available under local dependence; a future release
+    ## will assemble it from the graphical spike-and-slab prior over Psi's
+    ## off-diagonals, log det Psi (via W from QUIC), the q_star entropy, and the
+    ## Beta(tau) terms.
     ELBO <- NA_real_
   }
 
-  ## ---- sign check (from r1.1) ----------------------------------------------
+  ## ---- sign check ----------------------------------------------------
   mean_mu.q.Lam <- apply(mu.q.Lam, 2, mean)
   sign_flag <- which(mean_mu.q.Lam < 0)
   if (length(sign_flag) > 0) {

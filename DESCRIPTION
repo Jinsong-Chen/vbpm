@@ -17,9 +17,10 @@ Description: Regularized variational Bayes estimation of partially confirmatory
     (warm-started) regularization path, an orthogonal bifactor
     parameterization, and optional sparse residual (local dependence)
     estimation through a graphical spike-and-slab prior solved by QUIC.
-    Companion tools compute SEM-like fit statistics and select the number of
-    factors via a scale-free gain rule (Chen and Jin, 2026
-    <doi:10.48550/arXiv.2607.07159>).
+    The exploratory end of the continuum follows Chen (2023)
+    <doi:10.3758/s13428-022-01884-7>. Companion tools compute SEM-like fit
+    statistics and select the number of factors via a scale-free gain rule
+    (Chen and Jin, 2026 <doi:10.48550/arXiv.2607.07159>).
 License: GPL-3
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)

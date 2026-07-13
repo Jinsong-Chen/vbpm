@@ -1,24 +1,7 @@
-###############################################################################
-##  vbfa_fit.R  --  SEM-like fit statistics for PCFA-VB / PEFA  (vbfa_r2 stack)
-##
-##  Updated companion of analysis/vbfa_fit.R for the vbfa_r2 estimator
-##  (2026-07-13; the analysis/ original stays untouched for the frozen P1
-##  scripts). Notation follows Jin & Chen (2025), Regularized Variational
-##  Approximation for Partially Confirmatory Factor Analysis, SEM 32(3).
-##
-##  CHANGES vs analysis/vbfa_fit.R:
-##   * HARD selection is the default for every statistic — no _H suffix:
-##       t_nom t t_S RMSEA SRMR CFI TLI AIC BIC AIC_S BIC_S ELBO
-##     (_S marks the soft-selection variants where one exists; everything
-##     unsuffixed is hard-selected at threshold tau.)
-##   * LD guard: an LD fit from vbfa_r2 (Qe supplied) has PsiInv = NULL and
-##     is REJECTED with a clear error. r2.1 upgrade: use the full residual
-##     covariance W (already returned by QUIC) in the implied covariance
-##     Sigma = Lam Phi Lam' + W, and add the active residual off-diagonals
-##     (q_star >= tau) to the parameter counts.
-##
-##  Usage:   fit <- vbfa(Y, Q);  idx <- vbfa_fit(fit, Y, Q)
-###############################################################################
+## SEM-like fit statistics for a vbfa model. Hard selection (posterior
+## inclusion probability >= tau) is the default for every statistic; soft
+## variants carry an "_S" suffix. See the roxygen documentation of vbfa_fit()
+## below.
 
 #' SEM-like fit statistics for a vbfa model
 #'
@@ -58,16 +41,15 @@
 #' Multidisciplinary Journal*, 32(3), 437–449.
 #' \doi{10.1080/10705511.2024.2432612}
 #'
-#' @seealso [vbfa()], [pefa_vb()]
+#' @seealso [vbfa()], [pefa()]
 #' @export
 vbfa_fit <- function(fit, Y, Q, tau = 0.50, gamma = 0.5,
                      orthogonal = FALSE, rank_adjust = TRUE, rank_max_J = 100) {
-    ## LD fits (vbfa_r2 with Qe) are not supported yet — see header (r2.1).
+    ## local-dependence fits (Qe supplied) are not supported yet
     if (is.null(fit$PsiInv))
-        stop("vbfa_fit does not support LD fits yet (fit$PsiInv is NULL). ",
-             "r2.1 will use W in the implied covariance and count residual ",
-             "edges; until then compute fit statistics on a non-LD fit.",
-             call. = FALSE)
+        stop("vbfa_fit() does not support local-dependence fits yet ",
+             "(fit$PsiInv is NULL). Compute fit statistics on a diagonal-",
+             "residual fit (Qe = NULL).", call. = FALSE)
 
     N  <- nrow(Y); J <- ncol(Y); K <- ncol(Q); Ns <- N - 1
     m  <- J * (J + 1) / 2                    # unique covariance moments

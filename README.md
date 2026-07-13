@@ -21,7 +21,7 @@ are selected from the data by continuous spike-and-slab priors.
     sparse residual precision by a graphical spike-and-slab prior (QUIC).
 - **`vbfa_fit()`** — SEM-like fit statistics (RMSEA, SRMR, CFI, TLI, AIC, BIC,
   ELBO).
-- **`pefa_vb()`** / **`select_K_elbow()`** — sweep the number of factors and
+- **`pefa()`** / **`select_K_elbow()`** — sweep the number of factors and
   select it with a scale-free gain rule.
 - **`sim_fa()`** — simulate FA/IRT data with cross-loadings, local dependence,
   minor factors, categorical items, and missingness.

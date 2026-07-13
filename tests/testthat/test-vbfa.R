@@ -82,13 +82,13 @@ test_that("vbfa_fit returns the documented statistics and rejects LD fits", {
                      "AIC", "BIC", "AIC_S", "BIC_S", "ELBO"))
   Qe <- matrix(-1L, 24, 24); diag(Qe) <- 0L
   fl <- vbfa(d$Y, d$Q, Qe = Qe, convChk = FALSE, max_it = 100)
-  expect_error(vbfa_fit(fl, d$Y, d$Q), "LD")
+  expect_error(vbfa_fit(fl, d$Y, d$Q), "local-dependence")
 })
 
-test_that("pefa_vb selects a factor number within the window", {
+test_that("pefa selects a factor number within the window", {
   d <- make_dat()
   Q0 <- d$Q[, 1:2, drop = FALSE]
-  r <- pefa_vb(Q0, d$Y, Kmin = 2, Kmax = 4, verbose = FALSE,
+  r <- pefa(Q0, d$Y, Kmin = 2, Kmax = 4, verbose = FALSE,
                max_it = 1500, v0 = 0.001)
   expect_true(r$selected_K %in% 2:4)
   expect_true(all(r$sweep$converged))
