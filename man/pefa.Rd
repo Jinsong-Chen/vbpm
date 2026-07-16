@@ -14,7 +14,6 @@ pefa(
   fit_cut = FALSE,
   cutoffs = c(RMSEA = 0.06, SRMR = 0.1, CFI = 0.9, TLI = 0.9),
   max_it = 10000,
-  rseed = 12345,
   tau = 0.5,
   orthogonal = FALSE,
   save_path = NULL,
@@ -37,8 +36,7 @@ pefa(
 
 \item{cutoffs}{Named absolute-fit cutoffs used when \code{fit_cut = TRUE}.}
 
-\item{max_it, rseed, tau}{Passed to \code{\link[=vbfa]{vbfa()}} / \code{\link[=vb_fit]{vb_fit()}} (\code{max_it} is per
-stage).}
+\item{max_it, tau}{Passed to \code{\link[=vbfa]{vbfa()}} / \code{\link[=vb_fit]{vb_fit()}} (\code{max_it} is per stage).}
 
 \item{orthogonal}{Passed to \code{\link[=vbfa]{vbfa()}} and \code{\link[=vb_fit]{vb_fit()}}.}
 

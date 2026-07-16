@@ -65,8 +65,7 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #' @param fit_cut Logical; if `TRUE`, gate selection on absolute fit passing
 #'   `cutoffs`. Default `FALSE`.
 #' @param cutoffs Named absolute-fit cutoffs used when `fit_cut = TRUE`.
-#' @param max_it,rseed,tau Passed to [vbfa()] / [vb_fit()] (`max_it` is per
-#'   stage).
+#' @param max_it,tau Passed to [vbfa()] / [vb_fit()] (`max_it` is per stage).
 #' @param orthogonal Passed to [vbfa()] and [vb_fit()].
 #' @param save_path Optional CSV checkpoint path (resume-safe).
 #' @param verbose Logical; print per-model progress.
@@ -90,7 +89,7 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #' @export
 pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
                     cutoffs = c(RMSEA = .06, SRMR = .10, CFI = .90, TLI = .90),
-                    max_it = 10000, rseed = 12345, tau = 0.50,
+                    max_it = 10000, tau = 0.50,
                     orthogonal = FALSE, save_path = NULL, verbose = TRUE, ...) {
   Y  <- as.matrix(Y); Q0 <- as.matrix(Q0)
   J  <- ncol(Y); K0 <- ncol(Q0)
@@ -112,7 +111,7 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
       if (verbose) cat(sprintf("K=%2d  (from checkpoint)\n", K)); next
     }
     t0  <- Sys.time()
-    fit <- vbfa(Y, pad(K), max_it = max_it, convChk = FALSE, rseed = rseed,
+    fit <- vbfa(Y, pad(K), max_it = max_it, convChk = FALSE,
                 orthogonal = orthogonal, ...)
     fs  <- vb_fit(fit, Y, pad(K), tau = tau, orthogonal = orthogonal)
     fits[[i]] <- fit
@@ -156,7 +155,7 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
   if (!is.na(K_sel)) {
     sel_fit <- fits[[as.character(K_sel)]]
     if (is.null(sel_fit)) sel_fit <- vbfa(Y, pad(K_sel), max_it = max_it, convChk = FALSE,
-                                          rseed = rseed, orthogonal = orthogonal, ...)
+                                          orthogonal = orthogonal, ...)
     sel_stats <- vb_fit(sel_fit, Y, pad(K_sel), tau = tau, orthogonal = orthogonal)
   }
 

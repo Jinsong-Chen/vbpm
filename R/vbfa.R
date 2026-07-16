@@ -36,10 +36,20 @@ logC_igw <- function(xi, Lam, P) {
 #'   and warm-starts the next); a **scalar** gives a single fixed spike. The
 #'   default path ends at `0.001`; a scalar `v0 = 0.001` reproduces the
 #'   fixed-spike estimator exactly.
+#'
+#'   For a **gentler path that aids convergence**, pass a finer, longer,
+#'   log-spaced descent starting from a larger `v0`, e.g.
+#'   `v0 = exp(seq(log(0.05), log(0.001), length.out = 10))`. Each stage is
+#'   then a small perturbation of the previous one, so its warm start is a good
+#'   initialization and it converges quickly and stably. Prefer this when a fit
+#'   fails to converge within `max_it`, when the loading solution looks
+#'   unstable, or for near-singular / strongly regularized models: it navigates
+#'   the non-convex spike-and-slab landscape better than a single hard fit, and
+#'   is usually preferable to (and often faster than) simply raising `max_it`.
+#'   Keep the endpoint at your target; log spacing suits the multiplicative
+#'   spike.
 #' @param max_it Maximum variational iterations **per stage**. Default `5000`.
 #' @param convChk Logical; print per-iteration relative error. Default `TRUE`.
-#' @param rseed Integer random seed (the caller's RNG state is restored on
-#'   exit).
 #' @param tolVal Convergence tolerance on the maximum relative error.
 #' @param ld_control A named list of local-dependence controls, read only when
 #'   `Qe` is supplied: `xi0` (spike-penalty path, units of `N`; default
@@ -58,6 +68,12 @@ logC_igw <- function(xi, Lam, P) {
 #'   `q_star`, and path metadata.
 #'
 #' @section Notes:
+#' The diagonal-residual estimator is **deterministic** (fixed initialization,
+#' no random numbers), so results are reproducible without a seed; there is no
+#' `rseed` argument. (The local-dependence branch's QUIC solver shuffles its
+#' active set with the RNG, but that is a convex solve, so the shuffle order
+#' does not change the solution.)
+#'
 #' Missing-data support and the local-dependence ELBO are planned for a future
 #' release; see `NEWS`.
 #'
@@ -84,7 +100,7 @@ logC_igw <- function(xi, Lam, P) {
 #' @export
 vbfa <- function(Y, Q, Qe = NULL, orthogonal = FALSE,
                  v0 = c(0.01, 0.005, 0.002, 0.001),
-                 max_it = 5000, convChk = TRUE, rseed = 12345, tolVal = 1e-4,
+                 max_it = 5000, convChk = TRUE, tolVal = 1e-4,
                  ld_control = list()) {
 
   ## ---- input checks --------------------------------------------------
@@ -146,12 +162,14 @@ vbfa <- function(Y, Q, Qe = NULL, orthogonal = FALSE,
   }
 
   ## ---- RNG hygiene ---------------------------------------------------
-  if (exists(".Random.seed", .GlobalEnv))
-    oldseed <- .GlobalEnv$.Random.seed else oldseed <- NULL
-  set.seed(rseed)
-  on.exit({
-    if (!is.null(oldseed)) assign(".Random.seed", oldseed, envir = .GlobalEnv)
-  })
+  ## The diagonal-residual estimator consumes no random numbers (deterministic).
+  ## The only RNG use is the QUIC active-set shuffle in the local-dependence
+  ## branch -- a convex solve, so the order does not change the solution. We
+  ## save and restore the caller's RNG state so a fit leaves it untouched.
+  if (exists(".Random.seed", .GlobalEnv)) {
+    oldseed <- .GlobalEnv$.Random.seed
+    on.exit(assign(".Random.seed", oldseed, envir = .GlobalEnv))
+  }
 
   ## ---- shared setup and initialization -------------------------------
   Y <- scale(Y)          # standardize (both modes)

@@ -12,7 +12,6 @@ vbfa(
   v0 = c(0.01, 0.005, 0.002, 0.001),
   max_it = 5000,
   convChk = TRUE,
-  rseed = 12345,
   tolVal = 1e-04,
   ld_control = list()
 )
@@ -39,14 +38,23 @@ factors). Default \code{FALSE} (oblique; factor correlation estimated).}
 warm-started dynamic regularization path (each stage runs to convergence
 and warm-starts the next); a \strong{scalar} gives a single fixed spike. The
 default path ends at \code{0.001}; a scalar \code{v0 = 0.001} reproduces the
-fixed-spike estimator exactly.}
+fixed-spike estimator exactly.
+
+For a \strong{gentler path that aids convergence}, pass a finer, longer,
+log-spaced descent starting from a larger \code{v0}, e.g.
+\code{v0 = exp(seq(log(0.05), log(0.001), length.out = 10))}. Each stage is
+then a small perturbation of the previous one, so its warm start is a good
+initialization and it converges quickly and stably. Prefer this when a fit
+fails to converge within \code{max_it}, when the loading solution looks
+unstable, or for near-singular / strongly regularized models: it navigates
+the non-convex spike-and-slab landscape better than a single hard fit, and
+is usually preferable to (and often faster than) simply raising \code{max_it}.
+Keep the endpoint at your target; log spacing suits the multiplicative
+spike.}
 
 \item{max_it}{Maximum variational iterations \strong{per stage}. Default \code{5000}.}
 
 \item{convChk}{Logical; print per-iteration relative error. Default \code{TRUE}.}
-
-\item{rseed}{Integer random seed (the caller's RNG state is restored on
-exit).}
 
 \item{tolVal}{Convergence tolerance on the maximum relative error.}
 
@@ -77,6 +85,12 @@ bifactor parameterization, and sparse residual (local-dependence)
 estimation.
 }
 \section{Notes}{
+
+The diagonal-residual estimator is \strong{deterministic} (fixed initialization,
+no random numbers), so results are reproducible without a seed; there is no
+\code{rseed} argument. (The local-dependence branch's QUIC solver shuffles its
+active set with the RNG, but that is a convex solve, so the shuffle order
+does not change the solution.)
 
 Missing-data support and the local-dependence ELBO are planned for a future
 release; see \code{NEWS}.
