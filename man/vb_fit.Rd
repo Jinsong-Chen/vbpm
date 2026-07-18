@@ -10,7 +10,7 @@ vb_fit(
   Q,
   tau = 0.5,
   gamma = 0.5,
-  orthogonal = FALSE,
+  orthogonal = NULL,
   rank_adjust = TRUE,
   rank_max_J = 100
 )
@@ -29,8 +29,11 @@ local-dependence fits are not yet supported and raise an error).}
 \item{gamma}{Reserved (extended BIC tuning); currently unused in the
 returned vector.}
 
-\item{orthogonal}{Logical; must match the value used in \code{\link[=vbfa]{vbfa()}}. When
-\code{TRUE}, factor correlations are not free parameters.}
+\item{orthogonal}{Logical; whether the fit is an orthogonal (bifactor)
+model, in which case factor correlations are not free parameters. The
+default \code{NULL} reads the setting from the fit object itself, which is the
+recommended use. Supplying a value that contradicts the fit raises an
+error rather than silently miscounting parameters.}
 
 \item{rank_adjust}{Logical; if \code{TRUE}, the effective parameter count is the
 rank of the Jacobian of the model-implied covariance (needs the \code{numDeriv}
@@ -50,6 +53,22 @@ object under hard selection (an unspecified loading counts as active when its
 posterior inclusion probability is at least \code{tau}). Absolute indices
 (RMSEA, SRMR, CFI, TLI) and information criteria (AIC, BIC) are returned,
 together with the model's ELBO.
+}
+\examples{
+sim <- sim_fa(N = 300, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
+Q <- matrix(-1L, ncol(sim$dat), 3)
+for (k in 1:3) { a <- which(rep(1:3, each = 6) == k)[1:2]
+                 Q[a, ] <- 0L; Q[a, k] <- 1L }
+fit <- vbfa(sim$dat, Q, convChk = FALSE)
+round(vb_fit(fit, sim$dat, Q), 3)
+
+\donttest{
+## bifactor: orthogonal is read from the fit object, so the same call works
+Qb <- cbind(1L, Q)
+fb <- vbfa(sim$dat, Qb, orthogonal = TRUE, convChk = FALSE)
+round(vb_fit(fb, sim$dat, Qb), 3)
+}
+
 }
 \references{
 Chen, J., & Jin, Y. (2026). Recovering latent structures after variational

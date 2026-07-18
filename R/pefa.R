@@ -33,6 +33,22 @@
 #' bi-level Bayesian regularization. *Behavior Research Methods*, 55(4),
 #' 2125-2142. \doi{10.3758/s13428-022-01884-7}
 #'
+#' @examples
+#' ## ELBOs from a window sweep over K = 2:6 -- large gains up to K = 4,
+#' ## then only dust. The rule fires at the elbow:
+#' elbo <- c(-5400, -5100, -4900, -4895, -4892)
+#' select_K_elbow(K = 2:6, score = elbo)          # 4
+#'
+#' ## for an information criterion (smaller is better), pass its negative
+#' bic <- c(10900, 10500, 10310, 10395, 10480)
+#' select_K_elbow(K = 2:6, score = -bic)          # 4
+#'
+#' ## sustain = 1 is a plain first-crossing rule; the default sustain = 2
+#' ## refuses to fire on a single transient dip
+#' jag <- c(-5400, -5100, -5095, -4900, -4897, -4895)
+#' select_K_elbow(K = 2:7, score = jag, sustain = 1)  # 3 (fooled by the dip)
+#' select_K_elbow(K = 2:7, score = jag, sustain = 2)  # 5 (rides through it)
+#'
 #' @seealso [pefa()]
 #' @export
 select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
@@ -84,6 +100,22 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #' Chen, J. (2023). Fully and partially exploratory factor analysis with
 #' bi-level Bayesian regularization. *Behavior Research Methods*, 55(4),
 #' 2125-2142. \doi{10.3758/s13428-022-01884-7}
+#'
+#' @examples
+#' \donttest{
+#' ## three-factor data; the backbone Q0 anchors only the first two factors,
+#' ## and the sweep asks how many factors the data actually support
+#' sim <- sim_fa(N = 400, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
+#' J   <- ncol(sim$dat)
+#' Q0  <- matrix(-1L, J, 2)
+#' for (k in 1:2) { a <- which(rep(1:3, each = 6) == k)[1:2]
+#'                  Q0[a, ] <- 0L; Q0[a, k] <- 1L }
+#'
+#' r <- pefa(Q0, sim$dat, Kmin = 2, Kmax = 4, verbose = FALSE)
+#' r$selected_K          # 3 on this data
+#' r$sweep               # the full sweep table (ELBO, BIC, fit, timing)
+#' r$fit$flag            # the refitted selected model is returned
+#' }
 #'
 #' @seealso [vbfa()], [select_K_elbow()]
 #' @export

@@ -23,11 +23,16 @@ logC_igw <- function(xi, Lam, P) {
 #' @param Q Integer `J x K` design matrix for the loadings: `1` = specified
 #'   (anchored) loading, `0` = fixed zero, `-1` = unspecified (estimated by
 #'   spike-and-slab). `K` is the number of factors.
-#' @param Qe Optional `J x J` residual design matrix enabling local-dependence
-#'   estimation. Entries `1` (freely estimated residual dependence), `-1`
-#'   (uncertain; selected by spike-and-slab), `0` (shrunk to zero). Symmetric;
-#'   its diagonal is ignored. `NULL` (default) gives diagonal residuals. Fully
-#'   exploratory local dependence: `Qe = matrix(-1, J, J)`.
+#' @param ld Logical switch for local-dependence (sparse residual) estimation.
+#'   `FALSE` (default) fits diagonal residuals and ignores `Qe` (with a warning
+#'   if one is supplied). `TRUE` estimates a sparse residual precision by a
+#'   graphical spike-and-slab prior solved by QUIC, with the search space given
+#'   by `Qe`.
+#' @param Qe Residual design matrix (`J x J`), read only when `ld = TRUE`.
+#'   Entries `1` (freely estimated residual dependence), `-1` (uncertain;
+#'   selected by spike-and-slab), `0` (shrunk to zero). Symmetric; its diagonal
+#'   is ignored. The default `NULL` means fully exploratory local dependence,
+#'   i.e. `Qe = matrix(-1, J, J)`.
 #' @param orthogonal Logical. If `TRUE`, the factor correlation is fixed at the
 #'   identity (an orthogonal bifactor model: one general plus orthogonal group
 #'   factors). Default `FALSE` (oblique; factor correlation estimated).
@@ -52,7 +57,7 @@ logC_igw <- function(xi, Lam, P) {
 #' @param convChk Logical; print per-iteration relative error. Default `TRUE`.
 #' @param tolVal Convergence tolerance on the maximum relative error.
 #' @param ld_control A named list of local-dependence controls, read only when
-#'   `Qe` is supplied: `xi0` (spike-penalty path, units of `N`; default
+#'   `ld = TRUE`: `xi0` (spike-penalty path, units of `N`; default
 #'   `seq(0.1, 1, length.out = 5)`), `xi1` (slab penalty, units of `N`;
 #'   default `0.01`), `diag_penalty` (`1` penalizes the precision diagonal with
 #'   `xi1`, `0` leaves it unpenalized), `quic_eps`, `quic_max_it`, and the Beta
@@ -63,9 +68,10 @@ logC_igw <- function(xi, Lam, P) {
 #'   identity when `orthogonal = TRUE`), `pi` (posterior inclusion
 #'   probabilities), `PsiInv` (residual precisions; `NULL` under local
 #'   dependence), `ELBO` (evidence lower bound; `NA` under local dependence),
-#'   `iter`, `flag` (`1` if converged), and — when `Qe` is supplied — the
-#'   residual precision `Psi`, its inverse `W`, the residual-edge activeness
-#'   `q_star`, and path metadata.
+#'   `iter`, `flag` (`1` if converged), `orthogonal` and `ld` (the settings the
+#'   model was fit with), and — when `ld = TRUE` — the residual precision
+#'   `Psi`, its inverse `W`, the residual-edge activeness `q_star`, and path
+#'   metadata.
 #'
 #' @section Notes:
 #' The diagonal-residual estimator is **deterministic** (fixed initialization,
@@ -91,14 +97,42 @@ logC_igw <- function(xi, Lam, P) {
 #' *Journal of the American Statistical Association*, 113(521), 431–444.
 #'
 #' @examples
+#' ## partially confirmatory: two anchors per factor, the rest exploratory
 #' sim <- sim_fa(N = 300, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
 #' Q <- matrix(-1L, ncol(sim$dat), 3)
 #' for (k in 1:3) { a <- which(rep(1:3, each = 6) == k)[1:2]; Q[a, ] <- 0; Q[a, k] <- 1 }
 #' fit <- vbfa(sim$dat, Q, convChk = FALSE)
-#' fit$flag        # 1 if converged
+#' fit$flag                    # 1 if converged
+#' round(fit$Lam, 2)           # loadings
+#' round(fit$pi, 2)            # posterior inclusion probabilities
+#'
+#' \donttest{
+#' ## orthogonal bifactor: one general column plus the group factors
+#' Qb  <- cbind(1L, Q)
+#' fb  <- vbfa(sim$dat, Qb, orthogonal = TRUE, convChk = FALSE)
+#' fb$Phi                      # identity by construction
+#'
+#' ## local dependence: simulate correlated residuals, then set ld = TRUE
+#' simLD <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, lac = .3, ecr = .3,
+#'                 rseed = 2)
+#' fLD <- vbfa(simLD$dat, Q, ld = TRUE, convChk = FALSE, max_it = 300,
+#'             tolVal = 1e-3)
+#' ## largest recovered residual edges vs the planted ones
+#' Poff <- abs(fLD$Psi); Poff[lower.tri(Poff, diag = TRUE)] <- 0
+#' which(Poff >= sort(Poff, decreasing = TRUE)[3], arr.ind = TRUE)
+#' simLD$ofd_ind
+#'
+#' ## empirical illustration: NLSY 1997 (27 mixed-type items, 3 factors).
+#' ## vbfa() does not support NA yet, so complete cases are used, and the
+#' ## polytomous items are treated as continuous for this illustration.
+#' data(nlsy27)
+#' Yn <- as.matrix(nlsy27$dat[stats::complete.cases(nlsy27$dat), ])
+#' fn <- vbfa(Yn, nlsy27$Q, convChk = FALSE)
+#' round(fn$Lam, 2)
+#' }
 #'
 #' @export
-vbfa <- function(Y, Q, Qe = NULL, orthogonal = FALSE,
+vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
                  v0 = c(0.01, 0.005, 0.002, 0.001),
                  max_it = 5000, convChk = TRUE, tolVal = 1e-4,
                  ld_control = list()) {
@@ -116,8 +150,16 @@ vbfa <- function(Y, Q, Qe = NULL, orthogonal = FALSE,
   if (!all(Q %in% c(-1, 0, 1)))
     stop("Q entries must be in {-1, 0, 1}.", call. = FALSE)
 
-  ld <- !is.null(Qe)
-  if (ld) {
+  ld <- isTRUE(ld)
+  if (!ld) {
+    if (!is.null(Qe)) {
+      warning("Qe is ignored because ld = FALSE; set ld = TRUE to enable ",
+              "local-dependence estimation.", call. = FALSE)
+      Qe <- NULL
+    }
+  } else {
+    if (is.null(Qe))
+      Qe <- matrix(-1, ncol(Y), ncol(Y))   # fully exploratory local dependence
     Qe <- as.matrix(Qe)
     if (nrow(Qe) != ncol(Y) || ncol(Qe) != ncol(Y))
       stop("Qe must be J x J (J = ncol(Y)).", call. = FALSE)
@@ -497,6 +539,9 @@ vbfa <- function(Y, Q, Qe = NULL, orthogonal = FALSE,
               PsiInv = if (!ld) mu.q.psiInv else NULL,
               plotDat = plotDat, flag = flag, Lam = mu.q.Lam, pi = q,
               ELBO = ELBO, rho = rho,
+              ## settings the model was fit with, so downstream consumers
+              ## (vb_fit) need not be told twice
+              orthogonal = orthogonal, ld = ld,
               ## LD extras (NULL when Qe = NULL)
               Psi = if (ld) Psi else NULL,
               W = if (ld) W else NULL,

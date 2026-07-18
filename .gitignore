@@ -13,3 +13,15 @@ src/*.dll
 /Meta/
 ..Rcheck/
 *.Rcheck/
+
+# joint working surface + development material: local only, per Jinsong.
+# dev/ is NOT tracked -- it holds unported estimators, frozen references and
+# papers. Back it up outside git; nothing here survives a fresh clone.
+workbench.html
+/dev/
+/tmp/
+
+# vignette build artifacts
+vignettes/*.html
+vignettes/*.R
+inst/doc

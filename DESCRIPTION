@@ -1,7 +1,7 @@
 Package: vbpm
 Type: Package
 Title: Variational Bayes Psychometric Models
-Version: 0.1.0
+Version: 0.2.0
 Authors@R: c(
     person("Jinsong", "Chen", email = "jinsong.chen@live.com",
            role = c("aut", "cre"),
@@ -9,34 +9,35 @@ Authors@R: c(
     person("Yi", "Jin", role = "aut",
            comment = "first author of the method papers and the estimator"))
 Description: Variational Bayes estimation for a family of psychometric
-    measurement models. The current release centers on variational Bayes
-    factor analysis (vbfa), a regularized partially confirmatory factor
-    model spanning the confirmatory-exploratory continuum via spike-and-slab
+    measurement models. Two models are provided. Variational Bayes factor
+    analysis (vbfa) is a regularized partially confirmatory factor model
+    spanning the confirmatory-exploratory continuum via spike-and-slab
     priors on the loadings (Chen, Guo, Zhang, and Pan, 2021
     <doi:10.1037/met0000293>; Chen, 2023 <doi:10.3758/s13428-022-01884-7>;
     Jin and Chen, 2025 <doi:10.1080/10705511.2024.2432612>), with an optional
     dynamic (warm-started) regularization path, an orthogonal bifactor
     parameterization, and optional sparse residual (local dependence)
     estimation through a graphical spike-and-slab prior solved by QUIC.
-    Companion tools compute SEM-like fit statistics and select the number of
-    factors via a scale-free gain rule (Chen and Jin, 2026
-    <doi:10.48550/arXiv.2607.07159>). Further variational Bayes psychometric
-    models are planned for future releases.
+    Regularized MIMIC (vbmimic) extends this to multiple-indicators
+    multiple-causes models, placing spike-and-slab priors on both the
+    measurement and the structural part (Jin and Chen, 2025
+    <doi:10.1080/00273171.2025.2483253>). Companion tools compute SEM-like
+    fit statistics and select the number of factors via a scale-free gain
+    rule (Chen and Jin, 2026 <doi:10.48550/arXiv.2607.07159>), and simulate
+    data from either model family.
 License: GPL-3
 Encoding: UTF-8
+LazyData: true
 Roxygen: list(markdown = TRUE)
 Depends: R (>= 4.1)
-Imports:
-    Rcpp,
-    MASS,
-    stats
-LinkingTo:
-    Rcpp,
-    RcppArmadillo
-Suggests:
-    numDeriv,
-    testthat (>= 3.0.0)
+Imports: Rcpp, MASS, stats
+LinkingTo: Rcpp, RcppArmadillo
+Suggests: numDeriv, testthat (>= 3.0.0)
 Config/testthat/edition: 3
 URL: https://github.com/Jinsong-Chen/vbpm
 BugReports: https://github.com/Jinsong-Chen/vbpm/issues
 Config/roxygen2/version: 8.0.0
+Author: Jinsong Chen [aut, cre] (ORCID:
+    <https://orcid.org/0000-0002-0157-5469>),
+  Yi Jin [aut] (first author of the method papers and the estimator)
+Maintainer: Jinsong Chen <jinsong.chen@live.com>

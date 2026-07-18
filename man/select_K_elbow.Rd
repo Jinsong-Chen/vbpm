@@ -33,6 +33,23 @@ elbow prematurely: a step counts as the elbow only if the next
 \code{sustain - 1} steps are also below threshold (or it is the last step).
 \code{sustain = 1} reproduces a first-crossing rule.
 }
+\examples{
+## ELBOs from a window sweep over K = 2:6 -- large gains up to K = 4,
+## then only dust. The rule fires at the elbow:
+elbo <- c(-5400, -5100, -4900, -4895, -4892)
+select_K_elbow(K = 2:6, score = elbo)          # 4
+
+## for an information criterion (smaller is better), pass its negative
+bic <- c(10900, 10500, 10310, 10395, 10480)
+select_K_elbow(K = 2:6, score = -bic)          # 4
+
+## sustain = 1 is a plain first-crossing rule; the default sustain = 2
+## refuses to fire on a single transient dip
+jag <- c(-5400, -5100, -5095, -4900, -4897, -4895)
+select_K_elbow(K = 2:7, score = jag, sustain = 1)  # 3 (fooled by the dip)
+select_K_elbow(K = 2:7, score = jag, sustain = 2)  # 5 (rides through it)
+
+}
 \references{
 Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
 Bayesian variable selection: Fit assessment and factor-number selection in

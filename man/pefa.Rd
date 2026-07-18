@@ -58,6 +58,23 @@ confirmatory backbone \code{Q0} and padding each model with fully exploratory
 columns, then selects the number of factors with the scale-free gain rule
 (\code{\link[=select_K_elbow]{select_K_elbow()}}). Raw ELBO and BIC optima are reported for reference.
 }
+\examples{
+\donttest{
+## three-factor data; the backbone Q0 anchors only the first two factors,
+## and the sweep asks how many factors the data actually support
+sim <- sim_fa(N = 400, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
+J   <- ncol(sim$dat)
+Q0  <- matrix(-1L, J, 2)
+for (k in 1:2) { a <- which(rep(1:3, each = 6) == k)[1:2]
+                 Q0[a, ] <- 0L; Q0[a, k] <- 1L }
+
+r <- pefa(Q0, sim$dat, Kmin = 2, Kmax = 4, verbose = FALSE)
+r$selected_K          # 3 on this data
+r$sweep               # the full sweep table (ELBO, BIC, fit, timing)
+r$fit$flag            # the refitted selected model is returned
+}
+
+}
 \references{
 Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
 Bayesian variable selection: Fit assessment and factor-number selection in

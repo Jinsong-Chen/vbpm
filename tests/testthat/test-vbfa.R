@@ -59,7 +59,8 @@ test_that("LD mode recovers planted residual pairs; ELBO is NA", {
   pairs <- rbind(c(4, 9), c(11, 20), c(15, 23))
   d <- make_dat(seed = 2, ld_pairs = pairs, ld_rho = .5)
   Qe <- matrix(-1L, 24, 24); diag(Qe) <- 0L
-  f <- vbfa(d$Y, d$Q, Qe = Qe, convChk = FALSE, tolVal = 1e-3, max_it = 300)
+  f <- vbfa(d$Y, d$Q, ld = TRUE, Qe = Qe, convChk = FALSE,
+            tolVal = 1e-3, max_it = 300)
   expect_true(is.na(f$ELBO))
   Poff <- abs(f$Psi); Poff[lower.tri(Poff, diag = TRUE)] <- 0
   top3 <- order(-Poff)[1:3]
@@ -74,15 +75,54 @@ test_that("NA input is rejected", {
   expect_error(vbfa(Y, d$Q), "NA")
 })
 
+test_that("the ld switch governs Qe", {
+  d <- make_dat()
+  Qe <- matrix(-1L, 24, 24); diag(Qe) <- 0L
+
+  ## Qe without ld = TRUE is ignored, with a warning, and the fit is diagonal
+  expect_warning(f <- vbfa(d$Y, d$Q, Qe = Qe, convChk = FALSE), "ignored")
+  expect_false(f$ld)
+  expect_false(is.null(f$PsiInv))
+  expect_true(is.finite(f$ELBO))
+
+  ## ld = TRUE with Qe = NULL means fully exploratory local dependence
+  f2 <- vbfa(d$Y, d$Q, ld = TRUE, convChk = FALSE,
+             tolVal = 1e-3, max_it = 100)
+  expect_true(f2$ld)
+  expect_null(f2$PsiInv)
+  expect_true(is.na(f2$ELBO))
+  expect_equal(dim(f2$Psi), c(24L, 24L))
+})
+
 test_that("vb_fit returns the documented statistics and rejects LD fits", {
   d <- make_dat()
   f <- vbfa(d$Y, d$Q, convChk = FALSE)
   fs <- vb_fit(f, d$Y, d$Q)
   expect_named(fs, c("t_nom", "t", "t_S", "RMSEA", "SRMR", "CFI", "TLI",
                      "AIC", "BIC", "AIC_S", "BIC_S", "ELBO"))
-  Qe <- matrix(-1L, 24, 24); diag(Qe) <- 0L
-  fl <- vbfa(d$Y, d$Q, Qe = Qe, convChk = FALSE, max_it = 100)
+  fl <- vbfa(d$Y, d$Q, ld = TRUE, convChk = FALSE, max_it = 100)
   expect_error(vb_fit(fl, d$Y, d$Q), "local-dependence")
+})
+
+test_that("vb_fit reads orthogonal from the fit (the bifactor footgun)", {
+  d  <- make_dat()
+  Qb <- cbind(1L, d$Q)
+  fb <- vbfa(d$Y, Qb, orthogonal = TRUE, convChk = FALSE)
+
+  ## the default call now counts the bifactor correctly: no free factor
+  ## correlations. Before the fix it silently added K(K-1)/2 of them.
+  fs_default  <- vb_fit(fb, d$Y, Qb)
+  fs_explicit <- vb_fit(fb, d$Y, Qb, orthogonal = TRUE)
+  expect_identical(fs_default, fs_explicit)
+  K <- ncol(Qb)
+  expect_equal(unname(fs_default["t_nom"]),
+               sum((Qb == 1) | (Qb == -1 & {p <- fb$pi; p[Qb == 1] <- 1
+                                            p[Qb == 0] <- 0; p >= .5})) + 24)
+
+  ## a contradictory value errors instead of miscounting
+  expect_error(vb_fit(fb, d$Y, Qb, orthogonal = FALSE), "contradicts")
+  fo <- vbfa(d$Y, d$Q, convChk = FALSE)
+  expect_error(vb_fit(fo, d$Y, d$Q, orthogonal = TRUE), "contradicts")
 })
 
 test_that("pefa selects a factor number within the window", {

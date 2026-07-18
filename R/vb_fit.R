@@ -19,8 +19,11 @@
 #'   (default `0.5`).
 #' @param gamma Reserved (extended BIC tuning); currently unused in the
 #'   returned vector.
-#' @param orthogonal Logical; must match the value used in [vbfa()]. When
-#'   `TRUE`, factor correlations are not free parameters.
+#' @param orthogonal Logical; whether the fit is an orthogonal (bifactor)
+#'   model, in which case factor correlations are not free parameters. The
+#'   default `NULL` reads the setting from the fit object itself, which is the
+#'   recommended use. Supplying a value that contradicts the fit raises an
+#'   error rather than silently miscounting parameters.
 #' @param rank_adjust Logical; if `TRUE`, the effective parameter count is the
 #'   rank of the Jacobian of the model-implied covariance (needs the `numDeriv`
 #'   package). Automatically skipped for large `J`.
@@ -41,15 +44,49 @@
 #' Multidisciplinary Journal*, 32(3), 437–449.
 #' \doi{10.1080/10705511.2024.2432612}
 #'
+#' @examples
+#' sim <- sim_fa(N = 300, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
+#' Q <- matrix(-1L, ncol(sim$dat), 3)
+#' for (k in 1:3) { a <- which(rep(1:3, each = 6) == k)[1:2]
+#'                  Q[a, ] <- 0L; Q[a, k] <- 1L }
+#' fit <- vbfa(sim$dat, Q, convChk = FALSE)
+#' round(vb_fit(fit, sim$dat, Q), 3)
+#'
+#' \donttest{
+#' ## bifactor: orthogonal is read from the fit object, so the same call works
+#' Qb <- cbind(1L, Q)
+#' fb <- vbfa(sim$dat, Qb, orthogonal = TRUE, convChk = FALSE)
+#' round(vb_fit(fb, sim$dat, Qb), 3)
+#' }
+#'
 #' @seealso [vbfa()], [pefa()]
 #' @export
 vb_fit <- function(fit, Y, Q, tau = 0.50, gamma = 0.5,
-                     orthogonal = FALSE, rank_adjust = TRUE, rank_max_J = 100) {
-    ## local-dependence fits (Qe supplied) are not supported yet
+                     orthogonal = NULL, rank_adjust = TRUE, rank_max_J = 100) {
+    ## vbmimic() fits have no ELBO and a different parameter space; refuse
+    ## rather than silently computing meaningless statistics
+    if (!is.null(fit$B) && !is.null(fit$pi_B))
+        stop("vb_fit() does not support vbmimic() fits: the MIMIC model has no ",
+             "ELBO yet and its structural parameters are not counted here.",
+             call. = FALSE)
+
+    ## local-dependence fits are not supported yet
     if (is.null(fit$PsiInv))
         stop("vb_fit() does not support local-dependence fits yet ",
              "(fit$PsiInv is NULL). Compute fit statistics on a diagonal-",
-             "residual fit (Qe = NULL).", call. = FALSE)
+             "residual fit (ld = FALSE).", call. = FALSE)
+
+    ## resolve `orthogonal` from the fit object; this used to default to FALSE,
+    ## which silently miscounted K(K-1)/2 factor correlations for bifactor fits
+    if (is.null(orthogonal)) {
+        orthogonal <- isTRUE(fit$orthogonal)
+    } else if (!is.null(fit$orthogonal) &&
+               !identical(isTRUE(orthogonal), isTRUE(fit$orthogonal))) {
+        stop("orthogonal = ", orthogonal, " contradicts the fit, which was ",
+             "estimated with orthogonal = ", isTRUE(fit$orthogonal),
+             ". Omit the argument to use the fit's own setting.",
+             call. = FALSE)
+    }
 
     N  <- nrow(Y); J <- ncol(Y); K <- ncol(Q); Ns <- N - 1
     m  <- J * (J + 1) / 2                    # unique covariance moments

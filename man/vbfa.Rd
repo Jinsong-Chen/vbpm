@@ -7,6 +7,7 @@
 vbfa(
   Y,
   Q,
+  ld = FALSE,
   Qe = NULL,
   orthogonal = FALSE,
   v0 = c(0.01, 0.005, 0.002, 0.001),
@@ -24,11 +25,17 @@ internally. Missing values are not supported and raise an error.}
 (anchored) loading, \code{0} = fixed zero, \code{-1} = unspecified (estimated by
 spike-and-slab). \code{K} is the number of factors.}
 
-\item{Qe}{Optional \verb{J x J} residual design matrix enabling local-dependence
-estimation. Entries \code{1} (freely estimated residual dependence), \code{-1}
-(uncertain; selected by spike-and-slab), \code{0} (shrunk to zero). Symmetric;
-its diagonal is ignored. \code{NULL} (default) gives diagonal residuals. Fully
-exploratory local dependence: \code{Qe = matrix(-1, J, J)}.}
+\item{ld}{Logical switch for local-dependence (sparse residual) estimation.
+\code{FALSE} (default) fits diagonal residuals and ignores \code{Qe} (with a warning
+if one is supplied). \code{TRUE} estimates a sparse residual precision by a
+graphical spike-and-slab prior solved by QUIC, with the search space given
+by \code{Qe}.}
+
+\item{Qe}{Residual design matrix (\verb{J x J}), read only when \code{ld = TRUE}.
+Entries \code{1} (freely estimated residual dependence), \code{-1} (uncertain;
+selected by spike-and-slab), \code{0} (shrunk to zero). Symmetric; its diagonal
+is ignored. The default \code{NULL} means fully exploratory local dependence,
+i.e. \code{Qe = matrix(-1, J, J)}.}
 
 \item{orthogonal}{Logical. If \code{TRUE}, the factor correlation is fixed at the
 identity (an orthogonal bifactor model: one general plus orthogonal group
@@ -59,7 +66,7 @@ spike.}
 \item{tolVal}{Convergence tolerance on the maximum relative error.}
 
 \item{ld_control}{A named list of local-dependence controls, read only when
-\code{Qe} is supplied: \code{xi0} (spike-penalty path, units of \code{N}; default
+\code{ld = TRUE}: \code{xi0} (spike-penalty path, units of \code{N}; default
 \code{seq(0.1, 1, length.out = 5)}), \code{xi1} (slab penalty, units of \code{N};
 default \code{0.01}), \code{diag_penalty} (\code{1} penalizes the precision diagonal with
 \code{xi1}, \code{0} leaves it unpenalized), \code{quic_eps}, \code{quic_max_it}, and the Beta
@@ -71,9 +78,10 @@ A list with elements including \code{Lam} (posterior mean loadings),
 identity when \code{orthogonal = TRUE}), \code{pi} (posterior inclusion
 probabilities), \code{PsiInv} (residual precisions; \code{NULL} under local
 dependence), \code{ELBO} (evidence lower bound; \code{NA} under local dependence),
-\code{iter}, \code{flag} (\code{1} if converged), and — when \code{Qe} is supplied — the
-residual precision \code{Psi}, its inverse \code{W}, the residual-edge activeness
-\code{q_star}, and path metadata.
+\code{iter}, \code{flag} (\code{1} if converged), \code{orthogonal} and \code{ld} (the settings the
+model was fit with), and — when \code{ld = TRUE} — the residual precision
+\code{Psi}, its inverse \code{W}, the residual-edge activeness \code{q_star}, and path
+metadata.
 }
 \description{
 Fits a partially confirmatory factor-analytic measurement model by
@@ -97,11 +105,39 @@ release; see \code{NEWS}.
 }
 
 \examples{
+## partially confirmatory: two anchors per factor, the rest exploratory
 sim <- sim_fa(N = 300, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
 Q <- matrix(-1L, ncol(sim$dat), 3)
 for (k in 1:3) { a <- which(rep(1:3, each = 6) == k)[1:2]; Q[a, ] <- 0; Q[a, k] <- 1 }
 fit <- vbfa(sim$dat, Q, convChk = FALSE)
-fit$flag        # 1 if converged
+fit$flag                    # 1 if converged
+round(fit$Lam, 2)           # loadings
+round(fit$pi, 2)            # posterior inclusion probabilities
+
+\donttest{
+## orthogonal bifactor: one general column plus the group factors
+Qb  <- cbind(1L, Q)
+fb  <- vbfa(sim$dat, Qb, orthogonal = TRUE, convChk = FALSE)
+fb$Phi                      # identity by construction
+
+## local dependence: simulate correlated residuals, then set ld = TRUE
+simLD <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, lac = .3, ecr = .3,
+                rseed = 2)
+fLD <- vbfa(simLD$dat, Q, ld = TRUE, convChk = FALSE, max_it = 300,
+            tolVal = 1e-3)
+## largest recovered residual edges vs the planted ones
+Poff <- abs(fLD$Psi); Poff[lower.tri(Poff, diag = TRUE)] <- 0
+which(Poff >= sort(Poff, decreasing = TRUE)[3], arr.ind = TRUE)
+simLD$ofd_ind
+
+## empirical illustration: NLSY 1997 (27 mixed-type items, 3 factors).
+## vbfa() does not support NA yet, so complete cases are used, and the
+## polytomous items are treated as continuous for this illustration.
+data(nlsy27)
+Yn <- as.matrix(nlsy27$dat[stats::complete.cases(nlsy27$dat), ])
+fn <- vbfa(Yn, nlsy27$Q, convChk = FALSE)
+round(fn$Lam, 2)
+}
 
 }
 \references{
