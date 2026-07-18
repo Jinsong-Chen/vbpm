@@ -1,3 +1,30 @@
+## Internal: Gaussian conditional moments of the missing responses in one row.
+##
+## Deterministic analogue of the MCMC data augmentation used by LAWBL/PCFA:
+## given the residual covariance W and the factor-model mean, the missing
+## entries are replaced by their conditional expectation given the *observed*
+## entries of the same row, and the conditional covariance is returned so that
+## it can be carried into the residual sufficient statistics.
+##
+## Kept as a separate function so the delicate part of the missing-data path
+## can be tested directly against a textbook multivariate-normal conditional
+## rather than only through the behaviour of a converged fit.
+##
+##   W        J x J residual covariance (diagonal or full)
+##   mean_row length-J factor-model mean eta_i Lam'
+##   y_row    length-J response row (missing entries ignored)
+##   M, O     integer indices of missing and observed entries
+## Returns list(mean = E[y_M | y_O], cov = Var[y_M | y_O]).
+.cond_moments <- function(W, mean_row, y_row, M, O) {
+  if (!length(O))
+    return(list(mean = mean_row[M], cov = W[M, M, drop = FALSE]))
+  WOO_inv_r <- solve(W[O, O, drop = FALSE], y_row[O] - mean_row[O])
+  list(mean = mean_row[M] + as.vector(W[M, O, drop = FALSE] %*% WOO_inv_r),
+       cov  = W[M, M, drop = FALSE] -
+              W[M, O, drop = FALSE] %*%
+              solve(W[O, O, drop = FALSE], W[O, M, drop = FALSE]))
+}
+
 ## Internal: log-normalizing constant of the inverse generalized Wishart,
 ## used in the oblique ELBO.
 logC_igw <- function(xi, Lam, P) {
@@ -19,7 +46,8 @@ logC_igw <- function(xi, Lam, P) {
 #' estimation.
 #'
 #' @param Y Numeric `N x J` data matrix (observations by items). Standardized
-#'   internally. Missing values are not supported and raise an error.
+#'   internally. Missing continuous responses are handled by deterministic
+#'   Gaussian conditional-moment augmentation inside the variational loop.
 #' @param Q Integer `J x K` design matrix for the loadings: `1` = specified
 #'   (anchored) loading, `0` = fixed zero, `-1` = unspecified (estimated by
 #'   spike-and-slab). `K` is the number of factors.
@@ -100,8 +128,17 @@ logC_igw <- function(xi, Lam, P) {
 #' active set with the RNG, but that is a convex solve, so the shuffle order
 #' does not change the solution.)
 #'
-#' Missing-data support and the local-dependence ELBO are planned for a future
-#' release; see `NEWS`.
+#' Missing continuous responses are supported (see `Y`). Support for
+#' categorical or mixed responses is not yet implemented.
+#'
+#' Under local dependence `ELBO` is `NA` by design, and this is not a
+#' placeholder: the residual precision and the mixing proportion are point
+#' updates rather than variational factors, so no single joint mean-field
+#' bound over all unknowns is defined. The quantities that *are* defined are
+#' returned under their own names --- `objective` (the terminal VECM objective,
+#' with `objective_type = "vecm"`) and `ELBO_conditional` (the conditional
+#' bound given the terminal precision and mixing proportion). Use `objective`
+#' for model comparison, and only across fits sharing one `objective_type`.
 #'
 #' @references
 #' Chen, J., Guo, Z., Zhang, L., & Pan, J. (2021). A partially confirmatory
@@ -143,10 +180,10 @@ logC_igw <- function(xi, Lam, P) {
 #' simLD$ofd_ind
 #'
 #' ## empirical illustration: NLSY 1997 (27 mixed-type items, 3 factors).
-#' ## vbfa() does not support NA yet, so complete cases are used, and the
-#' ## polytomous items are treated as continuous for this illustration.
+#' ## Missing continuous responses are handled in-loop; the polytomous items
+#' ## are treated as continuous for this illustration.
 #' data(nlsy27)
-#' Yn <- as.matrix(nlsy27$dat[stats::complete.cases(nlsy27$dat), ])
+#' Yn <- as.matrix(nlsy27$dat)
 #' fn <- vbfa(Yn, nlsy27$Q)
 #' round(fn$Lam, 2)
 #' }
@@ -157,13 +194,16 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
                  max_it = 5000, convChk = FALSE, tolVal = 1e-4,
                  ld_control = list()) {
 
+  call <- match.call()
+
   ## ---- input checks --------------------------------------------------
-  ## missing data are not yet supported (a future release will impute inside
-  ## the variational loop; see NEWS)
-  if (anyNA(Y))
-    stop("Y contains NA. vbfa() does not support missing data; ",
-         "impute beforehand.", call. = FALSE)
   Y <- as.matrix(Y)
+  missing_mask <- is.na(Y)
+  has_missing <- any(missing_mask)
+  if (has_missing && any(colSums(!missing_mask) == 0L))
+    stop("Every item must have at least one observed response.", call. = FALSE)
+  if (has_missing && any(rowSums(!missing_mask) == 0L))
+    stop("Rows with all responses missing are not supported.", call. = FALSE)
   Q <- as.matrix(Q)
   if (nrow(Q) != ncol(Y))
     stop("The numbers of items in data and Q are unequal.", call. = FALSE)
@@ -234,7 +274,18 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
   }
 
   ## ---- shared setup and initialization -------------------------------
-  Y <- scale(Y)          # standardize (both modes)
+  center <- colMeans(Y, na.rm = TRUE)
+  scale_ <- apply(Y, 2, stats::sd, na.rm = TRUE)
+  if (any(!is.finite(scale_) | scale_ <= 0))
+    stop("Every item must have a positive observed-data standard deviation.",
+         call. = FALSE)
+  ## Preserve the historical complete-data arithmetic bit-for-bit. The
+  ## explicit observed-data transformation is used only when it is needed.
+  Y <- if (has_missing) sweep(sweep(Y, 2, center, "-"), 2, scale_, "/") else
+       scale(Y)
+  Y[missing_mask] <- 0   # observed-scale mean; updated inside the VB loop
+  missing_rows <- if (has_missing) which(rowSums(missing_mask) > 0L) else integer()
+  missing_cov_correction <- matrix(0, J, J)
 
   flag <- 0
   xi.PHI  <- 2 * P + 1
@@ -304,6 +355,23 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
       itNum <- itNum + 1
       stage_it <- stage_it + 1
 
+      ## -- missing-response conditional moments ------------------------
+      ## Deterministic analogue of LAWBL's Gaussian MCMC data augmentation.
+      ## Multiple missing responses in a row are updated jointly.
+      if (has_missing) {
+        W_now <- if (ld) W else diag(1 / mu.q.psiInv, J)
+        mean_now <- mu.q.eta %*% t(mu.q.Lam)
+        missing_cov_correction[,] <- 0
+        for (ii in missing_rows) {
+          M <- which(missing_mask[ii, ])
+          O <- which(!missing_mask[ii, ])
+          cmv <- .cond_moments(W_now, mean_now[ii, ], Y[ii, ], M, O)
+          Y[ii, M] <- cmv$mean
+          missing_cov_correction[M, M] <-
+            missing_cov_correction[M, M, drop = FALSE] + cmv$cov
+        }
+      }
+
       ## -- eta update ---------------------------------------------------
       if (!ld) {
         M.q.LamTpsiInvLam <- t(mu.q.Lam) %*% diag(mu.q.psiInv, J, J) %*% mu.q.Lam
@@ -339,7 +407,7 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
         for (j in 1:J) {
           E_lam_lam_j <- tcrossprod(mu.q.Lam[j, ])
           diag(E_lam_lam_j) <- mu.q.Lam_sq[j, ]
-          RSS_j <- sum(Y[, j]^2) -
+          RSS_j <- sum(Y[, j]^2) + missing_cov_correction[j, j] -
             2 * sum(etaY[, j] * mu.q.Lam[j, ]) +
             sum(E_eta_eta * E_lam_lam_j)
           b.q.psi[j] <- RSS_j / 2 + b
@@ -451,7 +519,8 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
         diag(tem2m) <- diag(tem2m) +
           rowSums(sigsq.q.Lam * matrix(diag(E_eta_eta), J, P, byrow = TRUE))
         cross_term <- t(Y) %*% mu.q.eta %*% t(mu.q.Lam)
-        S <- (tem2m + t(Y) %*% Y - cross_term - t(cross_term)) / N
+        S <- (tem2m + t(Y) %*% Y + missing_cov_correction -
+              cross_term - t(cross_term)) / N
 
         res_quic <- quic_fun(J, S, xi_star,
                              eps = ctrl$quic_eps,
@@ -526,10 +595,57 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
         sum(q_uns * log(q_uns) + (1 - q_uns) * log(1 - q_uns))
     )
   } else {
-    ## the ELBO is not yet available under local dependence; a future release
-    ## will assemble it from the graphical spike-and-slab prior over Psi's
-    ## off-diagonals, log det Psi (via W from QUIC), the q_star entropy, and the
-    ## Beta(tau) terms.
+    ## Manuscript-V4-consistent terminal VECM objective. Psi and tau are point
+    ## estimates, so this is deliberately not labelled a joint ELBO.
+    q_uns <- pmin(pmax(q[Q == -1], 1e-12), 1 - 1e-12)
+    if (orthogonal) {
+      eta_phi_term <- -0.5 * sum(diag(E_eta_eta)) +
+        0.5 * N * as.numeric(determinant(PHI.q.eta, logarithm = TRUE)$modulus) +
+        0.5 * N * P
+    } else {
+      eta_phi_term <-
+        0.5 * N * as.numeric(determinant(PHI.q.eta, logarithm = TRUE)$modulus) +
+        0.5 * N * P + logC_igw(xi.PHI, Lam.PHI, P) -
+        logC_igw(xi.q.PHI, Lam.q.PHI, P)
+    }
+    loading_term <-
+      0.5 * sum(log(sigsq.q.Lam[Q == 1] / h_0) + 1 -
+                  mu.q.Lam_sq[Q == 1] / h_0) +
+      0.5 * sum(log(sigsq.q.Lam[Q == -1]) + 1 -
+                  (1 - q_uns) * log(v0) - q_uns * log(v1) -
+                  mu.q.Lam_sq[Q == -1] *
+                  ((1 - q_uns) / v0 + q_uns / v1)) +
+      lbeta(a0_q_rho, b0_q_rho) - lbeta(a0, b0) -
+      sum(q_uns * log(q_uns) + (1 - q_uns) * log(1 - q_uns))
+
+    logdet_psi <- as.numeric(determinant(Psi, logarithm = TRUE)$modulus)
+    likelihood_term <- -0.5 * N * J * log(2 * pi) +
+      0.5 * N * logdet_psi - 0.5 * N * sum(S * Psi)
+
+    up <- upper.tri(Psi)
+    uncertain <- up & Qe == -1
+    fixed_slab <- up & Qe == 1
+    fixed_spike <- up & Qe == 0
+    qs <- pmin(pmax(q_star[uncertain], 1e-12), 1 - 1e-12)
+    abs_unc <- abs(Psi[uncertain])
+    edge_term <- sum(qs * (log(tau) + log(xi1_abs / 2) - xi1_abs * abs_unc) +
+                     (1 - qs) * (log(1 - tau) + log(xi0_abs / 2) -
+                                 xi0_abs * abs_unc) -
+                     qs * log(qs) - (1 - qs) * log(1 - qs)) +
+      sum(log(xi1_abs / 2) - xi1_abs * abs(Psi[fixed_slab])) +
+      sum(log(xi0_abs / 2) - xi0_abs * abs(Psi[fixed_spike]))
+    diag_term <- if (ctrl$diag_penalty == 0) 0 else
+      J * log(xi1_abs) - xi1_abs * sum(diag(Psi))
+    tau_term <- (a1 - 1) * log(tau) + (b1 - 1) * log(1 - tau) -
+      lbeta(a1, b1)
+    VECM_objective <- likelihood_term + eta_phi_term + loading_term +
+      edge_term + diag_term + tau_term
+    objective_terms <- c(likelihood = likelihood_term,
+                         latent = eta_phi_term,
+                         loadings = loading_term,
+                         edges = edge_term,
+                         diagonal = diag_term,
+                         tau = tau_term)
     ELBO <- NA_real_
   }
 
@@ -554,18 +670,42 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
   ## mirrors the papers' derivations. Renamed at 0.3.0:
   ##   sigsq.q.Lam -> Lam_var, PHI.q.eta -> eta_cov,
   ##   M.q.PHIiver -> Phi_inv_mean; plotDat dropped.
-  out <- list(Lam = mu.q.Lam, pi = q, eta = mu.q.eta,
+  out <- list(model = "vbfa", call = call,
+              nobs = N, nitem = J, nfactor = P,
+              converged = isTRUE(flag == 1),
+              Lam = mu.q.Lam, pi = q, eta = mu.q.eta,
               Phi = if (orthogonal) diag(1, P, P) else cov2cor(Lam.q.PHI),
               PsiInv = if (!ld) mu.q.psiInv else NULL,
-              ELBO = ELBO, rho = rho,
+              ELBO = ELBO,
+              ELBO_conditional = if (ld) likelihood_term + eta_phi_term +
+                                  loading_term else ELBO,
+              objective = if (ld) VECM_objective else ELBO,
+              objective_type = if (ld) "vecm" else "elbo", rho = rho,
+              objective_terms = if (ld) objective_terms else c(ELBO = ELBO),
               Lam_var = sigsq.q.Lam,        # posterior variances of loadings
               eta_cov = PHI.q.eta,          # posterior covariance of scores
               Phi_inv_mean = M.q.PHIiver,   # E[Phi^-1] under q
               iter = itNum, flag = flag, time = MFVBtime,
               ## settings the model was fit with, so downstream consumers
-              ## (vb_fit, print) need not be told twice
+              ## (fit_stats, print) need not be told twice
               Q = Q, Qe = if (ld) Qe else NULL,
               orthogonal = orthogonal, ld = ld,
+              design = list(Q = Q, Qe = if (ld) Qe else NULL),
+              coefficients = list(Lam = mu.q.Lam,
+                                  Phi = if (orthogonal) diag(1, P, P) else
+                                        cov2cor(Lam.q.PHI),
+                                  residual = if (ld) W else diag(1 / mu.q.psiInv)),
+              posterior = list(pi = q, Lam_var = sigsq.q.Lam,
+                               eta_mean = mu.q.eta, eta_cov = PHI.q.eta),
+              settings = list(orthogonal = orthogonal, ld = ld,
+                              v0 = v0_seq,
+                              xi0 = if (ld) xi0_seq else NULL),
+              preprocess = list(center = center, scale = scale_,
+                                missing_mask = missing_mask,
+                                n_missing = sum(missing_mask),
+                                response_type = "continuous"),
+              sample_cov = stats::cov2cor((crossprod(Y) +
+                                            missing_cov_correction) / (N - 1)),
               ## LD extras (NULL when ld = FALSE)
               Psi = if (ld) Psi else NULL,
               W = if (ld) W else NULL,

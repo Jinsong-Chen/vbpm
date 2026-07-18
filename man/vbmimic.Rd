@@ -18,10 +18,16 @@ vbmimic(
 }
 \arguments{
 \item{Y}{Numeric \verb{N x J} data matrix (observations by items). Missing values
-are not supported and raise an error.}
+in \code{Y} are supported: because the residual covariance is diagonal, a
+missing response is replaced in-loop by its conditional expectation
+\verb{eta_i A'}, with the conditional variance carried into the residual sum
+of squares. Items or rows with no observed response are rejected.}
 
 \item{X}{Numeric \verb{N x P} matrix of observed covariates (predictors of the
-factors), with the same number of rows as \code{Y}.}
+factors), with the same number of rows as \code{Y}. Missing covariates are
+\strong{not} supported: \code{X} is conditioned on rather than modelled, so
+imputing it would require a distributional assumption the MIMIC model
+does not make.}
 
 \item{Q_A}{Integer \verb{J x K} measurement design matrix: \code{1} = specified
 (anchored) loading, \code{0} = fixed zero, \code{-1} = unspecified (selected by

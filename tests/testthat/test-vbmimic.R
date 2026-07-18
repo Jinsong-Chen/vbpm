@@ -67,10 +67,12 @@ test_that("vbmimic validates its inputs", {
   Y <- s$dat[, 1:18]; X <- s$dat[, 19:27]
   QA <- matrix(-1L, 18, 3); QB <- matrix(-1L, 3, 9)
 
+  ## NA in Y is supported as of 0.4.0 (see test-missing-ld.R); NA in X is not,
+  ## because X is conditioned on rather than modelled.
   Yna <- Y; Yna[1, 1] <- NA
-  expect_error(vbmimic(Yna, X, QA, QB), "NA")
+  expect_no_error(vbmimic(Yna, X, QA, QB))
   Xna <- X; Xna[1, 1] <- NA
-  expect_error(vbmimic(Y, Xna, QA, QB), "NA")
+  expect_error(vbmimic(Y, Xna, QA, QB), "missing covariates")
   expect_error(vbmimic(Y, X[1:10, ], QA, QB), "same number of rows")
   expect_error(vbmimic(Y, X, matrix(-1L, 17, 3), QB), "nrow\\(Q_A\\)")
   expect_error(vbmimic(Y, X, QA, matrix(-1L, 3, 8)), "ncol\\(Q_B\\)")
@@ -102,11 +104,14 @@ test_that("the v0 path runs and a scalar v0 is a single stage", {
   expect_equal(f_pa$flag, 1)
 })
 
-test_that("vb_fit refuses vbmimic fits", {
+test_that("fit_stats covers vbmimic with explicitly limited indices", {
   s <- sim_lvm(N = 300, K = 3, J = 18, P = 9, b = mimic_B(), phx = 0, rseed = 8)
   f <- vbmimic(s$dat[, 1:18], s$dat[, 19:27],
               matrix(-1L, 18, 3), matrix(-1L, 3, 9))
-  expect_error(vb_fit(f, s$dat[, 1:18], matrix(-1L, 18, 3)), "vbmimic")
+  fs <- fit_stats(f)
+  expect_s3_class(fs, "vbpm_fit_stats")
+  expect_true(is.finite(fs["t_S"]))
+  expect_true(all(is.na(fs[c("RMSEA", "SRMR", "CFI", "TLI", "ELBO")])))
 })
 
 ## ---- sim_lvm ------------------------------------------------------------

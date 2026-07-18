@@ -1,0 +1,43 @@
+---
+title: "Factor-number sweeps with pefa"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Factor-number sweeps with pefa}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(vbpm)
+```
+
+`pefa()` evaluates a factor-number *window*. The returned `pefa` object is also
+a `vbpm_sweep`: it contains the candidate `vbpm_fit` objects and their
+comparison table, but is not itself a fitted probability model. “Path” is
+reserved for within-fit continuation sequences such as `v0` or `xi0`.
+
+```{r sweep}
+s <- sim_fa(N = 250, K = 3, ipf = 5, rseed = 19)
+Y <- s$dat
+Q0 <- matrix(-1L, ncol(Y), 2)
+Q0[1:2, ] <- 0L; Q0[1:2, 1] <- 1L
+Q0[6:7, ] <- 0L; Q0[6:7, 2] <- 1L
+
+p <- pefa(Q0, Y, Kmin = 2, Kmax = 4, v0 = 0.001,
+          verbose = FALSE)
+summary(p)
+selected_fit(p)
+```
+
+The summary reports raw objective, objective-gain, raw ELBO, ELBO-gain, raw
+BIC, and BIC-gain selections. For ordinary `vbfa` the objective is the ELBO.
+For LD-aware sweeps it is the manuscript V4 VECM objective, so the ELBO fields
+are intentionally `NA`. The primary rule is always `objective_gain`; a
+boundary result is a prompt to extend the candidate window in that direction.
+
+```{r plots, eval=FALSE}
+plot(p, type = "objective")
+plot(p, type = "gain")
+plot(p, type = "fit")
+```

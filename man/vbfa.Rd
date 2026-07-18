@@ -19,7 +19,8 @@ vbfa(
 }
 \arguments{
 \item{Y}{Numeric \verb{N x J} data matrix (observations by items). Standardized
-internally. Missing values are not supported and raise an error.}
+internally. Missing continuous responses are handled by deterministic
+Gaussian conditional-moment augmentation inside the variational loop.}
 
 \item{Q}{Integer \verb{J x K} design matrix for the loadings: \code{1} = specified
 (anchored) loading, \code{0} = fixed zero, \code{-1} = unspecified (estimated by
@@ -120,8 +121,17 @@ no random numbers), so results are reproducible without a seed; there is no
 active set with the RNG, but that is a convex solve, so the shuffle order
 does not change the solution.)
 
-Missing-data support and the local-dependence ELBO are planned for a future
-release; see \code{NEWS}.
+Missing continuous responses are supported (see \code{Y}). Support for
+categorical or mixed responses is not yet implemented.
+
+Under local dependence \code{ELBO} is \code{NA} by design, and this is not a
+placeholder: the residual precision and the mixing proportion are point
+updates rather than variational factors, so no single joint mean-field
+bound over all unknowns is defined. The quantities that \emph{are} defined are
+returned under their own names --- \code{objective} (the terminal VECM objective,
+with \code{objective_type = "vecm"}) and \code{ELBO_conditional} (the conditional
+bound given the terminal precision and mixing proportion). Use \code{objective}
+for model comparison, and only across fits sharing one \code{objective_type}.
 }
 
 \examples{
@@ -151,10 +161,10 @@ which(Poff >= sort(Poff, decreasing = TRUE)[3], arr.ind = TRUE)
 simLD$ofd_ind
 
 ## empirical illustration: NLSY 1997 (27 mixed-type items, 3 factors).
-## vbfa() does not support NA yet, so complete cases are used, and the
-## polytomous items are treated as continuous for this illustration.
+## Missing continuous responses are handled in-loop; the polytomous items
+## are treated as continuous for this illustration.
 data(nlsy27)
-Yn <- as.matrix(nlsy27$dat[stats::complete.cases(nlsy27$dat), ])
+Yn <- as.matrix(nlsy27$dat)
 fn <- vbfa(Yn, nlsy27$Q)
 round(fn$Lam, 2)
 }

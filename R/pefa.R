@@ -88,9 +88,11 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #' @param ... Further arguments passed to [vbfa()] (e.g. `v0`, `Qe`,
 #'   `ld_control`, `tolVal`).
 #'
-#' @return A list with `selected_K`, the `selection` vector, the fitted model
-#'   and `fit_stats` at the selected `K`, `Q_selected`, and the full `sweep`
-#'   data frame (carrying `converged`, `pass_fit`, `eligible` flags).
+#' @return An object of class `c("pefa", "vbpm_sweep")`. It contains the
+#'   candidate `window`, individual `fits`, full `sweep` comparison table,
+#'   `selection` results, and the fitted model and fit statistics at
+#'   `selected_K`. Use [summary.pefa()] for the aggregate results and
+#'   [selected_fit()] to extract the selected fitted model.
 #'
 #' @references
 #' Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
@@ -112,9 +114,9 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #'                  Q0[a, ] <- 0L; Q0[a, k] <- 1L }
 #'
 #' r <- pefa(Q0, sim$dat, Kmin = 2, Kmax = 4, verbose = FALSE)
-#' r$selected_K          # 3 on this data
-#' r$sweep               # the full sweep table (ELBO, BIC, fit, timing)
-#' r$fit$flag            # the refitted selected model is returned
+#' summary(r)            # ELBO, ELBO-gain, BIC, and BIC-gain selections
+#' r$sweep               # the full sweep table (ELBO, gains, fit, timing)
+#' selected_fit(r)$flag  # the refitted selected model is returned
 #' }
 #'
 #' @seealso [vbfa()], [select_K_elbow()]
@@ -123,6 +125,7 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
                     cutoffs = c(RMSEA = .06, SRMR = .10, CFI = .90, TLI = .90),
                     max_it = 10000, tau = 0.50,
                     orthogonal = FALSE, save_path = NULL, verbose = TRUE, ...) {
+  call <- match.call()
   Y  <- as.matrix(Y); Q0 <- as.matrix(Q0)
   J  <- ncol(Y); K0 <- ncol(Q0)
   if (nrow(Q0) != J) stop("nrow(Q0) must equal ncol(Y).", call. = FALSE)
@@ -145,10 +148,13 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
     t0  <- Sys.time()
     fit <- vbfa(Y, pad(K), max_it = max_it, convChk = FALSE,
                 orthogonal = orthogonal, ...)
-    fs  <- vb_fit(fit, Y, pad(K), tau = tau, orthogonal = orthogonal)
+    fs  <- fit_stats(fit, Y, pad(K), tau = tau, orthogonal = orthogonal)
     fits[[i]] <- fit
     rows[[i]] <- data.frame(
-      K = K, ELBO = as.numeric(fit$ELBO), AIC = fs["AIC"], BIC = fs["BIC"],
+      K = K, ELBO = as.numeric(fit$ELBO),
+      Objective = as.numeric(fit$objective),
+      objective_type = fit$objective_type,
+      AIC = fs["AIC"], BIC = fs["BIC"],
       RMSEA = fs["RMSEA"], SRMR = fs["SRMR"], CFI = fs["CFI"], TLI = fs["TLI"],
       t = fs["t"], iter = fit$iter, flag = fit$flag,
       secs = as.numeric(difftime(Sys.time(), t0, units = "secs")), row.names = NULL)
@@ -160,6 +166,24 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
                              as.integer(fit$flag == 1), rows[[i]]$secs))
   }
   sweep <- do.call(rbind, rows); sweep <- sweep[order(sweep$K), ]
+
+  ## Oriented marginal gains: larger is better for both curves. BIC_gain is
+  ## BIC(K - 1) - BIC(K), so a positive value is an improvement.
+  types <- unique(sweep$objective_type)
+  if (length(types) != 1L)
+    stop("PEFA candidates have mixed objective types: ",
+         paste(types, collapse = ", "), call. = FALSE)
+  sweep$Objective_gain <- c(NA_real_, diff(sweep$Objective))
+  sweep$ELBO_gain <- if (identical(types, "elbo")) sweep$Objective_gain else NA_real_
+  sweep$BIC_gain  <- c(NA_real_, -diff(sweep$BIC))
+  pct_gain <- function(g) {
+    den <- suppressWarnings(max(g, na.rm = TRUE))
+    if (!is.finite(den) || den <= 0) rep(NA_real_, length(g)) else 100 * g / den
+  }
+  sweep$Objective_gain_pct <- pct_gain(sweep$Objective_gain)
+  sweep$ELBO_gain_pct <- if (identical(types, "elbo"))
+    sweep$Objective_gain_pct else NA_real_
+  sweep$BIC_gain_pct  <- pct_gain(sweep$BIC_gain)
 
   ## ---- eligibility: converged within max_it AND passes absolute fit -------
   sweep$converged <- sweep$flag == 1L
@@ -175,12 +199,15 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
   pick <- function(d, score) if (nrow(d) == 0) NA_integer_ else select_K_elbow(d$K, score, delta, sustain)
 
   selection <- c(
-    elbo_gain         = pick(elig, elig$ELBO),                       # primary
-    elbo_raw          = if (nrow(elig)) elig$K[which.max(elig$ELBO)] else NA_integer_,
+    score_gain        = pick(elig, elig$Objective),                  # primary
+    score_raw         = if (nrow(elig)) elig$K[which.max(elig$Objective)] else NA_integer_,
+    elbo_gain         = if (identical(types, "elbo")) pick(elig, elig$ELBO) else NA_integer_,
+    elbo_raw          = if (nrow(elig) && identical(types, "elbo"))
+                          elig$K[which.max(elig$ELBO)] else NA_integer_,
     bic_gain          = pick(elig, -elig$BIC),                       # reference
     bic_raw           = if (nrow(elig)) elig$K[which.min(elig$BIC)]  else NA_integer_,
-    elbo_gain_allconv = pick(conv, conv$ELBO))                       # no fit gate
-  K_sel <- unname(selection["elbo_gain"])
+    elbo_gain_allconv = if (identical(types, "elbo")) pick(conv, conv$ELBO) else NA_integer_)
+  K_sel <- unname(selection["score_gain"])
 
   ## ---- attach model + fit for the SELECTED K (refit if from checkpoint) ---
   sel_fit <- sel_stats <- NULL
@@ -188,7 +215,7 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
     sel_fit <- fits[[as.character(K_sel)]]
     if (is.null(sel_fit)) sel_fit <- vbfa(Y, pad(K_sel), max_it = max_it, convChk = FALSE,
                                           orthogonal = orthogonal, ...)
-    sel_stats <- vb_fit(sel_fit, Y, pad(K_sel), tau = tau, orthogonal = orthogonal)
+    sel_stats <- fit_stats(sel_fit, Y, pad(K_sel), tau = tau, orthogonal = orthogonal)
   }
 
   if (verbose) {
@@ -199,14 +226,156 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
     cat(sprintf("  excluded: %d non-converged, %d converged-but-failing-fit; %d eligible\n",
                 n_fail, n_unfit, nrow(elig)))
     if (is.na(K_sel)) cat("  NO eligible model -- selection is NA (relax fit_cut or extend/converge).\n")
-    else cat(sprintf("  ELBO gain  -> K = %d   (selected; model returned)\n", K_sel))
-    cat(sprintf("  ELBO raw   -> K = %s\n",  selection["elbo_raw"]))
+    else cat(sprintf("  %s gain -> K = %d   (selected; model returned)\n",
+                     types, K_sel))
+    if (identical(types, "elbo"))
+      cat(sprintf("  ELBO raw   -> K = %s\n", selection["elbo_raw"]))
     cat(sprintf("  BIC  gain  -> K = %s\n",  selection["bic_gain"]))
     cat(sprintf("  BIC  raw   -> K = %s\n",  selection["bic_raw"]))
     cat(sprintf("  ELBO gain (all converged, no fit gate) -> K = %s\n", selection["elbo_gain_allconv"]))
   }
-  list(selected_K = K_sel, selection = selection, fit = sel_fit,
+  boundary <- if (is.na(K_sel)) "none" else if (K_sel == min(Ks)) "lower" else
+              if (K_sel == max(Ks)) "upper" else "interior"
+  out <- list(call = call,
+       selected_K = K_sel, selection = selection, fit = sel_fit,
+       selected_fit = sel_fit, fits = fits,
        fit_stats = sel_stats, Q_selected = if (!is.na(K_sel)) pad(K_sel) else NULL,
-       sweep = sweep, K0 = K0, delta = delta,
+       sweep = sweep,
+       window = list(K = Ks, Kmin = min(Ks), Kmax = max(Ks), K0 = K0),
+       K0 = K0, delta = delta, sustain = sustain,
+       boundary = boundary, objective_type = types,
        fit_cut = isTRUE(fit_cut), cutoffs = cutoffs)
+  class(out) <- c("pefa", "vbpm_sweep")
+  out
+}
+
+
+#' Methods for a PEFA factor-number sweep
+#'
+#' A [pefa()] result is a sweep over a candidate factor-number window, not a
+#' separate fitted probability model. `summary()` aggregates the candidate
+#' fits and reports the raw ELBO, ELBO-gain, raw BIC, and BIC-gain selections.
+#' [selected_fit()] extracts the actual fitted [vbfa()] object selected by the
+#' primary ELBO-gain rule.
+#'
+#' @param object,x A result returned by [pefa()].
+#' @param ... Further arguments. For `plot()`, graphical arguments passed to
+#'   base plotting functions.
+#' @param type Plot type: objective curves, marginal gains, or fit indices.
+#' @return `summary.pefa()` returns an object of class `summary.pefa` with
+#'   `selection`, `comparison`, window and tuning metadata, convergence and
+#'   boundary information, and the selected fit. Print methods return their
+#'   input invisibly; `plot.pefa()` returns `x` invisibly.
+#' @name pefa-methods
+NULL
+
+#' @rdname pefa-methods
+#' @export
+selected_fit <- function(object, ...) UseMethod("selected_fit")
+
+#' @rdname pefa-methods
+#' @export
+selected_fit.pefa <- function(object, ...) object$selected_fit
+
+#' @rdname pefa-methods
+#' @export
+print.pefa <- function(x, ...) {
+  nconv <- sum(x$sweep$converged)
+  cat(sprintf("PEFA sweep: K = %d:%d (%d of %d converged)\n",
+              x$window$Kmin, x$window$Kmax, nconv, nrow(x$sweep)))
+  cat(sprintf("  %s gain (delta = %g%%) -> K = %s\n",
+              toupper(x$objective_type), x$delta,
+              if (is.na(x$selected_K)) "NA" else x$selected_K))
+  cat("  objective:", x$objective_type, "\n")
+  if (x$boundary %in% c("lower", "upper")) {
+    direction <- if (x$boundary == "lower") "downward" else "upward"
+    cat(sprintf("  boundary selection: extend the window %s\n", direction))
+  }
+  cat("Use summary() for all selections and the per-K comparison.\n")
+  invisible(x)
+}
+
+#' @rdname pefa-methods
+#' @export
+summary.pefa <- function(object, ...) {
+  z <- list(
+    call = object$call,
+    window = object$window,
+    delta = object$delta,
+    sustain = object$sustain,
+    selection = c(
+      objective = unname(object$selection["score_raw"]),
+      objective_gain = unname(object$selection["score_gain"]),
+      elbo = unname(object$selection["elbo_raw"]),
+      elbo_gain = unname(object$selection["elbo_gain"]),
+      bic = unname(object$selection["bic_raw"]),
+      bic_gain = unname(object$selection["bic_gain"])
+    ),
+    selected_K = object$selected_K,
+    selected_rule = "objective_gain",
+    boundary = object$boundary,
+    objective_type = object$objective_type,
+    comparison = object$sweep,
+    convergence = c(converged = sum(object$sweep$converged),
+                    total = nrow(object$sweep)),
+    selected_fit = object$selected_fit
+  )
+  class(z) <- "summary.pefa"
+  z
+}
+
+#' @rdname pefa-methods
+#' @export
+print.summary.pefa <- function(x, ...) {
+  cat(sprintf("PEFA sweep summary: K = %d:%d; delta = %g%%; sustain = %d\n",
+              x$window$Kmin, x$window$Kmax, x$delta, x$sustain))
+  cat(sprintf("  %-10s -> K = %s\n", toupper(x$objective_type),
+              x$selection["objective"]))
+  cat(sprintf("  %-10s -> K = %s  (delta = %g%%; primary)\n",
+              paste0(toupper(x$objective_type), " gain"),
+              x$selection["objective_gain"], x$delta))
+  cat(sprintf("  BIC        -> K = %s\n", x$selection["bic"]))
+  cat(sprintf("  BIC gain   -> K = %s  (delta = %g%%)\n",
+              x$selection["bic_gain"], x$delta))
+  cat(sprintf("  converged: %d of %d; boundary: %s; objective: %s\n",
+              x$convergence["converged"], x$convergence["total"],
+              x$boundary, x$objective_type))
+  cat("\nComparison:\n")
+  keep <- intersect(c("K", "Objective", "Objective_gain", "Objective_gain_pct",
+                      "ELBO", "ELBO_gain", "ELBO_gain_pct",
+                      "BIC", "BIC_gain", "BIC_gain_pct", "RMSEA", "SRMR",
+                      "CFI", "TLI", "converged", "iter", "secs"),
+                    names(x$comparison))
+  print(x$comparison[, keep, drop = FALSE], row.names = FALSE)
+  invisible(x)
+}
+
+#' @rdname pefa-methods
+#' @importFrom graphics matplot legend abline
+#' @export
+plot.pefa <- function(x, type = c("objective", "gain", "fit"), ...) {
+  type <- match.arg(type)
+  d <- x$sweep
+  if (type == "objective") {
+    matplot(d$K, cbind(Objective = d$Objective, `-BIC` = -d$BIC), type = "b",
+            xlab = "Number of factors (K)", ylab = "Oriented criterion",
+            main = "PEFA objective sweep", ...)
+    legend("bottomright", c(toupper(x$objective_type), "-BIC"), col = 1:2, lty = 1:2,
+           pch = 1:2, bty = "n")
+  } else if (type == "gain") {
+    matplot(d$K, cbind(Objective = d$Objective_gain_pct, BIC = d$BIC_gain_pct),
+            type = "b", xlab = "Number of factors (K)",
+            ylab = "Marginal gain (% of maximum)",
+            main = sprintf("PEFA gain sweep (delta = %g%%)", x$delta), ...)
+    abline(h = x$delta, lty = 3)
+    legend("topright", c(paste(toupper(x$objective_type), "gain"), "BIC gain"), col = 1:2,
+           lty = 1:2, pch = 1:2, bty = "n")
+  } else {
+    matplot(d$K, d[, c("RMSEA", "SRMR", "CFI", "TLI"), drop = FALSE],
+            type = "b", xlab = "Number of factors (K)", ylab = "Fit index",
+            main = "PEFA fit-index sweep", ...)
+    legend("right", c("RMSEA", "SRMR", "CFI", "TLI"), col = 1:4,
+           lty = 1:4, pch = 1:4, bty = "n")
+  }
+  invisible(x)
 }

@@ -22,9 +22,15 @@
 #' design-matrix convention and the spike-and-slab formulation.
 #'
 #' @param Y Numeric `N x J` data matrix (observations by items). Missing values
-#'   are not supported and raise an error.
+#'   in `Y` are supported: because the residual covariance is diagonal, a
+#'   missing response is replaced in-loop by its conditional expectation
+#'   `eta_i A'`, with the conditional variance carried into the residual sum
+#'   of squares. Items or rows with no observed response are rejected.
 #' @param X Numeric `N x P` matrix of observed covariates (predictors of the
-#'   factors), with the same number of rows as `Y`.
+#'   factors), with the same number of rows as `Y`. Missing covariates are
+#'   **not** supported: `X` is conditioned on rather than modelled, so
+#'   imputing it would require a distributional assumption the MIMIC model
+#'   does not make.
 #' @param Q_A Integer `J x K` measurement design matrix: `1` = specified
 #'   (anchored) loading, `0` = fixed zero, `-1` = unspecified (selected by
 #'   spike-and-slab). `K` is the number of factors.
@@ -112,14 +118,17 @@
 vbmimic <- function(Y, X, Q_A, Q_B, v0 = 0.001, standardize = FALSE,
                     max_it = 1000, convChk = FALSE, tolVal = 1e-5) {
 
+  call <- match.call()
+
   ## ---- input checks --------------------------------------------------
-  ## missing data are not supported in either member of the family yet
-  if (anyNA(Y))
-    stop("Y contains NA. vbmimic() does not support missing data; ",
-         "impute beforehand.", call. = FALSE)
+  ## Missing responses in Y are supported (see below). Missing covariates are
+  ## not: X is conditioned on rather than modelled, so imputing it would
+  ## require assuming a distribution for the covariates that the MIMIC model
+  ## does not specify.
   if (anyNA(X))
-    stop("X contains NA. vbmimic() does not support missing data; ",
-         "impute beforehand.", call. = FALSE)
+    stop("X contains NA. vbmimic() does not support missing covariates: X is ",
+         "conditioned on, not modelled. Impute or drop them beforehand.",
+         call. = FALSE)
 
   Y   <- as.matrix(Y)
   X   <- as.matrix(X)
@@ -154,10 +163,31 @@ vbmimic <- function(Y, X, Q_A, Q_B, v0 = 0.001, standardize = FALSE,
     stop("vbmimic() requires at least two factors (ncol(Q_A) >= 2).",
          call. = FALSE)
 
+  ## ---- missing responses ----------------------------------------------
+  ## The residual covariance of Y is diagonal here (V holds residual
+  ## precisions), so the joint Gaussian conditional of vbfa() collapses to its
+  ## diagonal case: E[y_ij | y_i,obs] = eta_i A_j'. The covariate information
+  ## is already carried by eta_i, whose own update uses X and B, so no extra
+  ## conditioning on X is required. The conditional variance of an imputed
+  ## cell is 1 / V_j and is added to the residual sum of squares below.
+  missing_mask <- is.na(Y)
+  has_missing  <- any(missing_mask)
+  if (has_missing) {
+    if (any(colSums(!missing_mask) == 0L))
+      stop("Every item needs at least one observed response.", call. = FALSE)
+    if (any(rowSums(!missing_mask) == 0L))
+      stop("Rows with all responses missing are not supported.", call. = FALSE)
+  }
+  miss_count <- colSums(missing_mask)
+
   if (standardize) {
-    Y <- scale(Y)
+    ## centre and scale from observed entries only
+    center <- colMeans(Y, na.rm = TRUE)
+    scale_ <- apply(Y, 2, stats::sd, na.rm = TRUE)
+    Y <- sweep(sweep(Y, 2, center, "-"), 2, scale_, "/")
     X <- scale(X)
   }
+  Y[missing_mask] <- 0   # replaced by the conditional mean in iteration 1
 
   ## ---- initialization -------------------------------------------------
   ## Deterministic: the estimator consumes no random numbers, so there is no
@@ -229,6 +259,16 @@ vbmimic <- function(Y, X, Q_A, Q_B, v0 = 0.001, standardize = FALSE,
       mu.F <- t(t(mu.F) / sdF)
       mu.F_sq <- mu.F^2 + sigsq.F
 
+      ## ---- missing responses: conditional mean and variance --------------
+      ## Diagonal residual covariance => Equation (2) of the design note.
+      ## V from the start of the sweep is used for the variance correction,
+      ## as in vbfa()'s coordinate-ascent ordering.
+      if (has_missing) {
+        mean_now <- mu.F %*% t(mu.q.A)
+        Y[missing_mask] <- mean_now[missing_mask]
+        miss_var <- miss_count / V           # length J; 1/V_j per missing cell
+      }
+
       ## ---- residual precisions and measurement loadings ------------------
       for (j in 1:J) {
         ## expressions kept in the published associativity so the fit is
@@ -242,6 +282,9 @@ vbmimic <- function(Y, X, Q_A, Q_B, v0 = 0.001, standardize = FALSE,
         sub <- sum(t(mu.F^2) * mu.q.A[j, ]^2)
         add <- sum(t(mu.F_sq) * (mu.q.A_sq[j, ]))
         tem4 <- (tem1 - 2 * tem2 + tem3 - sub + add)
+        ## E[y_ij^2] for an imputed cell is (conditional mean)^2 + 1/V_j; the
+        ## squared mean is already in tem1, so only the variance is added.
+        if (has_missing) tem4 <- tem4 + miss_var[j]
         V[j] <- (N / 2 + a_v) / (tem4 / 2 + b_v)
 
         for (k in 1:K) {
@@ -373,7 +416,10 @@ vbmimic <- function(Y, X, Q_A, Q_B, v0 = 0.001, standardize = FALSE,
   pi_A <- Alpha
   pi_B <- Beta
 
-  out <- list(A = mu.q.A, B = mu.q.B,
+  out <- list(model = "vbmimic", call = call,
+              nobs = N, nitem = J, nfactor = K,
+              converged = isTRUE(flag == 1),
+              A = mu.q.A, B = mu.q.B,
               pi_A = pi_A, pi_B = pi_B,
               Q_A = Q_A, Q_B = Q_B,
               eta = mu.F, Phi = cov2cor(Sig), Sig = Sig, U = U, V = V,
@@ -381,7 +427,17 @@ vbmimic <- function(Y, X, Q_A, Q_B, v0 = 0.001, standardize = FALSE,
               A_var = sigsq.q.A, B_var = sigsq.q.B,
               iter = itNum, flag = flag,
               time = difftime(endTime, startTime, units = "secs"),
-              ELBO = NA_real_,
+              ELBO = NA_real_, objective = NA_real_, objective_type = "none",
+              design = list(Q_A = Q_A, Q_B = Q_B),
+              coefficients = list(A = mu.q.A, B = mu.q.B,
+                                  Phi = cov2cor(Sig)),
+              posterior = list(pi_A = pi_A, pi_B = pi_B,
+                               A_var = sigsq.q.A, B_var = sigsq.q.B,
+                               eta_mean = mu.F),
+              settings = list(standardize = standardize, v0 = v0_seq),
+              preprocess = list(missing_mask = missing_mask,
+                                n_missing = sum(missing_mask),
+                                response_type = "continuous"),
               path = list(v0 = v0_seq, n_stage = n_stage,
                           stage_iters = stage_iters))
   class(out) <- c("vbmimic", "vbpm_fit")

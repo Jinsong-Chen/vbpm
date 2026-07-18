@@ -48,9 +48,11 @@ pefa(
 \code{ld_control}, \code{tolVal}).}
 }
 \value{
-A list with \code{selected_K}, the \code{selection} vector, the fitted model
-and \code{fit_stats} at the selected \code{K}, \code{Q_selected}, and the full \code{sweep}
-data frame (carrying \code{converged}, \code{pass_fit}, \code{eligible} flags).
+An object of class \code{c("pefa", "vbpm_sweep")}. It contains the
+candidate \code{window}, individual \code{fits}, full \code{sweep} comparison table,
+\code{selection} results, and the fitted model and fit statistics at
+\code{selected_K}. Use \code{\link[=summary.pefa]{summary.pefa()}} for the aggregate results and
+\code{\link[=selected_fit]{selected_fit()}} to extract the selected fitted model.
 }
 \description{
 Fits \code{\link[=vbfa]{vbfa()}} over a window of factor numbers, holding a fixed partially
@@ -69,9 +71,9 @@ for (k in 1:2) { a <- which(rep(1:3, each = 6) == k)[1:2]
                  Q0[a, ] <- 0L; Q0[a, k] <- 1L }
 
 r <- pefa(Q0, sim$dat, Kmin = 2, Kmax = 4, verbose = FALSE)
-r$selected_K          # 3 on this data
-r$sweep               # the full sweep table (ELBO, BIC, fit, timing)
-r$fit$flag            # the refitted selected model is returned
+summary(r)            # ELBO, ELBO-gain, BIC, and BIC-gain selections
+r$sweep               # the full sweep table (ELBO, gains, fit, timing)
+selected_fit(r)$flag  # the refitted selected model is returned
 }
 
 }

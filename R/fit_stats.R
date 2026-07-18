@@ -1,9 +1,12 @@
-## SEM-like fit statistics for a vbfa model. Hard selection (posterior
+## SEM-like fit statistics for vbpm models. Hard selection (posterior
 ## inclusion probability >= tau) is the default for every statistic; soft
-## variants carry an "_S" suffix. See the roxygen documentation of vb_fit()
-## below.
+## variants carry an "_S" suffix.
+##
+## fit_stats() is the S3 generic; vb_fit() at the foot of this file is the
+## pre-0.4.0 name, kept as a thin compatibility wrapper. See the roxygen
+## documentation of fit_stats() below.
 
-#' SEM-like fit statistics for a vbfa model
+#' Fit statistics for vbpm models
 #'
 #' Computes structural-equation-model fit statistics for a fitted [vbfa()]
 #' object under hard selection (an unspecified loading counts as active when its
@@ -11,8 +14,8 @@
 #' (RMSEA, SRMR, CFI, TLI) and information criteria (AIC, BIC) are returned,
 #' together with the model's ELBO.
 #'
-#' @param fit A fitted object returned by [vbfa()] (diagonal-residual model;
-#'   local-dependence fits are not yet supported and raise an error).
+#' @param object,fit A fitted `vbpm_fit` object. `fit` is the historical
+#'   argument name retained by [vb_fit()].
 #' @param Y The `N x J` data matrix the model was fit to.
 #' @param Q The `J x K` loading design matrix used in the fit.
 #' @param tau Hard-selection threshold on the posterior inclusion probability
@@ -29,6 +32,8 @@
 #'   package). Automatically skipped for large `J`.
 #' @param rank_max_J Skip the Jacobian rank check when `J` exceeds this value
 #'   (default `100`); the nominal parameter count is used instead.
+#' @param ... Further arguments passed to methods. Unused by the methods
+#'   supplied with the package.
 #'
 #' @return A named numeric vector: `t_nom`, `t`, `t_S` (parameter counts),
 #'   `RMSEA`, `SRMR`, `CFI`, `TLI`, `AIC`, `BIC` (hard selection), `AIC_S`,
@@ -61,20 +66,15 @@
 #'
 #' @seealso [vbfa()], [pefa()]
 #' @export
-vb_fit <- function(fit, Y, Q, tau = 0.50, gamma = 0.5,
-                     orthogonal = NULL, rank_adjust = TRUE, rank_max_J = 100) {
-    ## vbmimic() fits have no ELBO and a different parameter space; refuse
-    ## rather than silently computing meaningless statistics
-    if (!is.null(fit$B) && !is.null(fit$pi_B))
-        stop("vb_fit() does not support vbmimic() fits: the MIMIC model has no ",
-             "ELBO yet and its structural parameters are not counted here.",
-             call. = FALSE)
+fit_stats <- function(object, ...) UseMethod("fit_stats")
 
-    ## local-dependence fits are not supported yet
-    if (is.null(fit$PsiInv))
-        stop("vb_fit() does not support local-dependence fits yet ",
-             "(fit$PsiInv is NULL). Compute fit statistics on a diagonal-",
-             "residual fit (ld = FALSE).", call. = FALSE)
+#' @rdname fit_stats
+#' @export
+## `...` is required for S3 consistency with the generic fit_stats(object, ...)
+fit_stats.vbfa <- function(object, Y = NULL, Q = object$Q, tau = 0.50, gamma = 0.5,
+                     orthogonal = NULL, rank_adjust = TRUE, rank_max_J = 100,
+                     ...) {
+    fit <- object
 
     ## resolve `orthogonal` from the fit object; this used to default to FALSE,
     ## which silently miscounted K(K-1)/2 factor correlations for bifactor fits
@@ -88,12 +88,15 @@ vb_fit <- function(fit, Y, Q, tau = 0.50, gamma = 0.5,
              call. = FALSE)
     }
 
-    N  <- nrow(Y); J <- ncol(Y); K <- ncol(Q); Ns <- N - 1
+    N <- if (is.null(Y)) fit$nobs else nrow(Y)
+    J <- nrow(fit$Lam); K <- ncol(Q); Ns <- N - 1
     m  <- J * (J + 1) / 2                    # unique covariance moments
 
     ## ---- plug-in variational posterior summaries ----------------------
     Lam_h <- fit$Lam                    # Lambda_hat
-    Psi   <- 1 / fit$PsiInv             # error variances (diag Psi_hat)
+    is_ld <- isTRUE(fit$ld)
+    Wres  <- if (is_ld) fit$W else diag(1 / fit$PsiInv, J)
+    if (is.null(Wres)) stop("Residual covariance is unavailable.", call. = FALSE)
     Phi   <- fit$Phi
 
     pi_ <- fit$pi;  pi_[Q == 1] <- 1;  pi_[Q == 0] <- 0   # pi_hat_{jk}
@@ -102,10 +105,10 @@ vb_fit <- function(fit, Y, Q, tau = 0.50, gamma = 0.5,
     Lam_S <- Lam_h * pi_                                 # soft-selected
 
     ## ---- model-implied covariances:  Sigma = Lam Phi Lam' + Psi -------
-    sigma <- function(L) L %*% Phi %*% t(L) + diag(Psi)
-    SgH   <- sigma(Lam_H);  SgS <- sigma(Lam_S)
-    Sg0   <- diag(diag(cor(Y)))              # independence baseline diag(S)
-    S     <- cor(Y)                          # vbfa fits scale(Y), so S = R
+    sigma <- function(L) L %*% Phi %*% t(L) + Wres
+    SgH <- sigma(Lam_H); SgS <- sigma(Lam_S)
+    S <- if (!is.null(fit$sample_cov)) fit$sample_cov else stats::cor(Y)
+    Sg0 <- diag(diag(S))
 
     ## ---- discrepancy F + plug-in log-likelihood -----------------------
     ## stable log-determinant (det() underflows to 0 for large, collinear S,
@@ -121,10 +124,20 @@ vb_fit <- function(fit, Y, Q, tau = 0.50, gamma = 0.5,
     ## ---- parameter counts and degrees of freedom ----------------------
     p_H   <- sum(aH)                          # required + active-unspecified
     n_phi <- if (orthogonal) 0L else K * (K - 1) / 2  # free factor correlations
-    t_nom <- p_H + J + n_phi                  # nominal count (J = error variances)
+    edge_H <- matrix(FALSE, J, J)
+    edge_S <- 0
+    if (is_ld) {
+        qe_upper <- upper.tri(fit$Qe)
+        edge_H <- qe_upper & (fit$Qe == 1 | (fit$Qe == -1 & fit$q_star >= tau))
+        edge_S <- sum(fit$Qe[qe_upper] == 1) +
+                  sum(fit$q_star[qe_upper & fit$Qe == -1])
+    }
+    n_edge <- sum(edge_H)
+    t_nom <- p_H + J + n_phi + n_edge
 
     ## rank-adjusted count: t = rank( d vech(Sigma) / d theta' )
-    th0 <- if (orthogonal) c(Lam_H[aH], Psi) else c(Lam_H[aH], Phi[lower.tri(Phi)], Psi)
+    resid0 <- if (is_ld) c(diag(fit$Psi), fit$Psi[edge_H]) else diag(Wres)
+    th0 <- c(Lam_H[aH], if (n_phi > 0) Phi[lower.tri(Phi)], resid0)
     rebuild_vech <- function(th) {
         L <- matrix(0, J, K); L[aH] <- th[seq_len(p_H)]
         P <- diag(K)
@@ -132,8 +145,18 @@ vb_fit <- function(fit, Y, Q, tau = 0.50, gamma = 0.5,
             P[lower.tri(P)] <- th[p_H + seq_len(n_phi)]
             P[upper.tri(P)] <- t(P)[upper.tri(P)]
         }
-        Pp <- th[p_H + n_phi + seq_len(J)]
-        Sg <- L %*% P %*% t(L) + diag(Pp)
+        pos <- p_H + n_phi
+        rd <- th[pos + seq_len(J)]
+        if (is_ld) {
+            Prec <- diag(rd, J)
+            if (n_edge > 0) {
+                ev <- th[pos + J + seq_len(n_edge)]
+                Prec[edge_H] <- ev
+                Prec[t(edge_H)] <- ev
+            }
+            Rcov <- solve(Prec)
+        } else Rcov <- diag(rd)
+        Sg <- L %*% P %*% t(L) + Rcov
         Sg[lower.tri(Sg, diag = TRUE)]
     }
     ## Rank-adjusted t needs a numDeriv Jacobian of vech(Sigma) (J(J+1)/2 rows),
@@ -147,7 +170,7 @@ vb_fit <- function(fit, Y, Q, tau = 0.50, gamma = 0.5,
     } else {
         t_H    <- t_nom                       # nominal count (rank check skipped)
     }
-    t_S    <- J + n_phi + sum(Q == 1) + sum(pi_[Q == -1])  # soft count
+    t_S <- J + n_phi + sum(Q == 1) + sum(pi_[Q == -1]) + edge_S
 
     df_H <- m - t_H
     df_0 <- J * (J - 1) / 2
@@ -172,10 +195,43 @@ vb_fit <- function(fit, Y, Q, tau = 0.50, gamma = 0.5,
     AIC_S <- -2 * llS + 2 * t_S
     BIC_S <- -2 * llS + log(Ns) * t_S
 
-    c(t_nom = t_nom, t = t_H, t_S = t_S,
+    out <- c(t_nom = t_nom, t = t_H, t_S = t_S,
       RMSEA = RMSEA, SRMR = SRMR,
       CFI = CFI, TLI = TLI,
       AIC = AIC, BIC = BIC,
       AIC_S = AIC_S, BIC_S = BIC_S,
-      ELBO = { e <- as.numeric(fit$ELBO); if (is.finite(e)) e else NA_real_ })
+      ELBO = { e <- as.numeric(fit$ELBO); if (length(e) && is.finite(e)) e else NA_real_ })
+    class(out) <- c("vbpm_fit_stats", "numeric")
+    attr(out, "model") <- "vbfa"
+    attr(out, "objective_type") <- if (!is.null(fit$objective_type))
+        fit$objective_type else if (is_ld) "vecm" else "elbo"
+    out
 }
+
+#' @rdname fit_stats
+#' @export
+fit_stats.vbmimic <- function(object, Y = NULL, Q = NULL, tau = 0.5, ...) {
+    nA <- sum(object$Q_A == 1) + sum(object$pi_A[object$Q_A == -1])
+    nB <- sum(object$Q_B == 1) + sum(object$pi_B[object$Q_B == -1])
+    out <- c(t_nom = NA_real_, t = NA_real_, t_S = nA + nB,
+             RMSEA = NA_real_, SRMR = NA_real_, CFI = NA_real_, TLI = NA_real_,
+             AIC = NA_real_, BIC = NA_real_, AIC_S = NA_real_, BIC_S = NA_real_,
+             ELBO = NA_real_)
+    class(out) <- c("vbpm_fit_stats", "numeric")
+    attr(out, "model") <- "vbmimic"
+    attr(out, "objective_type") <- "none"
+    attr(out, "note") <- paste("SEM-like fit statistics require the MIMIC",
+                               "objective and joint covariance derivation.")
+    out
+}
+
+#' @rdname fit_stats
+#' @export
+fit_stats.vbpm_fit <- function(object, ...)
+    stop("No fit_stats() method is defined for model class: ", class(object)[1],
+         call. = FALSE)
+
+# Historical API retained for v0.4.0 migration.
+#' @rdname fit_stats
+#' @export
+vb_fit <- function(fit, Y, Q = fit$Q, ...) fit_stats(fit, Y = Y, Q = Q, ...)

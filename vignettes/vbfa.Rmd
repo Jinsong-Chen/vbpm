@@ -20,7 +20,7 @@ spike-and-slab priors select the rest from the data.
 
 This vignette walks the factor-analysis side of the package: designing a `Q`
 matrix, fitting with `vbfa()`, reading the fit, computing fit statistics with
-`vb_fit()`, selecting the number of factors with `pefa()`, and two special
+`fit_stats()`, selecting the number of factors with `pefa()`, and two special
 modes (bifactor and local dependence). It ends with an empirical example and
 with a recipe for turning *graded* prior knowledge into a `Q` matrix.
 
@@ -90,11 +90,11 @@ fit_gentle <- vbfa(Y, Q, v0 = exp(seq(log(0.05), log(0.001), length.out = 10)))
 
 ## Fit statistics
 
-`vb_fit()` computes SEM-like statistics for a fit, with hard selection
+`fit_stats()` computes SEM-like statistics for a fit, with hard selection
 (PIP >= `tau`) as the default:
 
 ```{r vbfit}
-round(vb_fit(fit, Y, Q), 3)
+round(fit_stats(fit), 3)
 ```
 
 `t_nom`/`t`/`t_S` are parameter counts (nominal, rank-adjusted, soft), the rest
@@ -113,9 +113,16 @@ sustained-drop guard against transient dips).
 ```{r pefa}
 Q0 <- Q[, 1:2, drop = FALSE]   # pretend we only know two factors exist
 r  <- pefa(Q0, Y, Kmin = 2, Kmax = 4, verbose = FALSE)
-r$selected_K
-r$sweep[, c("K", "ELBO", "BIC", "CFI", "flag")]
+s  <- summary(r)                # aggregate sweep result
+s$selection                     # ELBO, ELBO gain, BIC, BIC gain
+s$comparison[, c("K", "ELBO", "ELBO_gain", "BIC", "BIC_gain", "CFI")]
+selected_fit(r)                 # the selected vbpm_fit candidate
 ```
+
+The candidate range is the PEFA *window*; the fitted collection and its
+selection results form a `vbpm_sweep`. Each candidate remains an ordinary
+`vbpm_fit`. The word *path* is reserved for continuation paths such as the
+ordered `v0` stages inside `vbfa()`.
 
 The rule itself is exported, so you can apply it to any criterion curve:
 
@@ -133,7 +140,7 @@ this is an identified orthogonal bifactor model:
 Qb <- cbind(1L, Q)
 fb <- vbfa(Y, Qb, orthogonal = TRUE)
 fb$Phi[1:3, 1:3]           # identity by construction
-round(vb_fit(fb, Y, Qb), 3)
+round(fit_stats(fb), 3)
 ```
 
 ## Local dependence
@@ -154,9 +161,19 @@ which(Poff >= sort(Poff, decreasing = TRUE)[3], arr.ind = TRUE)
 simLD$ofd_ind
 ```
 
-Two current limitations, both documented in `NEWS`: the ELBO is `NA` under
-local dependence, and `vb_fit()` refuses LD fits rather than computing
-statistics on the wrong implied covariance.
+For LD fits, `fit_stats()` uses the selected residual covariance. The returned
+`objective` is the manuscript V4 terminal VECM criterion; `ELBO` remains `NA`
+because the residual precision is point-updated rather than assigned a full
+variational distribution.
+
+## Incomplete continuous responses
+
+`vbfa()` accepts `NA` values in continuous response matrices. At each
+iteration it updates all missing entries within a person jointly from their
+Gaussian conditional mean and adds the conditional covariance to the expected
+residual cross-product. This deterministic conditional-moment update is the
+VB counterpart of the LAWBL/PCFA MCMC data augmentation. Entirely missing rows
+or items are rejected because their location or scale is not identified.
 
 ## An empirical example: NLSY 1997
 

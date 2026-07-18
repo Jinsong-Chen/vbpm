@@ -30,12 +30,17 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
     items on factors) and the structural design (`Q_B`, factors on covariates).
   - Supports the same warm-started `v0` path. The defaults reproduce the
     published estimator exactly.
-  - The ELBO is not yet available for this model, so `vb_fit()` and `pefa()`
-    do not accept `vbmimic` fits.
-- **`vb_fit()`** — SEM-like fit statistics (RMSEA, SRMR, CFI, TLI, AIC, BIC,
-  ELBO).
+  - The ELBO is not yet available for this model, so `fit_stats()` returns a
+    clearly marked limited result and `pefa()` does not accept `vbmimic` fits.
+- **`fit_stats()`** — SEM-like fit statistics (RMSEA, SRMR, CFI, TLI, AIC, BIC)
+  plus the model's objective. An S3 generic over fitted models: it builds the
+  implied covariance from the residual covariance, so it is correct for
+  diagonal *and* local-dependence `vbfa` fits, and it reads `orthogonal`/`ld`
+  from the fit rather than asking you to repeat them. (`vb_fit()` is the
+  pre-0.4.0 name, retained as a wrapper.)
 - **`pefa()`** / **`select_K_elbow()`** — sweep the number of factors and
-  select it with a scale-free gain rule.
+  select it with a scale-free gain rule. `pefa()` returns a sweep object with
+  `summary()`, `plot()`, and `selected_fit()`.
 - **`sim_fa()`** and **`sim_lvm()`** — two complementary data generators.
   `sim_fa()` is driven by the loading *pattern* (items per factor, alternating
   cross-loadings, minor factors); `sim_lvm()` is driven by a loading *matrix*
@@ -69,8 +74,9 @@ Then:
 
 ```r
 library(vbpm)
-vignette("vbpm-intro")   # start here
+vignette("vbfa")         # start here
 vignette("vbmimic")
+vignette("pefa")
 citation("vbpm")
 ```
 
@@ -91,12 +97,12 @@ Q[1:2, ] <- 0; Q[1:2, 1] <- 1        # two anchors on factor 1, etc.
 
 fit <- vbfa(Y, Q)                    # dynamic path on by default; quiet
 fit                                  # compact summary (S3 print method)
-idx <- vb_fit(fit, Y, Q)             # reads orthogonal/ld from the fit
+idx <- fit_stats(fit)                # reads data/design/settings from the fit
 ```
 
-Fits are ordinary named lists with a class attached — `fit$Lam`, `fit$pi`,
-`fit$Phi` are public API; see `?vbpm_fit`. Two vignettes walk the full
-workflow: `vignette("vbpm-intro")` and `vignette("vbmimic")`.
+Fits are ordinary named lists with a shared `vbpm_fit` class attached — fields
+such as `fit$Lam`, `fit$pi`, and `fit$Phi` remain public API. Focused vignettes
+cover `vbfa`, `vbmimic`, and the `pefa` factor-number sweep.
 
 MIMIC, with covariates predicting the factors:
 
@@ -146,15 +152,19 @@ round(fit$B, 2)                      # which covariates predict which factors
 
 ## Known limitations
 
-As of 0.3.0:
+As of 0.4.0:
 
-- **Missing data.** `vbfa()` and `vbmimic()` reject `NA` rather than imputing;
-  handle missingness beforehand. In-loop imputation is planned.
-- **ELBO under local dependence.** `vbfa(ld = TRUE)` returns `ELBO = NA`, and
-  `vb_fit()` refuses local-dependence fits rather than computing statistics on
-  the wrong implied covariance.
+- **Response types.** In-loop missing-data support covers continuous Gaussian
+  responses in both `vbfa()` and `vbmimic()`. Mixed/categorical augmentation
+  remains future work. `vbmimic()` requires complete covariates `X`, which are
+  conditioned on rather than modelled.
+- **LD objective.** Local-dependence `vbfa()` fits return the manuscript V4
+  terminal VECM objective and LD-aware fit statistics. `ELBO` is intentionally
+  `NA`: calling the point-updated precision objective a joint variational lower
+  bound would be misleading.
 - **ELBO for MIMIC.** `vbmimic()` converges on a residual criterion rather than
-  the bound, so `ELBO` is `NA` and `vb_fit()`/`pefa()` do not accept its fits.
+  the bound, so `ELBO` is `NA`. `fit_stats()` describes the available parameter
+  counts but covariance fit indices await a fully specified joint covariance.
 - **Fully exploratory MIMIC.** With both `Q_A` and `Q_B` left entirely
   unspecified the model converges cleanly but the solution can be rotationally
   ambiguous. Anchor at least one part.

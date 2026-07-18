@@ -69,13 +69,16 @@ test_that("orthogonal bifactor returns Phi = I", {
   expect_identical(f$Phi, diag(1, ncol(Qb), ncol(Qb)))
 })
 
-test_that("LD mode recovers planted residual pairs; ELBO is NA", {
+test_that("LD mode recovers planted residual pairs and exposes VECM objective", {
   pairs <- rbind(c(4, 9), c(11, 20), c(15, 23))
   d <- make_dat(seed = 2, ld_pairs = pairs, ld_rho = .5)
   Qe <- matrix(-1L, 24, 24); diag(Qe) <- 0L
   f <- vbfa(d$Y, d$Q, ld = TRUE, Qe = Qe, convChk = FALSE,
             tolVal = 1e-3, max_it = 300)
   expect_true(is.na(f$ELBO))
+  expect_identical(f$objective_type, "vecm")
+  expect_true(is.finite(f$objective))
+  expect_equal(sum(f$objective_terms), f$objective, tolerance = 1e-10)
   Poff <- abs(f$Psi); Poff[lower.tri(Poff, diag = TRUE)] <- 0
   top3 <- order(-Poff)[1:3]
   found <- apply(t(apply(cbind(row(Poff)[top3], col(Poff)[top3]), 1, sort)), 1,
@@ -84,9 +87,21 @@ test_that("LD mode recovers planted residual pairs; ELBO is NA", {
   expect_gte(sum(planted %in% found), 2)
 })
 
-test_that("NA input is rejected", {
-  d <- make_dat(); Y <- d$Y; Y[1, 1] <- NA
-  expect_error(vbfa(Y, d$Q), "NA")
+test_that("incomplete continuous data use deterministic joint moments", {
+  d <- make_dat(N = 180); Y <- d$Y
+  Y[cbind(1:20, rep(1:4, each = 5))] <- NA
+  Y[31, 1:3] <- NA
+  f1 <- vbfa(Y, d$Q, v0 = .001, max_it = 300, convChk = FALSE)
+  f2 <- vbfa(Y, d$Q, v0 = .001, max_it = 300, convChk = FALSE)
+  expect_false(anyNA(f1$Lam))
+  expect_identical(f1$Lam, f2$Lam)
+  expect_equal(f1$preprocess$n_missing, 23)
+  expect_identical(f1$preprocess$missing_mask, is.na(Y))
+  expect_true(is.finite(f1$objective))
+  Y_bad <- Y; Y_bad[, 1] <- NA
+  expect_error(vbfa(Y_bad, d$Q), "at least one observed")
+  Y_bad <- Y; Y_bad[1, ] <- NA
+  expect_error(vbfa(Y_bad, d$Q), "all responses missing")
 })
 
 test_that("the ld switch governs Qe", {
@@ -108,14 +123,17 @@ test_that("the ld switch governs Qe", {
   expect_equal(dim(f2$Psi), c(24L, 24L))
 })
 
-test_that("vb_fit returns the documented statistics and rejects LD fits", {
+test_that("fit_stats is generic, preserves vb_fit, and supports LD fits", {
   d <- make_dat()
   f <- vbfa(d$Y, d$Q, convChk = FALSE)
-  fs <- vb_fit(f, d$Y, d$Q)
+  fs <- fit_stats(f)
   expect_named(fs, c("t_nom", "t", "t_S", "RMSEA", "SRMR", "CFI", "TLI",
                      "AIC", "BIC", "AIC_S", "BIC_S", "ELBO"))
+  expect_identical(unname(vb_fit(f, d$Y, d$Q)), unname(fs))
   fl <- vbfa(d$Y, d$Q, ld = TRUE, convChk = FALSE, max_it = 100)
-  expect_error(vb_fit(fl, d$Y, d$Q), "local-dependence")
+  fsl <- fit_stats(fl)
+  expect_true(all(is.finite(fsl[c("RMSEA", "SRMR", "CFI", "TLI", "BIC")])))
+  expect_identical(attr(fsl, "objective_type"), "vecm")
 })
 
 test_that("vb_fit reads orthogonal from the fit (the bifactor footgun)", {
@@ -146,6 +164,23 @@ test_that("pefa selects a factor number within the window", {
                max_it = 1500, v0 = 0.001)
   expect_true(r$selected_K %in% 2:4)
   expect_true(all(r$sweep$converged))
+  expect_s3_class(r, "pefa")
+  expect_s3_class(r, "vbpm_sweep")
+  expect_identical(r$window$K, 2:4)
+  expect_true(all(c("ELBO_gain", "ELBO_gain_pct", "BIC_gain", "BIC_gain_pct") %in%
+                  names(r$sweep)))
+  expect_s3_class(selected_fit(r), "vbpm_fit")
+
+  s <- summary(r)
+  expect_s3_class(s, "summary.pefa")
+  expect_named(s$selection, c("objective", "objective_gain", "elbo", "elbo_gain",
+                              "bic", "bic_gain"))
+  expect_identical(unname(s$selection["objective_gain"]), r$selected_K)
+  expect_identical(s$delta, 10)
+  expect_identical(s$comparison, r$sweep)
+  expect_true(s$boundary %in% c("lower", "interior", "upper", "none"))
+  expect_output(print(r), "PEFA sweep")
+  expect_output(print(s), "ELBO gain.*delta = 10%")
 })
 
 test_that("fits carry the vbpm_fit class; print and coef dispatch", {

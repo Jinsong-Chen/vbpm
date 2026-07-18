@@ -1,3 +1,36 @@
+# vbpm 0.4.0
+
+* `vbmimic()` now also accepts missing responses in `Y`. Its residual
+  covariance is diagonal, so the joint Gaussian conditional collapses to the
+  factor-model mean `eta_i A'`, with the conditional variance `1 / V_j` carried
+  into the residual sum of squares; the covariate information is already
+  carried by `eta_i`. Missing values in `X` remain an error: covariates are
+  conditioned on rather than modelled, so imputing them would require a
+  distributional assumption the MIMIC model does not make.
+* `vbfa()` now handles incomplete continuous-response data by deterministic,
+  joint Gaussian conditional-moment updates. The model and conditional moments
+  match the data-augmentation formulation used by LAWBL and the related PCFA
+  MCMC work; rows or items with no observed responses are rejected.
+* Local-dependence fits now expose the terminal VECM objective derived in the
+  LD-PCFA-VB V4 manuscript. It is stored as `objective` with
+  `objective_type = "vecm"`; `ELBO` remains `NA` because the residual precision
+  and mixing probability are point updates rather than variational factors.
+* New `fit_stats()` S3 generic works for all `vbpm_fit` objects. It computes
+  covariance fit statistics for diagonal and LD `vbfa` fits and returns a
+  clearly marked limited result for `vbmimic`; `vb_fit()` remains as a
+  compatibility wrapper.
+* `pefa()` now returns a `c("pefa", "vbpm_sweep")` object with candidate fits,
+  a sweep table, `summary()`, `plot()`, and `selected_fit()`. Summaries report
+  objective, objective-gain, ELBO, ELBO-gain, BIC, and BIC-gain selections.
+* The package now has focused `vbfa`, `vbmimic`, and `pefa` vignettes.
+* Verification for the above: the Gaussian conditional-moment kernel is now an
+  internal function (`.cond_moments()`) tested directly against textbook
+  multivariate-normal conditional means and covariances, for diagonal and full
+  residual covariance; missing-data fits are checked for mask integrity and
+  row-permutation invariance; LD fit statistics are checked to be built from
+  the residual covariance `W` rather than the precision; and missing data is
+  checked to compose with local dependence.
+
 # vbpm 0.3.0
 
 Fits are now classed objects, output names are plain-language, the default is
@@ -93,9 +126,17 @@ First release.
 
 ## Not implemented in this first release
 
-(For the current status of these, see "Known limitations" in `README.md` —
-as of 0.3.0 all three are still outstanding.)
+All three items below were addressed in 0.4.0; they are recorded here as the
+state of 0.1.0. See "Known limitations" in `README.md` for current status.
 
-* Missing-data support in `vbfa()` (currently errors on `NA`).
-* ELBO under the local-dependence model (currently `NA`).
-* LD-aware `vb_fit()`.
+* Missing-data support in `vbfa()` (errored on `NA`). *Added in 0.4.0 for
+  continuous responses, by in-loop Gaussian conditional moments.*
+* ELBO under the local-dependence model (`NA`). *Resolved in 0.4.0 by
+  supplying the quantities that are actually defined — the terminal VECM
+  `objective` and the conditional bound `ELBO_conditional`. `ELBO` remains
+  `NA` by design, because the precision and mixing proportion are point
+  updates rather than variational factors, so no single joint mean-field
+  bound exists to report.*
+* LD-aware `vb_fit()`. *Added in 0.4.0 via `fit_stats()`, which builds the
+  implied covariance from the residual covariance `W` and counts selected
+  residual edges.*
