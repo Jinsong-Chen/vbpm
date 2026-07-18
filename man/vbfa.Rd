@@ -95,7 +95,7 @@ E[Phi^-1].}
 \item{iter, flag, time}{Total iterations, \code{1} if the final stage
 converged within \code{max_it} (else \code{0}), and elapsed time.}
 \item{Q, Qe, orthogonal, ld}{The design matrices and settings the model
-was fit with (\code{Qe} is \code{NULL} when \code{ld = FALSE}); read by \code{\link[=vb_fit]{vb_fit()}}
+was fit with (\code{Qe} is \code{NULL} when \code{ld = FALSE}); read by \code{\link[=fit_stats]{fit_stats()}}
 and \code{\link[=print.vbpm_fit]{print.vbpm_fit()}} so they never need repeating.}
 \item{Psi, W, q_star, xi_star, tau}{Local-dependence results (\code{NULL}
 when \code{ld = FALSE}): residual precision, its inverse, residual-edge

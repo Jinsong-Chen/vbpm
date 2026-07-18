@@ -81,8 +81,8 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #' @param fit_cut Logical; if `TRUE`, gate selection on absolute fit passing
 #'   `cutoffs`. Default `FALSE`.
 #' @param cutoffs Named absolute-fit cutoffs used when `fit_cut = TRUE`.
-#' @param max_it,tau Passed to [vbfa()] / [vb_fit()] (`max_it` is per stage).
-#' @param orthogonal Passed to [vbfa()] and [vb_fit()].
+#' @param max_it,tau Passed to [vbfa()] / [fit_stats()] (`max_it` is per stage).
+#' @param orthogonal Passed to [vbfa()] and [fit_stats()].
 #' @param save_path Optional CSV checkpoint path (resume-safe).
 #' @param verbose Logical; print per-model progress.
 #' @param ... Further arguments passed to [vbfa()] (e.g. `v0`, `Qe`,

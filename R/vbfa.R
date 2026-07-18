@@ -112,7 +112,7 @@ logC_igw <- function(xi, Lam, P) {
 #'     \item{iter, flag, time}{Total iterations, `1` if the final stage
 #'       converged within `max_it` (else `0`), and elapsed time.}
 #'     \item{Q, Qe, orthogonal, ld}{The design matrices and settings the model
-#'       was fit with (`Qe` is `NULL` when `ld = FALSE`); read by [vb_fit()]
+#'       was fit with (`Qe` is `NULL` when `ld = FALSE`); read by [fit_stats()]
 #'       and [print.vbpm_fit()] so they never need repeating.}
 #'     \item{Psi, W, q_star, xi_star, tau}{Local-dependence results (`NULL`
 #'       when `ld = FALSE`): residual precision, its inverse, residual-edge

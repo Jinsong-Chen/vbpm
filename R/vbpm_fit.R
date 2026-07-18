@@ -25,7 +25,7 @@
 #' floods the screen with every matrix in the object, but shows a compact
 #' summary (model type, dimensions, convergence, ELBO, active loadings).
 #' Second, functions receiving a fit can **recognize what it is**: this is
-#' how [vb_fit()] knows a bifactor fit from an oblique one without being told
+#' how [fit_stats()] knows a bifactor fit from an oblique one without being told
 #' (the fit carries its own `orthogonal` and `ld` settings), and how it
 #' refuses a [vbmimic()] fit rather than computing meaningless statistics
 #' on it.
@@ -36,6 +36,16 @@
 #' every model in the family unless a model overrides them — one `print`
 #' method serves all estimators, and future family members (e.g. further
 #' variational models) inherit sensible behaviour on day one.
+#'
+#' @section `vbpm_fit` versus `vb_fit()`:
+#' These two names look related and are not, which is worth stating once.
+#' `vbpm_fit` is the **class of a fitted model** — what [vbfa()] and
+#' [vbmimic()] return. `vb_fit()` was the pre-0.4.0 **name of the function
+#' that computes fit statistics**, now [fit_stats()]; it survives only as a
+#' thin wrapper for old scripts. So a `vbpm_fit` is an input to
+#' `fit_stats()`, never its output, and `vb_fit()` never returned a
+#' `vbpm_fit`. New code should use [fit_stats()] and can ignore `vb_fit()`
+#' entirely.
 #'
 #' @section What is deliberately NOT hidden:
 #' Some R packages wrap results in opaque objects whose internals are
@@ -58,7 +68,7 @@ NULL
 #'
 #' @param x A fit returned by [vbfa()] or [vbmimic()].
 #' @param tau Threshold on the posterior inclusion probability used only for
-#'   the "active loadings" line (default `0.5`, matching [vb_fit()]).
+#'   the "active loadings" line (default `0.5`, matching [fit_stats()]).
 #' @param ... Ignored (present for compatibility with the [print()] generic).
 #'
 #' @return `x`, invisibly (the R convention for print methods, so `print(fit)`

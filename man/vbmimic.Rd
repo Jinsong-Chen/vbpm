@@ -96,7 +96,7 @@ design-matrix convention and the spike-and-slab formulation.
 The evidence lower bound is \strong{not} currently returned. The published
 algorithm converges on the weighted residual vector rather than on the
 bound, and the bound's implementable closed form has not been assembled.
-Because \code{\link[=vb_fit]{vb_fit()}} and \code{\link[=pefa]{pefa()}} are built on the ELBO, they do not accept
+Because \code{\link[=fit_stats]{fit_stats()}} and \code{\link[=pefa]{pefa()}} are built on the ELBO, they do not accept
 \code{vbmimic} fits; both raise an error rather than returning wrong numbers.
 }
 \examples{

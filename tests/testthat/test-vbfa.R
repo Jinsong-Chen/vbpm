@@ -85,6 +85,14 @@ test_that("LD mode recovers planted residual pairs and exposes VECM objective", 
                  paste, collapse = "-")
   planted <- apply(pairs, 1, paste, collapse = "-")
   expect_gte(sum(planted %in% found), 2)
+
+  ## Sparsity, not just ranking. This is the property on which the packaged
+  ## branch and the V4 reference genuinely differ: measured on this scenario,
+  ## the package selects exactly the 3 planted edges while ld-vb_r.R selects
+  ## 24 (21 false positives), because the r1.1 second-moment rescaling changes
+  ## the factor scale and hence what QUIC shrinks. Guarding the false-positive
+  ## rate is more meaningful than agreeing with the reference numerically.
+  expect_lte(sum(f$q_star[upper.tri(f$q_star)] >= .5), 6)
 })
 
 test_that("incomplete continuous data use deterministic joint moments", {

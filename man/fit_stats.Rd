@@ -76,13 +76,13 @@ Q <- matrix(-1L, ncol(sim$dat), 3)
 for (k in 1:3) { a <- which(rep(1:3, each = 6) == k)[1:2]
                  Q[a, ] <- 0L; Q[a, k] <- 1L }
 fit <- vbfa(sim$dat, Q)
-round(vb_fit(fit, sim$dat, Q), 3)
+round(fit_stats(fit), 3)
 
 \donttest{
 ## bifactor: orthogonal is read from the fit object, so the same call works
 Qb <- cbind(1L, Q)
 fb <- vbfa(sim$dat, Qb, orthogonal = TRUE)
-round(vb_fit(fb, sim$dat, Qb), 3)
+round(fit_stats(fb), 3)
 }
 
 }

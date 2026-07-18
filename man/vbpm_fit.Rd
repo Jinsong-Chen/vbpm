@@ -28,7 +28,7 @@ The label does exactly two things. First, generic functions such as
 floods the screen with every matrix in the object, but shows a compact
 summary (model type, dimensions, convergence, ELBO, active loadings).
 Second, functions receiving a fit can \strong{recognize what it is}: this is
-how \code{\link[=vb_fit]{vb_fit()}} knows a bifactor fit from an oblique one without being told
+how \code{\link[=fit_stats]{fit_stats()}} knows a bifactor fit from an oblique one without being told
 (the fit carries its own \code{orthogonal} and \code{ld} settings), and how it
 refuses a \code{\link[=vbmimic]{vbmimic()}} fit rather than computing meaningless statistics
 on it.
@@ -41,6 +41,18 @@ The specific class (\code{"vbfa"}, \code{"vbmimic"}) comes first, the family cla
 every model in the family unless a model overrides them — one \code{print}
 method serves all estimators, and future family members (e.g. further
 variational models) inherit sensible behaviour on day one.
+}
+
+\section{\code{vbpm_fit} versus \code{vb_fit()}}{
+
+These two names look related and are not, which is worth stating once.
+\code{vbpm_fit} is the \strong{class of a fitted model} — what \code{\link[=vbfa]{vbfa()}} and
+\code{\link[=vbmimic]{vbmimic()}} return. \code{vb_fit()} was the pre-0.4.0 \strong{name of the function
+that computes fit statistics}, now \code{\link[=fit_stats]{fit_stats()}}; it survives only as a
+thin wrapper for old scripts. So a \code{vbpm_fit} is an input to
+\code{fit_stats()}, never its output, and \code{vb_fit()} never returned a
+\code{vbpm_fit}. New code should use \code{\link[=fit_stats]{fit_stats()}} and can ignore \code{vb_fit()}
+entirely.
 }
 
 \section{What is deliberately NOT hidden}{

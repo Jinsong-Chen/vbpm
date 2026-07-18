@@ -10,7 +10,7 @@
 \item{x}{A fit returned by \code{\link[=vbfa]{vbfa()}} or \code{\link[=vbmimic]{vbmimic()}}.}
 
 \item{tau}{Threshold on the posterior inclusion probability used only for
-the "active loadings" line (default \code{0.5}, matching \code{\link[=vb_fit]{vb_fit()}}).}
+the "active loadings" line (default \code{0.5}, matching \code{\link[=fit_stats]{fit_stats()}}).}
 
 \item{...}{Ignored (present for compatibility with the \code{\link[=print]{print()}} generic).}
 }

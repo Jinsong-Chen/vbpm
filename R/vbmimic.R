@@ -77,7 +77,7 @@
 #' @note The evidence lower bound is **not** currently returned. The published
 #'   algorithm converges on the weighted residual vector rather than on the
 #'   bound, and the bound's implementable closed form has not been assembled.
-#'   Because [vb_fit()] and [pefa()] are built on the ELBO, they do not accept
+#'   Because [fit_stats()] and [pefa()] are built on the ELBO, they do not accept
 #'   `vbmimic` fits; both raise an error rather than returning wrong numbers.
 #'
 #' @references
