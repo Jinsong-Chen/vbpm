@@ -86,12 +86,15 @@ test_that("LD mode recovers planted residual pairs and exposes VECM objective", 
   planted <- apply(pairs, 1, paste, collapse = "-")
   expect_gte(sum(planted %in% found), 2)
 
-  ## Sparsity, not just ranking. This is the property on which the packaged
-  ## branch and the V4 reference genuinely differ: measured on this scenario,
-  ## the package selects exactly the 3 planted edges while ld-vb_r.R selects
-  ## 24 (21 false positives), because the r1.1 second-moment rescaling changes
-  ## the factor scale and hence what QUIC shrinks. Guarding the false-positive
-  ## rate is more meaningful than agreeing with the reference numerically.
+  ## Sparsity, not just ranking. Measured on this scenario the package selects
+  ## exactly the 3 planted edges while the V4 reference ld-vb_r.R selects 24.
+  ## The cause is upstream of the LD machinery, which is identical in both:
+  ## the reference attenuates the loadings (mean primary .475 against a true
+  ## .65), so more common variance is left in the residual covariance and QUIC
+  ## reads it as local dependence. The packaged branch takes its measurement
+  ## updates from r1.1 instead, recovers the loadings (.640), and leaves little
+  ## for QUIC to find. Guarding the false-positive rate is therefore the
+  ## meaningful regression, not numerical agreement with the reference.
   expect_lte(sum(f$q_star[upper.tri(f$q_star)] >= .5), 6)
 })
 
