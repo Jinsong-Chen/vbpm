@@ -154,10 +154,16 @@ round(fit$B, 2)                      # which covariates predict which factors
 
 As of 0.4.0:
 
-- **Response types.** In-loop missing-data support covers continuous Gaussian
-  responses in both `vbfa()` and `vbmimic()`. Mixed/categorical augmentation
-  remains future work. `vbmimic()` requires complete covariates `X`, which are
-  conditioned on rather than modelled.
+- **Response types.** The estimators model **continuous Gaussian responses**,
+  and in-loop missing-data support covers that case in both `vbfa()` and
+  `vbmimic()`. Categorical and mixed responses are **out of scope for the
+  current line of releases** — supporting them means adding a threshold model
+  and augmenting latent responses, which is a modelling extension rather than
+  a feature. Simulating them is supported (`cati`/`noc` in `sim_fa()`,
+  `ilvl` in `sim_lvm()`); estimating from them is not.
+- **Complete covariates.** `vbmimic()` requires complete `X`: covariates are
+  conditioned on rather than modelled, so the model supplies no distribution
+  to impute them from.
 - **LD objective.** Local-dependence `vbfa()` fits return the manuscript V4
   terminal VECM objective and LD-aware fit statistics. `ELBO` is intentionally
   `NA`: calling the point-updated precision objective a joint variational lower
