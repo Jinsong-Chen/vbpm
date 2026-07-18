@@ -1,0 +1,41 @@
+citHeader("To cite vbpm in publications, please cite the package and the paper for the estimator you used (Jin & Chen 2025 SEM for vbfa; Jin & Chen 2025 MBR for vbmimic; Chen & Jin 2026 for vb_fit/pefa):")
+
+bibentry(
+  bibtype = "Manual",
+  title   = "{vbpm}: Variational Bayes Psychometric Models",
+  author  = c(person("Jinsong", "Chen"), person("Yi", "Jin")),
+  year    = "2026",
+  note    = sprintf("R package version %s", meta$Version),
+  url     = "https://github.com/Jinsong-Chen/vbpm"
+)
+
+bibentry(
+  bibtype = "Article",
+  title   = "Regularized variational approximation for partially confirmatory factor analysis",
+  author  = c(person("Yi", "Jin"), person("Jinsong", "Chen")),
+  journal = "Structural Equation Modeling: A Multidisciplinary Journal",
+  year    = "2025",
+  volume  = "32",
+  number  = "3",
+  pages   = "437--449",
+  doi     = "10.1080/10705511.2024.2432612"
+)
+
+bibentry(
+  bibtype = "Article",
+  title   = "Regularized variational Bayesian approximations for variable selection in extended multiple-indicators multiple-causes models",
+  author  = c(person("Yi", "Jin"), person("Jinsong", "Chen")),
+  journal = "Multivariate Behavioral Research",
+  year    = "2025",
+  doi     = "10.1080/00273171.2025.2483253"
+)
+
+bibentry(
+  bibtype = "Article",
+  title   = "Recovering latent structures after variational Bayesian variable selection: Fit assessment and factor-number selection in partially exploratory factor analysis",
+  author  = c(person("Jinsong", "Chen"), person("Yi", "Jin")),
+  journal = "arXiv preprint",
+  year    = "2026",
+  note    = "arXiv:2607.07159",
+  url     = "https://arxiv.org/abs/2607.07159"
+)

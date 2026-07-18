@@ -63,9 +63,14 @@ Y   <- sim$dat
 Q <- matrix(-1, ncol(Y), 3)
 Q[1:2, ] <- 0; Q[1:2, 1] <- 1        # two anchors on factor 1, etc.
 
-fit <- vbfa(Y, Q)                    # dynamic path on by default
-idx <- vb_fit(fit, Y, Q)
+fit <- vbfa(Y, Q)                    # dynamic path on by default; quiet
+fit                                  # compact summary (S3 print method)
+idx <- vb_fit(fit, Y, Q)             # reads orthogonal/ld from the fit
 ```
+
+Fits are ordinary named lists with a class attached — `fit$Lam`, `fit$pi`,
+`fit$Phi` are public API; see `?vbpm_fit`. Two vignettes walk the full
+workflow: `vignette("vbpm-intro")` and `vignette("vbmimic")`.
 
 MIMIC, with covariates predicting the factors:
 

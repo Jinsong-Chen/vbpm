@@ -31,6 +31,20 @@ congruence <- function(Le, Lt) {
            sqrt(sum(Le[, perm[k]]^2) * sum(Lt[, k]^2)), numeric(1))
 }
 
+test_that("vbfa(v0 = 0.001) reproduces the frozen r1.1 estimator bit-for-bit", {
+  ## THE regression test protecting the paper-1 artifact. The fixture stores
+  ## both the data and the reference outputs of vbfa_r1.1.R (CS repo), so this
+  ## cannot be invalidated by generator drift; regenerate only via
+  ## dev/make_r11_fixture.R and only if the reference itself is re-frozen.
+  ref <- readRDS(test_path("fixtures", "vbfa_r11_ref.rds"))
+  f <- vbfa(ref$Y, ref$Q, v0 = 0.001, max_it = 1500)
+  expect_identical(unname(f$Lam), unname(ref$Lam))
+  expect_identical(unname(f$Phi), unname(ref$Phi))
+  expect_identical(unname(f$PsiInv), unname(ref$PsiInv))
+  expect_identical(f$ELBO, ref$ELBO)
+  expect_identical(f$iter, ref$iter)     # 79, matching CS smoke test T1
+})
+
 test_that("scalar v0 = 0.001 reproduces the fixed-spike estimator deterministically", {
   d <- make_dat()
   f1 <- vbfa(d$Y, d$Q, v0 = 0.001, max_it = 1500, convChk = FALSE)
@@ -132,6 +146,41 @@ test_that("pefa selects a factor number within the window", {
                max_it = 1500, v0 = 0.001)
   expect_true(r$selected_K %in% 2:4)
   expect_true(all(r$sweep$converged))
+})
+
+test_that("fits carry the vbpm_fit class; print and coef dispatch", {
+  d <- make_dat()
+  f <- vbfa(d$Y, d$Q, convChk = FALSE)
+  expect_s3_class(f, "vbfa")
+  expect_s3_class(f, "vbpm_fit")
+  expect_identical(f$Q, d$Q)                    # design stored in the fit
+  out <- capture.output(print(f))
+  expect_true(any(grepl("vbfa", out)))
+  expect_true(any(grepl("converged", out)))
+  expect_identical(coef(f), f$Lam)
+  ## $ access is untouched by the class
+  expect_identical(f$Lam, unclass(f)$Lam)
+})
+
+test_that("renamed output fields are present and old names are gone", {
+  d <- make_dat()
+  f <- vbfa(d$Y, d$Q, convChk = FALSE)
+  expect_true(all(c("Lam_var", "eta_cov", "Phi_inv_mean") %in% names(f)))
+  expect_false(any(c("sigsq.q.Lam", "PHI.q.eta", "M.q.PHIiver", "plotDat")
+                   %in% names(f)))
+  expect_equal(dim(f$Lam_var), dim(f$Lam))
+  expect_equal(dim(f$eta_cov), c(ncol(d$Q), ncol(d$Q)))
+})
+
+test_that("vbfa is quiet by default and messages when convChk = TRUE", {
+  d <- make_dat(N = 150)
+  ## max_it = 5 will not converge, so silence the expected warning and test
+  ## only the message channel
+  expect_no_message(suppressWarnings(
+    vbfa(d$Y, d$Q, v0 = 0.001, max_it = 5)))
+  expect_message(suppressWarnings(
+    vbfa(d$Y, d$Q, v0 = 0.001, max_it = 5, convChk = TRUE)),
+    "relative error")
 })
 
 test_that("sim_fa produces data with planted local dependence", {

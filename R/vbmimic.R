@@ -45,21 +45,23 @@
 #' @param tolVal Convergence tolerance on the maximum absolute change in the
 #'   weighted residual vector.
 #'
-#' @return A list with components:
+#' @return An object of class `c("vbmimic", "vbpm_fit")` — a named list (see
+#'   [vbpm_fit]) with components:
 #'   \describe{
 #'     \item{A}{`J x K` posterior mean measurement loadings.}
 #'     \item{B}{`K x P` posterior mean structural coefficients.}
 #'     \item{pi_A, pi_B}{Posterior inclusion probabilities for the unspecified
 #'       entries of `Q_A` and `Q_B` (specified entries are held at 1, fixed
 #'       zeros at 0).}
+#'     \item{Q_A, Q_B}{The design matrices the model was fit with.}
 #'     \item{eta}{`N x K` posterior mean factor scores.}
 #'     \item{Phi}{`K x K` factor correlation matrix implied by `Sig`.}
 #'     \item{Sig, U}{Factor covariance matrix and its inverse.}
 #'     \item{V}{Length-`J` residual precisions.}
 #'     \item{rho, theta}{Inclusion rates for the measurement and structural
 #'       parts.}
-#'     \item{sigsq.q.A, sigsq.q.B}{Posterior variances of the loadings and
-#'       structural coefficients.}
+#'     \item{A_var, B_var}{Posterior variances of the loadings and structural
+#'       coefficients.}
 #'     \item{iter, flag, time}{Total iterations, `1` if the final stage
 #'       converged within `max_it` (else `0`), and elapsed time.}
 #'     \item{ELBO}{`NA_real_`; see Note.}
@@ -371,13 +373,17 @@ vbmimic <- function(Y, X, Q_A, Q_B, v0 = 0.001, standardize = FALSE,
   pi_A <- Alpha
   pi_B <- Beta
 
-  list(A = mu.q.A, B = mu.q.B,
-       pi_A = pi_A, pi_B = pi_B,
-       eta = mu.F, Phi = cov2cor(Sig), Sig = Sig, U = U, V = V,
-       rho = RHO, theta = Theta,
-       sigsq.q.A = sigsq.q.A, sigsq.q.B = sigsq.q.B,
-       iter = itNum, flag = flag,
-       time = difftime(endTime, startTime, units = "secs"),
-       ELBO = NA_real_,
-       path = list(v0 = v0_seq, n_stage = n_stage, stage_iters = stage_iters))
+  out <- list(A = mu.q.A, B = mu.q.B,
+              pi_A = pi_A, pi_B = pi_B,
+              Q_A = Q_A, Q_B = Q_B,
+              eta = mu.F, Phi = cov2cor(Sig), Sig = Sig, U = U, V = V,
+              rho = RHO, theta = Theta,
+              A_var = sigsq.q.A, B_var = sigsq.q.B,
+              iter = itNum, flag = flag,
+              time = difftime(endTime, startTime, units = "secs"),
+              ELBO = NA_real_,
+              path = list(v0 = v0_seq, n_stage = n_stage,
+                          stage_iters = stage_iters))
+  class(out) <- c("vbmimic", "vbpm_fit")
+  out
 }

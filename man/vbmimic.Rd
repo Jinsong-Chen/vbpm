@@ -50,21 +50,23 @@ analogous behaviour here.}
 weighted residual vector.}
 }
 \value{
-A list with components:
+An object of class \code{c("vbmimic", "vbpm_fit")} — a named list (see
+\link{vbpm_fit}) with components:
 \describe{
 \item{A}{\verb{J x K} posterior mean measurement loadings.}
 \item{B}{\verb{K x P} posterior mean structural coefficients.}
 \item{pi_A, pi_B}{Posterior inclusion probabilities for the unspecified
 entries of \code{Q_A} and \code{Q_B} (specified entries are held at 1, fixed
 zeros at 0).}
+\item{Q_A, Q_B}{The design matrices the model was fit with.}
 \item{eta}{\verb{N x K} posterior mean factor scores.}
 \item{Phi}{\verb{K x K} factor correlation matrix implied by \code{Sig}.}
 \item{Sig, U}{Factor covariance matrix and its inverse.}
 \item{V}{Length-\code{J} residual precisions.}
 \item{rho, theta}{Inclusion rates for the measurement and structural
 parts.}
-\item{sigsq.q.A, sigsq.q.B}{Posterior variances of the loadings and
-structural coefficients.}
+\item{A_var, B_var}{Posterior variances of the loadings and structural
+coefficients.}
 \item{iter, flag, time}{Total iterations, \code{1} if the final stage
 converged within \code{max_it} (else \code{0}), and elapsed time.}
 \item{ELBO}{\code{NA_real_}; see Note.}

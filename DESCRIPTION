@@ -1,7 +1,7 @@
 Package: vbpm
 Type: Package
 Title: Variational Bayes Psychometric Models
-Version: 0.2.0
+Version: 0.3.0
 Authors@R: c(
     person("Jinsong", "Chen", email = "jinsong.chen@live.com",
            role = c("aut", "cre"),
@@ -30,14 +30,20 @@ Encoding: UTF-8
 LazyData: true
 Roxygen: list(markdown = TRUE)
 Depends: R (>= 4.1)
-Imports: Rcpp, MASS, stats
-LinkingTo: Rcpp, RcppArmadillo
-Suggests: numDeriv, testthat (>= 3.0.0)
+Imports:
+    Rcpp,
+    MASS,
+    stats
+LinkingTo:
+    Rcpp,
+    RcppArmadillo
+Suggests:
+    numDeriv,
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
 Config/testthat/edition: 3
+VignetteBuilder: knitr
 URL: https://github.com/Jinsong-Chen/vbpm
 BugReports: https://github.com/Jinsong-Chen/vbpm/issues
 Config/roxygen2/version: 8.0.0
-Author: Jinsong Chen [aut, cre] (ORCID:
-    <https://orcid.org/0000-0002-0157-5469>),
-  Yi Jin [aut] (first author of the method papers and the estimator)
-Maintainer: Jinsong Chen <jinsong.chen@live.com>

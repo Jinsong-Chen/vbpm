@@ -25,6 +25,11 @@ test_that("vbmimic recovers the structural pattern up to factor permutation", {
   expect_true(is.na(f$ELBO))                     # documented: no ELBO yet
   expect_equal(dim(f$A), c(18L, 3L))
   expect_equal(dim(f$B), c(3L, 9L))
+  expect_s3_class(f, "vbmimic")
+  expect_s3_class(f, "vbpm_fit")
+  out <- capture.output(print(f))
+  expect_true(any(grepl("MIMIC", out)))
+  expect_named(coef(f), c("A", "B"))
 
   ## same covariate blocks, allowing for label switching
   truth <- apply(B != 0, 1, function(r) paste(which(r), collapse = ","))

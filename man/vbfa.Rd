@@ -12,7 +12,7 @@ vbfa(
   orthogonal = FALSE,
   v0 = c(0.01, 0.005, 0.002, 0.001),
   max_it = 5000,
-  convChk = TRUE,
+  convChk = FALSE,
   tolVal = 1e-04,
   ld_control = list()
 )
@@ -61,7 +61,9 @@ spike.}
 
 \item{max_it}{Maximum variational iterations \strong{per stage}. Default \code{5000}.}
 
-\item{convChk}{Logical; print per-iteration relative error. Default \code{TRUE}.}
+\item{convChk}{Logical; report per-iteration relative error via
+\code{\link[=message]{message()}} (so it can be silenced with \code{\link[=suppressMessages]{suppressMessages()}}). Default
+\code{FALSE} (quiet).}
 
 \item{tolVal}{Convergence tolerance on the maximum relative error.}
 
@@ -73,15 +75,33 @@ default \code{0.01}), \code{diag_penalty} (\code{1} penalizes the precision diag
 prior parameters \code{a1}, \code{b1} on the local-dependence proportion.}
 }
 \value{
-A list with elements including \code{Lam} (posterior mean loadings),
-\code{eta} (word/observation factor scores), \code{Phi} (factor correlation; the
-identity when \code{orthogonal = TRUE}), \code{pi} (posterior inclusion
-probabilities), \code{PsiInv} (residual precisions; \code{NULL} under local
-dependence), \code{ELBO} (evidence lower bound; \code{NA} under local dependence),
-\code{iter}, \code{flag} (\code{1} if converged), \code{orthogonal} and \code{ld} (the settings the
-model was fit with), and — when \code{ld = TRUE} — the residual precision
-\code{Psi}, its inverse \code{W}, the residual-edge activeness \code{q_star}, and path
-metadata.
+An object of class \code{c("vbfa", "vbpm_fit")} — a named list (see
+\link{vbpm_fit} for what the class does and does not change) with elements:
+\describe{
+\item{Lam}{\verb{J x K} posterior mean loadings.}
+\item{pi}{Posterior inclusion probabilities of the unspecified loadings
+(specified entries are reported as coded in \code{Q}).}
+\item{eta}{\verb{N x K} posterior mean factor scores.}
+\item{Phi}{Factor correlation matrix; the identity when
+\code{orthogonal = TRUE}.}
+\item{PsiInv}{Residual precisions; \code{NULL} when \code{ld = TRUE}.}
+\item{ELBO}{Evidence lower bound; \code{NA} when \code{ld = TRUE}.}
+\item{rho}{Posterior inclusion rate of the unspecified loadings.}
+\item{Lam_var}{Posterior variances of the loadings.}
+\item{eta_cov}{Posterior covariance of the factor scores.}
+\item{Phi_inv_mean}{Posterior mean of the factor precision,
+E[Phi^-1].}
+\item{iter, flag, time}{Total iterations, \code{1} if the final stage
+converged within \code{max_it} (else \code{0}), and elapsed time.}
+\item{Q, Qe, orthogonal, ld}{The design matrices and settings the model
+was fit with (\code{Qe} is \code{NULL} when \code{ld = FALSE}); read by \code{\link[=vb_fit]{vb_fit()}}
+and \code{\link[=print.vbpm_fit]{print.vbpm_fit()}} so they never need repeating.}
+\item{Psi, W, q_star, xi_star, tau}{Local-dependence results (\code{NULL}
+when \code{ld = FALSE}): residual precision, its inverse, residual-edge
+inclusion probabilities, edge shrinkage, and the LD proportion.}
+\item{path}{The \code{v0} schedule (and \code{xi0} under LD) with per-stage
+iteration counts.}
+}
 }
 \description{
 Fits a partially confirmatory factor-analytic measurement model by
@@ -109,7 +129,7 @@ release; see \code{NEWS}.
 sim <- sim_fa(N = 300, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
 Q <- matrix(-1L, ncol(sim$dat), 3)
 for (k in 1:3) { a <- which(rep(1:3, each = 6) == k)[1:2]; Q[a, ] <- 0; Q[a, k] <- 1 }
-fit <- vbfa(sim$dat, Q, convChk = FALSE)
+fit <- vbfa(sim$dat, Q)
 fit$flag                    # 1 if converged
 round(fit$Lam, 2)           # loadings
 round(fit$pi, 2)            # posterior inclusion probabilities
@@ -117,13 +137,13 @@ round(fit$pi, 2)            # posterior inclusion probabilities
 \donttest{
 ## orthogonal bifactor: one general column plus the group factors
 Qb  <- cbind(1L, Q)
-fb  <- vbfa(sim$dat, Qb, orthogonal = TRUE, convChk = FALSE)
+fb  <- vbfa(sim$dat, Qb, orthogonal = TRUE)
 fb$Phi                      # identity by construction
 
 ## local dependence: simulate correlated residuals, then set ld = TRUE
 simLD <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, lac = .3, ecr = .3,
                 rseed = 2)
-fLD <- vbfa(simLD$dat, Q, ld = TRUE, convChk = FALSE, max_it = 300,
+fLD <- vbfa(simLD$dat, Q, ld = TRUE, max_it = 300,
             tolVal = 1e-3)
 ## largest recovered residual edges vs the planted ones
 Poff <- abs(fLD$Psi); Poff[lower.tri(Poff, diag = TRUE)] <- 0
@@ -135,7 +155,7 @@ simLD$ofd_ind
 ## polytomous items are treated as continuous for this illustration.
 data(nlsy27)
 Yn <- as.matrix(nlsy27$dat[stats::complete.cases(nlsy27$dat), ])
-fn <- vbfa(Yn, nlsy27$Q, convChk = FALSE)
+fn <- vbfa(Yn, nlsy27$Q)
 round(fn$Lam, 2)
 }
 

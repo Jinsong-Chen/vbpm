@@ -1,3 +1,37 @@
+# vbpm 0.3.0
+
+Fits are now classed objects, output names are plain-language, the default is
+quiet, and the package has vignettes. One release, one breaking-change window,
+before any public release — no public API ever carried the old behaviour.
+
+* **S3 class `vbpm_fit`.** `vbfa()` returns `c("vbfa", "vbpm_fit")` and
+  `vbmimic()` returns `c("vbmimic", "vbpm_fit")`. A fit is still a plain named
+  list — `fit$Lam` etc. are unchanged and remain public API — but `print(fit)`
+  now shows a compact summary instead of dumping every matrix, and `coef()`
+  works. See `?vbpm_fit` for exactly what the class does and does not change.
+* **Fits carry their own settings and designs.** `Q` (and `Qe`, `Q_A`, `Q_B`),
+  `orthogonal`, and `ld` are stored in the fit, which is how `vb_fit()` and
+  `print()` know what they are looking at without being told.
+* **Output renames** (the variational `.q.` notation stays *inside* the
+  estimators, where it mirrors the papers' derivations; the returned names are
+  now plain language):
+  * `sigsq.q.Lam` -> `Lam_var`, `PHI.q.eta` -> `eta_cov`,
+    `M.q.PHIiver` -> `Phi_inv_mean` (in `vbfa()`);
+  * `sigsq.q.A`/`sigsq.q.B` -> `A_var`/`B_var` (in `vbmimic()`);
+  * `plotDat` dropped (always-`NULL` placeholder).
+* **Quiet by default.** `vbfa(convChk = FALSE)` is now the default, and
+  progress goes through `message()` (suppressible) instead of `cat()`.
+  `vbmimic()` already behaved this way.
+* **Vignettes**: "Getting started with vbpm" (Q design, fitting, fit
+  statistics, factor-number selection, bifactor, local dependence, the NLSY
+  empirical example, and turning graded prior knowledge into a Q matrix) and
+  "MIMIC models with vbmimic".
+* **Stored-reference regression test**: `vbfa(v0 = 0.001)` is now proven
+  bit-identical to the frozen fixed-spike estimator behind the 2025 SEM paper
+  (fixture generated from the original source; 79 iterations, all deltas
+  exactly zero). This is the guarantee that lets analysis code migrate from
+  the historical scripts to the package.
+
 # vbpm 0.2.0
 
 * `vbmimic()` — regularized variational Bayes for extended multiple-indicators

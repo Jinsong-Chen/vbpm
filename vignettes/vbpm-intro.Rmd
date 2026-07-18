@@ -1,0 +1,221 @@
+---
+title: "Getting started with vbpm: partially confirmatory factor analysis"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with vbpm: partially confirmatory factor analysis}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(vbpm)
+```
+
+`vbpm` estimates psychometric measurement models by regularized mean-field
+variational Bayes. Its models are *partially confirmatory*: instead of choosing
+between a confirmatory analysis (every loading prespecified) and an exploratory
+one (nothing prespecified), you specify what you know and let continuous
+spike-and-slab priors select the rest from the data.
+
+This vignette walks the factor-analysis side of the package: designing a `Q`
+matrix, fitting with `vbfa()`, reading the fit, computing fit statistics with
+`vb_fit()`, selecting the number of factors with `pefa()`, and two special
+modes (bifactor and local dependence). It ends with an empirical example and
+with a recipe for turning *graded* prior knowledge into a `Q` matrix.
+
+## The design matrix Q
+
+Everything starts with a `J x K` integer matrix with three codes:
+
+| code | meaning |
+|------|---------|
+| `1`  | **specified** (anchored): the loading is estimated freely, with no spike — you assert this item measures this factor |
+| `0`  | **fixed zero**: the loading is constrained to zero — you assert it does not |
+| `-1` | **unspecified**: the data decide, via a spike-and-slab prior; the fit reports a posterior inclusion probability (PIP) |
+
+A fully confirmatory model has no `-1`; a fully exploratory one is all `-1`
+(plus enough anchors to identify the factors). Everything between is the
+partially confirmatory continuum.
+
+## Simulate, design, fit
+
+`sim_fa()` generates factor-analytic data from a loading *pattern*: `K` factors,
+`ipf` items per factor, primary loadings `lam`, cross-loadings `lac`.
+
+```{r fit}
+sim <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
+Y <- sim$dat
+
+## two anchors per factor; everything else left to the data
+Q <- matrix(-1L, ncol(Y), 3)
+for (k in 1:3) {
+  a <- which(rep(1:3, each = 6) == k)[1:2]
+  Q[a, ] <- 0L
+  Q[a, k] <- 1L
+}
+
+fit <- vbfa(Y, Q)
+fit
+```
+
+Typing the fit's name gives the compact summary above — the object carries an
+S3 class (`vbpm_fit`), but it is still an ordinary list underneath and every
+component is public API (see `?vbpm_fit`):
+
+```{r access}
+round(fit$Lam[1:6, ], 2)   # posterior mean loadings
+round(fit$pi[1:6, ], 2)    # PIPs of the unspecified entries
+round(fit$Phi, 2)          # factor correlations (oblique by default)
+```
+
+A loading is conventionally treated as *active* when its PIP is at least .5.
+Compare recovered structure against the truth:
+
+```{r recovery}
+active <- (Q == 1) | (Q == -1 & fit$pi >= .5)
+table(truth = sim$MLA != 0, active = active)
+```
+
+Two properties worth knowing. The estimator is **deterministic** — fixed
+initialization, no random numbers — so there is no seed to set and two runs are
+bit-identical. And the default `v0` is a decreasing *vector*, a warm-started
+regularization path; a scalar `v0 = 0.001` reproduces the fixed-spike estimator
+of Jin & Chen (2025) exactly. When a hard model fails to converge, prefer a
+gentler, longer path over raising `max_it`:
+
+```{r path, eval = FALSE}
+fit_gentle <- vbfa(Y, Q, v0 = exp(seq(log(0.05), log(0.001), length.out = 10)))
+```
+
+## Fit statistics
+
+`vb_fit()` computes SEM-like statistics for a fit, with hard selection
+(PIP >= `tau`) as the default:
+
+```{r vbfit}
+round(vb_fit(fit, Y, Q), 3)
+```
+
+`t_nom`/`t`/`t_S` are parameter counts (nominal, rank-adjusted, soft), the rest
+are the usual absolute and information indices. The function reads `orthogonal`
+and `ld` from the fit object itself, so a bifactor fit needs no extra argument
+— and supplying a contradictory one is an error, not a silent miscount.
+
+## How many factors? pefa() and the gain rule
+
+`pefa()` sweeps a window of factor counts, holding your partially confirmatory
+backbone fixed and padding with exploratory columns, then selects K with a
+scale-free *gain rule*: a factor is worth keeping while its marginal ELBO gain
+is at least `delta` percent of the largest gain in the window (with a
+sustained-drop guard against transient dips).
+
+```{r pefa}
+Q0 <- Q[, 1:2, drop = FALSE]   # pretend we only know two factors exist
+r  <- pefa(Q0, Y, Kmin = 2, Kmax = 4, verbose = FALSE)
+r$selected_K
+r$sweep[, c("K", "ELBO", "BIC", "CFI", "flag")]
+```
+
+The rule itself is exported, so you can apply it to any criterion curve:
+
+```{r elbow}
+select_K_elbow(K = r$sweep$K, score = r$sweep$ELBO)
+```
+
+## Bifactor models
+
+`orthogonal = TRUE` fixes the factor correlation at the identity. With a design
+whose first column is a general factor (all items load) plus group columns,
+this is an identified orthogonal bifactor model:
+
+```{r bifactor}
+Qb <- cbind(1L, Q)
+fb <- vbfa(Y, Qb, orthogonal = TRUE)
+fb$Phi[1:3, 1:3]           # identity by construction
+round(vb_fit(fb, Y, Qb), 3)
+```
+
+## Local dependence
+
+Correlated residuals (e.g. testlets, shared stems) are handled by a *graphical*
+spike-and-slab prior on the residual precision, solved by QUIC. Turn it on with
+`ld = TRUE`; by default the search is fully exploratory, or restrict it with a
+`J x J` design `Qe` using the same `-1/0/1` codes.
+
+```{r ld}
+simLD <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, lac = .3, ecr = .3,
+                rseed = 2)
+fLD <- vbfa(simLD$dat, Q, ld = TRUE, max_it = 300, tolVal = 1e-3)
+
+## the largest recovered residual edges, vs the planted pairs
+Poff <- abs(fLD$Psi); Poff[lower.tri(Poff, diag = TRUE)] <- 0
+which(Poff >= sort(Poff, decreasing = TRUE)[3], arr.ind = TRUE)
+simLD$ofd_ind
+```
+
+Two current limitations, both documented in `NEWS`: the ELBO is `NA` under
+local dependence, and `vb_fit()` refuses LD fits rather than computing
+statistics on the wrong implied covariance.
+
+## An empirical example: NLSY 1997
+
+`nlsy27` ships with the package: 3,458 respondents, 27 mixed-type items, and an
+initial three-factor design with two to three anchors per factor.
+
+```{r nlsy}
+data(nlsy27)
+## vbfa() does not support NA yet -> complete cases; the 17 polytomous items
+## are treated as continuous for this illustration
+Yn <- as.matrix(nlsy27$dat[stats::complete.cases(nlsy27$dat), ])
+dim(Yn)
+fn <- vbfa(Yn, nlsy27$Q)
+fn
+round(fn$Lam, 2)
+```
+
+## From graded knowledge to a Q matrix
+
+Prior knowledge is often *graded* rather than crisp — say, a membership score
+`S[j, k]` in `[0, 1]` for item `j` on factor `k`, from expert ratings, text
+similarity, or a clustering consensus. A practical thresholding rule turns such
+scores into a partially confirmatory `Q`:
+
+* **anchor** (`1`) where the evidence is strong: `S > .80`;
+* **leave to the data** (`-1`) where it is equivocal: `.20 <= S <= .80`;
+* **exclude** (`0`) where it is absent: `S < .20`.
+
+```{r softq}
+## a toy graded membership matrix for the simulated items
+set.seed(3)
+S <- matrix(runif(18 * 3, 0, .2), 18, 3)          # baseline noise
+S[cbind(1:18, rep(1:3, each = 6))] <- runif(18, .55, .95)  # true memberships
+
+Qsoft <- matrix(0L, 18, 3)
+Qsoft[S >= .20 & S <= .80] <- -1L
+Qsoft[S >= .80] <- 1L
+table(Qsoft)
+
+fsoft <- vbfa(Y, Qsoft)
+fsoft$flag
+```
+
+This costs no new machinery — it is simply a disciplined way to build `Q` — and
+it uses the graded information honestly: strong evidence anchors, equivocal
+evidence is *tested* rather than assumed, absence excludes. (A deeper version,
+in which the graded scores enter the prior itself as per-element inclusion
+probabilities, is on the package roadmap.)
+
+## References
+
+* Chen, J., Guo, Z., Zhang, L., & Pan, J. (2021). A partially confirmatory
+  approach to scale development with the Bayesian Lasso. *Psychological
+  Methods*, 26(2), 210–235.
+* Chen, J. (2023). Fully and partially exploratory factor analysis with
+  bi-level Bayesian regularization. *Behavior Research Methods*, 55(4),
+  2125–2142.
+* Jin, Y., & Chen, J. (2025). Regularized variational approximation for
+  partially confirmatory factor analysis. *Structural Equation Modeling*,
+  32(3), 437–449.
+* Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
+  Bayesian variable selection. *arXiv:2607.07159*.

@@ -54,7 +54,9 @@ logC_igw <- function(xi, Lam, P) {
 #'   Keep the endpoint at your target; log spacing suits the multiplicative
 #'   spike.
 #' @param max_it Maximum variational iterations **per stage**. Default `5000`.
-#' @param convChk Logical; print per-iteration relative error. Default `TRUE`.
+#' @param convChk Logical; report per-iteration relative error via
+#'   [message()] (so it can be silenced with [suppressMessages()]). Default
+#'   `FALSE` (quiet).
 #' @param tolVal Convergence tolerance on the maximum relative error.
 #' @param ld_control A named list of local-dependence controls, read only when
 #'   `ld = TRUE`: `xi0` (spike-penalty path, units of `N`; default
@@ -63,15 +65,33 @@ logC_igw <- function(xi, Lam, P) {
 #'   `xi1`, `0` leaves it unpenalized), `quic_eps`, `quic_max_it`, and the Beta
 #'   prior parameters `a1`, `b1` on the local-dependence proportion.
 #'
-#' @return A list with elements including `Lam` (posterior mean loadings),
-#'   `eta` (word/observation factor scores), `Phi` (factor correlation; the
-#'   identity when `orthogonal = TRUE`), `pi` (posterior inclusion
-#'   probabilities), `PsiInv` (residual precisions; `NULL` under local
-#'   dependence), `ELBO` (evidence lower bound; `NA` under local dependence),
-#'   `iter`, `flag` (`1` if converged), `orthogonal` and `ld` (the settings the
-#'   model was fit with), and — when `ld = TRUE` — the residual precision
-#'   `Psi`, its inverse `W`, the residual-edge activeness `q_star`, and path
-#'   metadata.
+#' @return An object of class `c("vbfa", "vbpm_fit")` — a named list (see
+#'   [vbpm_fit] for what the class does and does not change) with elements:
+#'   \describe{
+#'     \item{Lam}{`J x K` posterior mean loadings.}
+#'     \item{pi}{Posterior inclusion probabilities of the unspecified loadings
+#'       (specified entries are reported as coded in `Q`).}
+#'     \item{eta}{`N x K` posterior mean factor scores.}
+#'     \item{Phi}{Factor correlation matrix; the identity when
+#'       `orthogonal = TRUE`.}
+#'     \item{PsiInv}{Residual precisions; `NULL` when `ld = TRUE`.}
+#'     \item{ELBO}{Evidence lower bound; `NA` when `ld = TRUE`.}
+#'     \item{rho}{Posterior inclusion rate of the unspecified loadings.}
+#'     \item{Lam_var}{Posterior variances of the loadings.}
+#'     \item{eta_cov}{Posterior covariance of the factor scores.}
+#'     \item{Phi_inv_mean}{Posterior mean of the factor precision,
+#'       E\[Phi^-1\].}
+#'     \item{iter, flag, time}{Total iterations, `1` if the final stage
+#'       converged within `max_it` (else `0`), and elapsed time.}
+#'     \item{Q, Qe, orthogonal, ld}{The design matrices and settings the model
+#'       was fit with (`Qe` is `NULL` when `ld = FALSE`); read by [vb_fit()]
+#'       and [print.vbpm_fit()] so they never need repeating.}
+#'     \item{Psi, W, q_star, xi_star, tau}{Local-dependence results (`NULL`
+#'       when `ld = FALSE`): residual precision, its inverse, residual-edge
+#'       inclusion probabilities, edge shrinkage, and the LD proportion.}
+#'     \item{path}{The `v0` schedule (and `xi0` under LD) with per-stage
+#'       iteration counts.}
+#'   }
 #'
 #' @section Notes:
 #' The diagonal-residual estimator is **deterministic** (fixed initialization,
@@ -101,7 +121,7 @@ logC_igw <- function(xi, Lam, P) {
 #' sim <- sim_fa(N = 300, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
 #' Q <- matrix(-1L, ncol(sim$dat), 3)
 #' for (k in 1:3) { a <- which(rep(1:3, each = 6) == k)[1:2]; Q[a, ] <- 0; Q[a, k] <- 1 }
-#' fit <- vbfa(sim$dat, Q, convChk = FALSE)
+#' fit <- vbfa(sim$dat, Q)
 #' fit$flag                    # 1 if converged
 #' round(fit$Lam, 2)           # loadings
 #' round(fit$pi, 2)            # posterior inclusion probabilities
@@ -109,13 +129,13 @@ logC_igw <- function(xi, Lam, P) {
 #' \donttest{
 #' ## orthogonal bifactor: one general column plus the group factors
 #' Qb  <- cbind(1L, Q)
-#' fb  <- vbfa(sim$dat, Qb, orthogonal = TRUE, convChk = FALSE)
+#' fb  <- vbfa(sim$dat, Qb, orthogonal = TRUE)
 #' fb$Phi                      # identity by construction
 #'
 #' ## local dependence: simulate correlated residuals, then set ld = TRUE
 #' simLD <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, lac = .3, ecr = .3,
 #'                 rseed = 2)
-#' fLD <- vbfa(simLD$dat, Q, ld = TRUE, convChk = FALSE, max_it = 300,
+#' fLD <- vbfa(simLD$dat, Q, ld = TRUE, max_it = 300,
 #'             tolVal = 1e-3)
 #' ## largest recovered residual edges vs the planted ones
 #' Poff <- abs(fLD$Psi); Poff[lower.tri(Poff, diag = TRUE)] <- 0
@@ -127,14 +147,14 @@ logC_igw <- function(xi, Lam, P) {
 #' ## polytomous items are treated as continuous for this illustration.
 #' data(nlsy27)
 #' Yn <- as.matrix(nlsy27$dat[stats::complete.cases(nlsy27$dat), ])
-#' fn <- vbfa(Yn, nlsy27$Q, convChk = FALSE)
+#' fn <- vbfa(Yn, nlsy27$Q)
 #' round(fn$Lam, 2)
 #' }
 #'
 #' @export
 vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
                  v0 = c(0.01, 0.005, 0.002, 0.001),
-                 max_it = 5000, convChk = TRUE, tolVal = 1e-4,
+                 max_it = 5000, convChk = FALSE, tolVal = 1e-4,
                  ld_control = list()) {
 
   ## ---- input checks --------------------------------------------------
@@ -242,7 +262,6 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
   a.q.psi <- rep(N / 2 + a, J)
   b.q.psi <- rep(b, J)
   mu.q.psiInv <- rep(1, J)
-  plotDat <- NULL
 
   a0 <- 1
   b0 <- 1
@@ -278,9 +297,8 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
     stage_it <- 0
     flag <- 0        # reset per stage; reflects the FINAL stage on return
     if (convChk && n_stage > 1)
-      cat("Stage", stage, "/", n_stage, ": v0 =", signif(v0, 4),
-          if (ld) paste0("; xi0 = ", signif(xi0_seq[stage], 4), " * N"),
-          "\n")
+      message("Stage ", stage, "/", n_stage, ": v0 = ", signif(v0, 4),
+              if (ld) paste0("; xi0 = ", signif(xi0_seq[stage], 4), " * N"))
 
     while (!converged) {
       itNum <- itNum + 1
@@ -455,10 +473,9 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
         relErrTemp <- abs(parVecHat - parVecHatPrev)
         relErrTemp[is.nan(relErrTemp)] <- 0
         relErr <- max(relErrTemp)
-        plotDat <- append(plotDat, relErr)
-        if (convChk == TRUE)
-          cat("Iteration number:", itNum, ";",
-              "MFVB relative error:", signif(relErr, 5), "\n")
+        if (convChk)
+          message("Iteration ", itNum, "; MFVB relative error: ",
+                  signif(relErr, 5))
         if (relErr < tolVal) {
           converged <- TRUE
           flag <- 1
@@ -532,17 +549,24 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
   MFVBendTime <- Sys.time()
   MFVBtime <- MFVBendTime - MFVBstartTime
 
-  out <- list(sigsq.q.Lam = sigsq.q.Lam, iter = itNum,
-              PHI.q.eta = PHI.q.eta, eta = mu.q.eta,
+  ## Output names are the public API and use plain-language names; the VB
+  ## notation (mu.q.*, PHI.q.eta, ...) stays inside the estimator, where it
+  ## mirrors the papers' derivations. Renamed at 0.3.0:
+  ##   sigsq.q.Lam -> Lam_var, PHI.q.eta -> eta_cov,
+  ##   M.q.PHIiver -> Phi_inv_mean; plotDat dropped.
+  out <- list(Lam = mu.q.Lam, pi = q, eta = mu.q.eta,
               Phi = if (orthogonal) diag(1, P, P) else cov2cor(Lam.q.PHI),
-              M.q.PHIiver = M.q.PHIiver, time = MFVBtime,
               PsiInv = if (!ld) mu.q.psiInv else NULL,
-              plotDat = plotDat, flag = flag, Lam = mu.q.Lam, pi = q,
               ELBO = ELBO, rho = rho,
+              Lam_var = sigsq.q.Lam,        # posterior variances of loadings
+              eta_cov = PHI.q.eta,          # posterior covariance of scores
+              Phi_inv_mean = M.q.PHIiver,   # E[Phi^-1] under q
+              iter = itNum, flag = flag, time = MFVBtime,
               ## settings the model was fit with, so downstream consumers
-              ## (vb_fit) need not be told twice
+              ## (vb_fit, print) need not be told twice
+              Q = Q, Qe = if (ld) Qe else NULL,
               orthogonal = orthogonal, ld = ld,
-              ## LD extras (NULL when Qe = NULL)
+              ## LD extras (NULL when ld = FALSE)
               Psi = if (ld) Psi else NULL,
               W = if (ld) W else NULL,
               q_star = if (ld) q_star else NULL,
@@ -552,5 +576,6 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
               path = list(v0 = v0_seq,
                           xi0 = if (ld) xi0_seq else NULL,
                           n_stage = n_stage, stage_iters = stage_iters))
-  return(out)
+  class(out) <- c("vbfa", "vbpm_fit")
+  out
 }
