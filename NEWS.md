@@ -91,7 +91,10 @@ First release.
 * `sim_fa()` — simulate factor-analytic and IRT data with cross-loadings,
   local dependence, minor factors, categorical responses, and missingness.
 
-## Not yet implemented (planned for 0.1.1 / 0.2)
+## Not implemented in this first release
+
+(For the current status of these, see "Known limitations" in `README.md` —
+as of 0.3.0 all three are still outstanding.)
 
 * Missing-data support in `vbfa()` (currently errors on `NA`).
 * ELBO under the local-dependence model (currently `NA`).

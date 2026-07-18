@@ -44,12 +44,38 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
 
 ## Installation
 
+A C++ toolchain is required to compile the QUIC solver (Rtools on Windows,
+Xcode command line tools on macOS).
+
+The repository is currently **private**, so `install_github()` needs a GitHub
+personal access token with `repo` scope — create one at
+<https://github.com/settings/tokens>, then:
+
 ```r
 # install.packages("remotes")
-remotes::install_github("Jinsong-Chen/vbpm")
+remotes::install_github("Jinsong-Chen/vbpm",
+                        auth_token   = "ghp_...",   # or set GITHUB_PAT
+                        build_vignettes = TRUE)
 ```
 
-A C++ toolchain is required to compile the QUIC solver (Rtools on Windows).
+Or, avoiding tokens entirely, clone and install from source:
+
+```sh
+git clone https://github.com/Jinsong-Chen/vbpm.git
+R CMD INSTALL vbpm
+```
+
+Then:
+
+```r
+library(vbpm)
+vignette("vbpm-intro")   # start here
+vignette("vbmimic")
+citation("vbpm")
+```
+
+Building the vignettes needs `knitr`, `rmarkdown`, and pandoc (bundled with
+RStudio; from a plain shell, point `RSTUDIO_PANDOC` at it).
 
 ## Quick start
 
@@ -118,7 +144,26 @@ round(fit$B, 2)                      # which covariates predict which factors
   analysis. *arXiv preprint* arXiv:2607.07159.
   <https://arxiv.org/abs/2607.07159>
 
-See `NEWS.md` for the current feature set and roadmap.
+## Known limitations
+
+As of 0.3.0:
+
+- **Missing data.** `vbfa()` and `vbmimic()` reject `NA` rather than imputing;
+  handle missingness beforehand. In-loop imputation is planned.
+- **ELBO under local dependence.** `vbfa(ld = TRUE)` returns `ELBO = NA`, and
+  `vb_fit()` refuses local-dependence fits rather than computing statistics on
+  the wrong implied covariance.
+- **ELBO for MIMIC.** `vbmimic()` converges on a residual criterion rather than
+  the bound, so `ELBO` is `NA` and `vb_fit()`/`pefa()` do not accept its fits.
+- **Fully exploratory MIMIC.** With both `Q_A` and `Q_B` left entirely
+  unspecified the model converges cleanly but the solution can be rotationally
+  ambiguous. Anchor at least one part.
+
+Both estimators reproduce their published references bit-for-bit, and the
+`vbfa` guarantee is enforced by a stored-reference regression test that runs on
+every `R CMD check`.
+
+See `NEWS.md` for the per-version changelog.
 
 ## License
 
