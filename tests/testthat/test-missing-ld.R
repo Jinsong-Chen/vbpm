@@ -288,3 +288,38 @@ test_that("plot.pefa draws its three panels without error", {
   expect_silent(plot(r, type = "gain"))
   expect_silent(plot(r, type = "fit"))
 })
+
+## ---- item 5b: the terminal VECM objective ------------------------------
+
+test_that("the VECM objective is monotone within a single stage", {
+  ## Empirical half of verification item 5b. The analytical half -- a
+  ## term-by-term check against Eq. (Qpsi) of the V4 manuscript -- is recorded
+  ## in dev/vbpm_extension_design.qmd section 8.1. A single stage is forced by
+  ## a scalar v0 AND a single xi0, since n_stage is the max of the two lengths.
+  ## Across a stage boundary a decrease would be legitimate (v0 changes there).
+  d <- ld_dat(N = 350, seed = 5)
+  ctrl <- list(xi0 = 1)
+  its <- c(5, 15, 30, 60, 100)
+  obj <- vapply(its, function(m) {
+    f <- suppressWarnings(vbfa(d$Y, d$Q, ld = TRUE, v0 = 0.001,
+                               ld_control = ctrl, max_it = m, tolVal = 1e-12))
+    expect_equal(f$path$n_stage, 1L)
+    f$objective
+  }, numeric(1))
+  expect_true(all(is.finite(obj)))
+  ## non-decreasing up to floating point at convergence
+  expect_true(all(diff(obj) > -1e-6))
+})
+
+test_that("objective_terms decompose the objective exactly", {
+  d <- ld_dat(N = 300, seed = 6)
+  f <- vbfa(d$Y, d$Q, ld = TRUE, max_it = 120, tolVal = 1e-3)
+  expect_named(f$objective_terms,
+               c("likelihood", "latent", "loadings", "edges", "diagonal", "tau"))
+  expect_true(all(is.finite(f$objective_terms)))
+  expect_equal(sum(f$objective_terms), f$objective)
+  ## ELBO_conditional is the VE-step part: likelihood + latent + loadings,
+  ## i.e. Eq. (3); the objective adds the Psi/tau prior terms on top.
+  expect_equal(unname(sum(f$objective_terms[c("likelihood", "latent", "loadings")])),
+               f$ELBO_conditional)
+})
