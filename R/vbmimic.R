@@ -77,8 +77,12 @@
 #' @note The evidence lower bound is **not** currently returned. The published
 #'   algorithm converges on the weighted residual vector rather than on the
 #'   bound, and the bound's implementable closed form has not been assembled.
-#'   Because [fit_stats()] and [pefa()] are built on the ELBO, they do not accept
-#'   `vbmimic` fits; both raise an error rather than returning wrong numbers.
+#'   [fit_stats()] does accept a `vbmimic` fit, but returns a deliberately
+#'   limited result: `n_active_coef` (soft-selected measurement and structural
+#'   coefficients) plus typed `NA` for every covariance-based index and
+#'   parameter count, with an explanatory `note` attribute. [pefa()] does not
+#'   accept `vbmimic` fits at all, because factor-number selection needs a
+#'   comparable objective.
 #'
 #' @references
 #' Jin, Y., & Chen, J. (2025). Regularized variational Bayesian approximations

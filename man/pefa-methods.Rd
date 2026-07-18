@@ -39,7 +39,10 @@ input invisibly; \code{plot.pefa()} returns \code{x} invisibly.
 \description{
 A \code{\link[=pefa]{pefa()}} result is a sweep over a candidate factor-number window, not a
 separate fitted probability model. \code{summary()} aggregates the candidate
-fits and reports the raw ELBO, ELBO-gain, raw BIC, and BIC-gain selections.
+fits and reports the raw objective, objective-gain, raw BIC, and BIC-gain
+selections. The objective is the ELBO for diagonal VBFA sweeps and the
+terminal VECM objective for LD sweeps; ELBO-specific columns are reported
+only when every candidate has \code{objective_type = "elbo"}.
 \code{\link[=selected_fit]{selected_fit()}} extracts the actual fitted \code{\link[=vbfa]{vbfa()}} object selected by the
-primary ELBO-gain rule.
+primary objective-gain rule.
 }

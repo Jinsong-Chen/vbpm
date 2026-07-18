@@ -52,6 +52,26 @@
 #' @seealso [pefa()]
 #' @export
 select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
+  ## ---- input contract -------------------------------------------------
+  if (length(K) != length(score))
+    stop("K and score must have the same length (got ", length(K), " and ",
+         length(score), ").", call. = FALSE)
+  if (!length(K)) stop("K must not be empty.", call. = FALSE)
+  if (!is.numeric(K) || anyNA(K) || any(!is.finite(K)))
+    stop("K must be finite and numeric.", call. = FALSE)
+  if (any(K != round(K)))
+    stop("K must contain whole numbers.", call. = FALSE)
+  if (anyDuplicated(K))
+    stop("K must not contain duplicates.", call. = FALSE)
+  if (!is.numeric(score) || anyNA(score) || any(!is.finite(score)))
+    stop("score must be finite and numeric; drop or impute non-finite ",
+         "candidates before selecting.", call. = FALSE)
+  if (length(delta) != 1L || !is.finite(delta) || delta < 0 || delta > 100)
+    stop("delta must be a single number in [0, 100].", call. = FALSE)
+  if (length(sustain) != 1L || !is.finite(sustain) || sustain < 1 ||
+      sustain != round(sustain))
+    stop("sustain must be a single positive whole number.", call. = FALSE)
+
   o <- order(K); K <- K[o]; score <- score[o]
   if (length(K) == 1L) return(K)
   g <- diff(score)                       # marginal gain of adding each factor
@@ -83,7 +103,10 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #' @param cutoffs Named absolute-fit cutoffs used when `fit_cut = TRUE`.
 #' @param max_it,tau Passed to [vbfa()] / [fit_stats()] (`max_it` is per stage).
 #' @param orthogonal Passed to [vbfa()] and [fit_stats()].
-#' @param save_path Optional CSV checkpoint path (resume-safe).
+#' @param save_path Optional CSV checkpoint path. A sidecar
+#'   `<save_path>.manifest` records the data, design and every setting that
+#'   affects comparability; resuming refuses to proceed if any of them differ,
+#'   rather than pooling incomparable candidates.
 #' @param verbose Logical; print per-model progress.
 #' @param ... Further arguments passed to [vbfa()] (e.g. `v0`, `Qe`,
 #'   `ld_control`, `tolVal`).
@@ -114,7 +137,7 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #'                  Q0[a, ] <- 0L; Q0[a, k] <- 1L }
 #'
 #' r <- pefa(Q0, sim$dat, Kmin = 2, Kmax = 4, verbose = FALSE)
-#' summary(r)            # ELBO, ELBO-gain, BIC, and BIC-gain selections
+#' summary(r)            # objective, objective-gain, BIC and BIC-gain selections
 #' r$sweep               # the full sweep table (ELBO, gains, fit, timing)
 #' selected_fit(r)$flag  # the refitted selected model is returned
 #' }
@@ -129,13 +152,63 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
   Y  <- as.matrix(Y); Q0 <- as.matrix(Q0)
   J  <- ncol(Y); K0 <- ncol(Q0)
   if (nrow(Q0) != J) stop("nrow(Q0) must equal ncol(Y).", call. = FALSE)
+  ## Validate the window before fitting: Kmin:Kmax silently reverses when
+  ## Kmax < Kmin, which would sweep a different set than the user asked for.
+  for (nm in c("Kmin", "Kmax")) {
+    v <- get(nm)
+    if (length(v) != 1L || !is.finite(v) || v != round(v) || v < 1)
+      stop(nm, " must be a single positive whole number.", call. = FALSE)
+  }
+  if (Kmax < Kmin)
+    stop(sprintf("Kmax (%d) < Kmin (%d): the window must be non-decreasing.",
+                 Kmax, Kmin), call. = FALSE)
   if (Kmin < K0)
     stop(sprintf("Kmin (%d) < K0 (%d): the window must be at least the number of specified factors.",
                  Kmin, K0), call. = FALSE)
+  if (length(tau) != 1L || !is.finite(tau) || tau < 0 || tau > 1)
+    stop("tau must be a single number in [0, 1].", call. = FALSE)
   Ks  <- Kmin:Kmax
   pad <- function(K) if (K == K0) Q0 else cbind(Q0, matrix(-1L, J, K - K0))
 
-  done  <- if (!is.null(save_path) && file.exists(save_path)) read.csv(save_path) else NULL
+  ## ---- checkpoint provenance -------------------------------------------
+  ## Resuming a sweep by matching K alone would silently mix rows produced
+  ## from different data, designs or hyperparameters. A sidecar manifest
+  ## records everything that affects comparability across candidates; a
+  ## mismatch refuses the resume rather than pooling incomparable fits.
+  manifest_path <- if (!is.null(save_path)) paste0(save_path, ".manifest") else NULL
+  fingerprint <- if (is.null(save_path)) NULL else list(
+    n = nrow(Y), J = J, K0 = K0, window = c(Kmin, Kmax),
+    ## cheap but position-sensitive summaries of the data and the design
+    Y_sig  = c(sum(Y), sum(Y^2), sum(Y * seq_len(nrow(Y)))),
+    Q0_sig = paste(Q0, collapse = ""),
+    orthogonal = orthogonal, tau = tau, max_it = max_it,
+    delta = delta, sustain = sustain,
+    fit_cut = isTRUE(fit_cut), cutoffs = cutoffs,
+    dots = vapply(list(...), function(z) paste(format(z), collapse = ","),
+                  character(1)),
+    dot_names = names(list(...)))
+
+  done <- NULL
+  if (!is.null(save_path) && file.exists(save_path)) {
+    if (!file.exists(manifest_path))
+      stop("Checkpoint '", save_path, "' has no manifest, so its provenance ",
+           "cannot be verified. Delete it or choose a new save_path.",
+           call. = FALSE)
+    old <- readRDS(manifest_path)
+    if (!identical(old, fingerprint)) {
+      differing <- names(fingerprint)[
+        !vapply(names(fingerprint),
+                function(nm) identical(old[[nm]], fingerprint[[nm]]),
+                logical(1))]
+      stop("Checkpoint '", save_path, "' was produced under different ",
+           "settings (", paste(differing, collapse = ", "), "). Resuming ",
+           "would mix incomparable candidates. Delete it or choose a new ",
+           "save_path.", call. = FALSE)
+    }
+    done <- read.csv(save_path)
+  }
+  if (!is.null(save_path) && !file.exists(manifest_path))
+    saveRDS(fingerprint, manifest_path)
   fits  <- setNames(vector("list", length(Ks)), as.character(Ks))
   rows  <- vector("list", length(Ks))
 
@@ -254,9 +327,12 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
 #'
 #' A [pefa()] result is a sweep over a candidate factor-number window, not a
 #' separate fitted probability model. `summary()` aggregates the candidate
-#' fits and reports the raw ELBO, ELBO-gain, raw BIC, and BIC-gain selections.
+#' fits and reports the raw objective, objective-gain, raw BIC, and BIC-gain
+#' selections. The objective is the ELBO for diagonal VBFA sweeps and the
+#' terminal VECM objective for LD sweeps; ELBO-specific columns are reported
+#' only when every candidate has `objective_type = "elbo"`.
 #' [selected_fit()] extracts the actual fitted [vbfa()] object selected by the
-#' primary ELBO-gain rule.
+#' primary objective-gain rule.
 #'
 #' @param object,x A result returned by [pefa()].
 #' @param ... Further arguments. For `plot()`, graphical arguments passed to

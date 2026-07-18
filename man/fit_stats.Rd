@@ -59,9 +59,16 @@ package). Automatically skipped for large \code{J}.}
 (default \code{100}); the nominal parameter count is used instead.}
 }
 \value{
-A named numeric vector: \code{t_nom}, \code{t}, \code{t_S} (parameter counts),
-\code{RMSEA}, \code{SRMR}, \code{CFI}, \code{TLI}, \code{AIC}, \code{BIC} (hard selection), \code{AIC_S},
-\code{BIC_S} (soft selection), and \code{ELBO}.
+An object of class \code{vbpm_fit_stats} (a named numeric vector) with
+\code{t_nom}, \code{t}, \code{t_S} (parameter counts), \code{RMSEA}, \code{SRMR}, \code{CFI}, \code{TLI},
+\code{AIC}, \code{BIC} (hard selection), \code{AIC_S}, \code{BIC_S} (soft selection), \code{ELBO},
+and \code{objective}. The last is the model's comparability score: equal to
+\code{ELBO} for a diagonal fit, and the terminal VECM objective under local
+dependence, where \code{ELBO} is \code{NA}. It is comparable only across fits
+sharing the \code{objective_type} attribute, which is also attached.
+
+The \code{vbmimic} method returns the same shape with \code{n_active_coef} in place
+of a full soft count and typed \code{NA} elsewhere; see \code{\link[=vbmimic]{vbmimic()}}.
 }
 \description{
 Computes structural-equation-model fit statistics for a fitted \code{\link[=vbfa]{vbfa()}}

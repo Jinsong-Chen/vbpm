@@ -161,7 +161,7 @@ which(Poff >= sort(Poff, decreasing = TRUE)[3], arr.ind = TRUE)
 simLD$ofd_ind
 ```
 
-For LD fits, `fit_stats()` uses the selected residual covariance. The returned
+For LD fits, `fit_stats()` uses the estimated residual covariance `W`. The returned
 `objective` is the manuscript V4 terminal VECM criterion; `ELBO` remains `NA`
 because the residual precision is point-updated rather than assigned a full
 variational distribution.
@@ -180,15 +180,32 @@ or items are rejected because their location or scale is not identified.
 `nlsy27` ships with the package: 3,458 respondents, 27 mixed-type items, and an
 initial three-factor design with two to three anchors per factor.
 
+The data are 1.12% incomplete, which exercises the missing-response path from
+the previous section: the `NA`s are passed straight to `vbfa()` and imputed
+in-loop, with no listwise deletion.
+
 ```{r nlsy}
 data(nlsy27)
-## vbfa() does not support NA yet -> complete cases; the 17 polytomous items
-## are treated as continuous for this illustration
-Yn <- as.matrix(nlsy27$dat[stats::complete.cases(nlsy27$dat), ])
+Yn <- as.matrix(nlsy27$dat)
 dim(Yn)
+sum(is.na(Yn))            # incomplete cells, handled in-loop
+
 fn <- vbfa(Yn, nlsy27$Q)
 fn
+fn$preprocess$n_missing   # recorded on the fit
 round(fn$Lam, 2)
+```
+
+One caveat remains, and it is about response type rather than missingness: 17
+of the 27 items are polytomous and are treated here as continuous. A threshold
+model for categorical and mixed responses is out of scope for this release
+(see "Known limitations" in the README).
+
+For comparison, the complete-case analysis discards every respondent with any
+missing answer:
+
+```{r nlsy-cc}
+nrow(Yn) - sum(stats::complete.cases(Yn))   # respondents listwise deletion drops
 ```
 
 ## From graded knowledge to a Q matrix

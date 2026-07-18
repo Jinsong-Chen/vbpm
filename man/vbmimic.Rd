@@ -96,8 +96,12 @@ design-matrix convention and the spike-and-slab formulation.
 The evidence lower bound is \strong{not} currently returned. The published
 algorithm converges on the weighted residual vector rather than on the
 bound, and the bound's implementable closed form has not been assembled.
-Because \code{\link[=fit_stats]{fit_stats()}} and \code{\link[=pefa]{pefa()}} are built on the ELBO, they do not accept
-\code{vbmimic} fits; both raise an error rather than returning wrong numbers.
+\code{\link[=fit_stats]{fit_stats()}} does accept a \code{vbmimic} fit, but returns a deliberately
+limited result: \code{n_active_coef} (soft-selected measurement and structural
+coefficients) plus typed \code{NA} for every covariance-based index and
+parameter count, with an explanatory \code{note} attribute. \code{\link[=pefa]{pefa()}} does not
+accept \code{vbmimic} fits at all, because factor-number selection needs a
+comparable objective.
 }
 \examples{
 ## 3 factors, 18 items, 9 covariates in disjoint blocks of 3

@@ -104,7 +104,7 @@ round(fit$Phi, 2)            # factor correlations, from the disturbances
 * **Determinism.** Like `vbfa()`, the estimator consumes no random numbers —
   no seed argument, bit-identical reruns.
 * **No ELBO yet.** The published algorithm converges on a residual criterion,
-  not the bound; `fit$ELBO` is `NA`, and `vb_fit()`/`pefa()` therefore refuse
+  not the bound; `fit$ELBO` is `NA`. `pefa()` therefore refuses
   `vbmimic` fits rather than reporting wrong statistics. An implemented ELBO
   is on the roadmap.
 

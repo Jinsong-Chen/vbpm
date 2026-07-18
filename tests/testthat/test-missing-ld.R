@@ -323,3 +323,63 @@ test_that("objective_terms decompose the objective exactly", {
   expect_equal(unname(sum(f$objective_terms[c("likelihood", "latent", "loadings")])),
                f$ELBO_conditional)
 })
+
+## ---- audit follow-ups: checkpoint provenance and input validation --------
+
+test_that("pefa refuses a checkpoint written under different settings", {
+  d <- make_dat(N = 200)
+  Q0 <- d$Q[, 1:2, drop = FALSE]
+  cp <- tempfile(fileext = ".csv")
+  on.exit(unlink(c(cp, paste0(cp, ".manifest"))), add = TRUE)
+
+  r1 <- pefa(Q0, d$Y, Kmin = 2, Kmax = 3, verbose = FALSE, v0 = .001,
+             max_it = 200, save_path = cp)
+  expect_true(file.exists(paste0(cp, ".manifest")))
+
+  ## same settings: resume is allowed
+  expect_no_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, verbose = FALSE,
+                       v0 = .001, max_it = 200, save_path = cp))
+
+  ## different data behind the same path must be refused, not pooled
+  d2 <- make_dat(N = 200, seed = 99)
+  expect_error(pefa(Q0, d2$Y, Kmin = 2, Kmax = 3, verbose = FALSE,
+                    v0 = .001, max_it = 200, save_path = cp),
+               "different settings")
+  ## as must a changed hyperparameter
+  expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, verbose = FALSE,
+                    v0 = .01, max_it = 200, save_path = cp),
+               "different settings")
+  ## a checkpoint with no manifest cannot be verified
+  cp2 <- tempfile(fileext = ".csv")
+  on.exit(unlink(cp2), add = TRUE)
+  write.csv(r1$sweep, cp2, row.names = FALSE)
+  expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, verbose = FALSE,
+                    v0 = .001, max_it = 200, save_path = cp2),
+               "no manifest")
+})
+
+test_that("select_K_elbow validates its inputs", {
+  ok <- c(-100, -80, -75, -74)
+  expect_error(select_K_elbow(2:5, ok[1:3]), "same length")
+  expect_error(select_K_elbow(c(2, 2, 3, 4), ok), "duplicates")
+  expect_error(select_K_elbow(c(2, 3, 4, NA), ok), "finite")
+  expect_error(select_K_elbow(c(2.5, 3, 4, 5), ok), "whole numbers")
+  expect_error(select_K_elbow(2:5, c(ok[1:3], NA)), "finite")
+  expect_error(select_K_elbow(2:5, ok, delta = -1), "0, 100")
+  expect_error(select_K_elbow(2:5, ok, delta = 101), "0, 100")
+  expect_error(select_K_elbow(2:5, ok, sustain = 0), "positive whole number")
+  expect_error(select_K_elbow(2:5, ok, sustain = 1.5), "positive whole number")
+  expect_silent(select_K_elbow(2:5, ok))
+})
+
+test_that("pefa validates its window", {
+  d <- make_dat(N = 120)
+  Q0 <- d$Q[, 1:2, drop = FALSE]
+  ## a reversed window would silently become a descending sequence
+  expect_error(pefa(Q0, d$Y, Kmin = 4, Kmax = 2, verbose = FALSE),
+               "non-decreasing")
+  expect_error(pefa(Q0, d$Y, Kmin = 2.5, Kmax = 4, verbose = FALSE),
+               "whole number")
+  expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, tau = 1.5, verbose = FALSE),
+               "tau")
+})

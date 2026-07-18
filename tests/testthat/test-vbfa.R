@@ -139,7 +139,10 @@ test_that("fit_stats is generic, preserves vb_fit, and supports LD fits", {
   f <- vbfa(d$Y, d$Q, convChk = FALSE)
   fs <- fit_stats(f)
   expect_named(fs, c("t_nom", "t", "t_S", "RMSEA", "SRMR", "CFI", "TLI",
-                     "AIC", "BIC", "AIC_S", "BIC_S", "ELBO"))
+                     "AIC", "BIC", "AIC_S", "BIC_S", "ELBO", "objective"))
+  ## for a diagonal fit the objective IS the ELBO; under LD it is the VECM
+  ## objective, where ELBO is NA. The README promises this element.
+  expect_equal(unname(fs["objective"]), unname(fs["ELBO"]))
   expect_identical(unname(vb_fit(f, d$Y, d$Q)), unname(fs))
   fl <- vbfa(d$Y, d$Q, ld = TRUE, convChk = FALSE, max_it = 100)
   fsl <- fit_stats(fl)

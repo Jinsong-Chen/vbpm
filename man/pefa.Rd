@@ -71,7 +71,7 @@ for (k in 1:2) { a <- which(rep(1:3, each = 6) == k)[1:2]
                  Q0[a, ] <- 0L; Q0[a, k] <- 1L }
 
 r <- pefa(Q0, sim$dat, Kmin = 2, Kmax = 4, verbose = FALSE)
-summary(r)            # ELBO, ELBO-gain, BIC, and BIC-gain selections
+summary(r)            # objective, objective-gain, BIC and BIC-gain selections
 r$sweep               # the full sweep table (ELBO, gains, fit, timing)
 selected_fit(r)$flag  # the refitted selected model is returned
 }

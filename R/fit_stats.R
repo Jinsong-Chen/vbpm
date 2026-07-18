@@ -35,9 +35,16 @@
 #' @param ... Further arguments passed to methods. Unused by the methods
 #'   supplied with the package.
 #'
-#' @return A named numeric vector: `t_nom`, `t`, `t_S` (parameter counts),
-#'   `RMSEA`, `SRMR`, `CFI`, `TLI`, `AIC`, `BIC` (hard selection), `AIC_S`,
-#'   `BIC_S` (soft selection), and `ELBO`.
+#' @return An object of class `vbpm_fit_stats` (a named numeric vector) with
+#'   `t_nom`, `t`, `t_S` (parameter counts), `RMSEA`, `SRMR`, `CFI`, `TLI`,
+#'   `AIC`, `BIC` (hard selection), `AIC_S`, `BIC_S` (soft selection), `ELBO`,
+#'   and `objective`. The last is the model's comparability score: equal to
+#'   `ELBO` for a diagonal fit, and the terminal VECM objective under local
+#'   dependence, where `ELBO` is `NA`. It is comparable only across fits
+#'   sharing the `objective_type` attribute, which is also attached.
+#'
+#'   The `vbmimic` method returns the same shape with `n_active_coef` in place
+#'   of a full soft count and typed `NA` elsewhere; see [vbmimic()].
 #'
 #' @references
 #' Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
@@ -200,7 +207,12 @@ fit_stats.vbfa <- function(object, Y = NULL, Q = object$Q, tau = 0.50, gamma = 0
       CFI = CFI, TLI = TLI,
       AIC = AIC, BIC = BIC,
       AIC_S = AIC_S, BIC_S = BIC_S,
-      ELBO = { e <- as.numeric(fit$ELBO); if (length(e) && is.finite(e)) e else NA_real_ })
+      ELBO = { e <- as.numeric(fit$ELBO); if (length(e) && is.finite(e)) e else NA_real_ },
+      ## The model's own comparability score. For a diagonal fit this equals
+      ## ELBO; under LD it is the terminal VECM objective, where ELBO is NA.
+      ## Comparable only across fits sharing the objective_type attribute.
+      objective = { o <- as.numeric(fit$objective)
+                    if (length(o) && is.finite(o)) o else NA_real_ })
     class(out) <- c("vbpm_fit_stats", "numeric")
     attr(out, "model") <- "vbfa"
     attr(out, "objective_type") <- if (!is.null(fit$objective_type))
@@ -211,17 +223,26 @@ fit_stats.vbfa <- function(object, Y = NULL, Q = object$Q, tau = 0.50, gamma = 0
 #' @rdname fit_stats
 #' @export
 fit_stats.vbmimic <- function(object, Y = NULL, Q = NULL, tau = 0.5, ...) {
+    ## Soft-selected COEFFICIENTS only: the measurement loadings plus the
+    ## structural coefficients. This is deliberately not reported as `t_S`,
+    ## which elsewhere means a full soft parameter count -- it omits the
+    ## residual precisions, the factor covariance, and the inclusion rates.
+    ## It must not be fed to an information criterion.
     nA <- sum(object$Q_A == 1) + sum(object$pi_A[object$Q_A == -1])
     nB <- sum(object$Q_B == 1) + sum(object$pi_B[object$Q_B == -1])
-    out <- c(t_nom = NA_real_, t = NA_real_, t_S = nA + nB,
+    out <- c(t_nom = NA_real_, t = NA_real_, t_S = NA_real_,
+             n_active_coef = nA + nB,
              RMSEA = NA_real_, SRMR = NA_real_, CFI = NA_real_, TLI = NA_real_,
              AIC = NA_real_, BIC = NA_real_, AIC_S = NA_real_, BIC_S = NA_real_,
-             ELBO = NA_real_)
+             ELBO = NA_real_, objective = NA_real_)
     class(out) <- c("vbpm_fit_stats", "numeric")
     attr(out, "model") <- "vbmimic"
     attr(out, "objective_type") <- "none"
-    attr(out, "note") <- paste("SEM-like fit statistics require the MIMIC",
-                               "objective and joint covariance derivation.")
+    attr(out, "note") <- paste(
+        "SEM-like fit statistics require the MIMIC objective and joint",
+        "covariance derivation, neither of which is available yet.",
+        "n_active_coef counts soft-selected measurement and structural",
+        "coefficients only and is not a full parameter count.")
     out
 }
 

@@ -110,7 +110,11 @@ test_that("fit_stats covers vbmimic with explicitly limited indices", {
               matrix(-1L, 18, 3), matrix(-1L, 3, 9))
   fs <- fit_stats(f)
   expect_s3_class(fs, "vbpm_fit_stats")
-  expect_true(is.finite(fs["t_S"]))
+  ## t_S is NA for MIMIC: the soft coefficient count is reported separately
+  ## as n_active_coef, because it omits residual and factor-covariance
+  ## parameters and must not be fed to an information criterion.
+  expect_true(is.na(fs["t_S"]))
+  expect_true(is.finite(fs["n_active_coef"]))
   expect_true(all(is.na(fs[c("RMSEA", "SRMR", "CFI", "TLI", "ELBO")])))
 })
 
