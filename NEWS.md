@@ -32,10 +32,23 @@ estimator bug fix.
   covariance-equivalent -- and the truth-sized candidate inside such a sweep
   is itself not interpretable. `?pefa` gains a dedicated section; the
   `print()` methods replace the generic "extend the window" advice with an
-  explicit caution when an orthogonal sweep lands on the lower boundary;
-  and the bifactor vignette demonstrates the failure on higher-order data
-  plus the working two-step recipe (count via known zeros encoded as `0`,
-  then an anchored refit at the selected `K` for all interpretation).
+  explicit caution when an orthogonal sweep lands on the lower boundary.
+* **The bifactor vignette is rebuilt as a small tutorial paper.** It opens
+  with the covariance geometry that drives everything (cross-cluster blocks
+  are rank-one under both bifactor and oblique models, so a general factor
+  is identified only by within-cluster rank-two structure), demonstrates
+  the sweep failure on both true-bifactor and higher-order data, and closes
+  with a validated **two-step decision route**: (1) an ordinary oblique
+  `pefa()` sweep for the first-order factor count -- interior selections
+  are trustworthy there even when the data are bifactor or higher-order;
+  (2) anchored oblique-K versus anchored bifactor-(K+1), compared by BIC
+  (not ELBO, whose prior mass differs across the two designs); (3) within
+  the winner, the Schmid-Leiman mean-CV check (bifactor side) or a triad
+  factorization of the fitted factor correlations (oblique side) settles
+  bifactor versus higher-order versus plain correlated factors. Every
+  population in the vignette routes correctly, and the route's power limits
+  (a near-homogeneous true bifactor needs a large sample at step 2) are
+  reported from a 3 x 3 x 3 simulation grid. `?pefa` summarizes the route.
 * **Fixed: inflated residual variances for anchored items under local
   dependence.** The posterior variance of fixed-zero (`Q == 0`) loadings was
   left at its initialization value 1 instead of 0, and the LD branch's

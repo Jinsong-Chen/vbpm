@@ -76,12 +76,27 @@ window boundary regardless of the true \code{K}. In simulations from true
 bifactor and true higher-order populations this failure is systematic (it
 is an identification property, not sampling noise), and the truth-sized
 candidate inside such a sweep is itself rotationally scrambled -- its
-loadings must not be interpreted. If a bifactor factor count is needed:
-encode every loading that is \emph{known} to be absent as a fixed \code{0} rather
-than \code{-1} (this restores an interior selection), and then \strong{refit} at the
-selected \code{K} with anchors on each group factor before interpreting
-loadings or transforming to a higher-order solution. The \code{bifactor}
-vignette demonstrates both the failure and the working two-step recipe.
+loadings must not be interpreted. Encoding every loading that is \emph{known}
+to be absent as a fixed \code{0} rather than \code{-1} restores an interior
+selection for the factor count, but the sweep's fits remain
+uninterpretable; all interpretation belongs to an anchored refit.
+
+The decision route that works runs through the \emph{ordinary} sweep instead:
+(1) sweep \strong{without} a general column (\code{orthogonal = FALSE}) for the
+first-order factor count \code{K} -- for that question an omitted factor
+produces honest misfit, and interior selections are trustworthy even when
+the data are truly bifactor or higher-order (the general factor is then
+absorbed into the factor correlations, which is harmless at this step);
+(2) at the selected \code{K}, fit the anchored oblique \code{K}-factor model and
+the anchored orthogonal bifactor with one added, fully specified general
+column, and compare their \code{BIC} from \code{\link[=fit_stats]{fit_stats()}} -- compare \code{BIC}, not
+\code{ELBO}, because the two designs carry spike-and-slab prior mass on
+different numbers of entries; (3) if the bifactor wins, check
+Schmid-Leiman proportionality to decide between a genuine bifactor and a
+higher-order collapse; if the oblique model wins, a higher-order layer
+may still be read from the factor correlations. The \code{bifactor} vignette
+works through the failure, the route, and its power limits (a true
+bifactor with near-homogeneous loadings needs a large sample at step 2).
 }
 
 \examples{
