@@ -160,7 +160,7 @@ simLD$ofd_ind
 ```
 
 For LD fits, `fit_stats()` uses the estimated residual covariance `W`. The
-returned `objective` is the manuscript V4 terminal VECM criterion; `ELBO`
+returned `objective` is the terminal VECM criterion; `ELBO`
 remains `NA` because the residual precision is point-updated rather than
 assigned a full variational distribution.
 

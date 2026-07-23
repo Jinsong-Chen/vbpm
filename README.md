@@ -64,18 +64,14 @@ git clone https://github.com/Jinsong-Chen/vbpm.git
 R CMD INSTALL vbpm
 ```
 
-While the repository is private, `install_github()` additionally needs a GitHub
-personal access token with `repo` scope — create one at
-<https://github.com/settings/tokens> and pass `auth_token = "ghp_..."`, or set
-`GITHUB_PAT`. Cloning over SSH avoids this.
-
 Then:
 
 ```r
 library(vbpm)
 vignette("vbfa")         # start here
-vignette("vbmimic")
-vignette("pefa")
+vignette("pefa")         # choosing the number of factors
+vignette("bifactor")     # bifactor, higher-order, and testlet structures
+vignette("vbmimic")      # covariates predicting the factors
 citation("vbpm")
 ```
 
@@ -101,7 +97,8 @@ idx <- fit_stats(fit)                # reads data/design/settings from the fit
 
 Fits are ordinary named lists with a shared `vbpm_fit` class attached — fields
 such as `fit$Lam`, `fit$pi`, and `fit$Phi` remain public API. Focused vignettes
-cover `vbfa`, `vbmimic`, and the `pefa` factor-number sweep.
+cover `vbfa`, factor-number selection (`pefa`), bifactor/higher-order/testlet
+structures, and `vbmimic`.
 
 MIMIC, with covariates predicting the factors:
 
@@ -160,7 +157,7 @@ round(fit$B, 2)                      # which covariates predict which factors
 
 ## Known limitations
 
-As of 0.4.0:
+As of 0.5.0:
 
 - **Response types.** The estimators model **continuous Gaussian responses**,
   and in-loop missing-data support covers that case in both `vbfa()` and
@@ -172,7 +169,7 @@ As of 0.4.0:
 - **Complete covariates.** `vbmimic()` requires complete `X`: covariates are
   conditioned on rather than modelled, so the model supplies no distribution
   to impute them from.
-- **LD objective.** Local-dependence `vbfa()` fits return the manuscript V4
+- **LD objective.** Local-dependence `vbfa()` fits return the
   terminal VECM objective and LD-aware fit statistics. `ELBO` is intentionally
   `NA`: calling the point-updated precision objective a joint variational lower
   bound would be misleading.
@@ -191,4 +188,10 @@ See `NEWS.md` for the per-version changelog.
 
 ## License
 
-GPL-3. Authors: Jinsong Chen (maintainer) and Yi Jin.
+GPL-3.
+
+## Authors
+
+- Jinsong Chen (maintainer) — [\@Jinsong-Chen](https://github.com/Jinsong-Chen)
+- Yi Jin — [\@jinyi1998](https://github.com/jinyi1998), first author of the
+  method papers behind `vbfa()` and `vbmimic()`

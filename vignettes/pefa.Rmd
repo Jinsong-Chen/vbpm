@@ -219,7 +219,7 @@ Delete the checkpoint (or pick a new `save_path`) to start over deliberately.
 
 `pefa()` does not assume the objective is always the ELBO. For ordinary
 (diagonal) `vbfa` sweeps it is the ELBO; for LD-aware sweeps (`ld = TRUE`) it
-is the manuscript V4 terminal VECM objective instead, and the ELBO-specific
+is the terminal VECM objective instead, and the ELBO-specific
 columns and selections (`elbo`, `elbo_gain`) are `NA` because the residual
 precision there is point-updated rather than given a full variational
 distribution. `objective_gain` remains the primary rule in both cases, just

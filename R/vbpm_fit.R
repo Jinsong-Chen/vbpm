@@ -37,6 +37,23 @@
 #' method serves all estimators, and future family members (e.g. further
 #' variational models) inherit sensible behaviour on day one.
 #'
+#' @section Why two classes rather than one class plus a model field:
+#' A natural-looking alternative is a single `"vbpm_fit"` class with a field
+#' saying which model it is. The field exists -- every fit carries
+#' `$model` (`"vbfa"` or `"vbmimic"`), and it is the right thing to *read*
+#' when a script wants to branch on model type. But it cannot replace the
+#' class vector, because the class vector is what R's method dispatch runs
+#' on. With the two-element class, model-specific behaviour is added by
+#' writing a method (`fit_stats.vbmimic()`), the family default by writing
+#' `fit_stats.vbpm_fit()`, and a future model (say `vblvm`) joins by
+#' returning `c("vblvm", "vbpm_fit")` and adding only the methods where it
+#' differs -- including from outside this package. With a single class, every
+#' generic would have to contain a hand-written `switch(object$model, ...)`
+#' that this package alone can extend, and `inherits(fit, "vbfa")` would stop
+#' working. This is the same convention base R uses: a `glm` object has class
+#' `c("glm", "lm")`, not class `"lm"` with a family field. So: dispatch on the
+#' classes, read `$model` for display and bookkeeping.
+#'
 #' @section `vbpm_fit` versus `vb_fit()`:
 #' These two names look related and are not, which is worth stating once.
 #' `vbpm_fit` is the **class of a fitted model** -- what [vbfa()] and
