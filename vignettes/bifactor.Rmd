@@ -140,17 +140,28 @@ same surplus reappears in a different disguise (split across the two anchored
 group columns, say), but some absorbed, covariance-equivalent representation
 is always available.
 
-Two practical lessons follow. First, a `boundary = "lower"` selection is the
-sweep's own warning label -- `print(r)` says it in as many words -- and a
-bifactor sweep that stalls at its backbone should be read as "no *separable*
-extra group factor was found," not "the backbone is the true structure."
-Second, the absorption route runs through entries that are free but should
-not be: if an item is *known* not to measure a group factor, encode that as a
-fixed `0` rather than an exploratory `-1`. The clean, interior selections
-shown in the `pefa` vignette come from correlated-factor structure, where an
-omitted factor produces honest misfit; orthogonal bifactor structure is
-intrinsically the harder case for factor-number discovery, and this section
-is deliberately an example of the sweep telling you so.
+The blunt conclusion first: **an ordinary bifactor sweep -- general column
+plus anchored group columns, everything else `-1` -- should not be used to
+determine the number of group factors.** Its selection is not merely noisy
+but systematically misleading: the absorbed candidate wins regardless of the
+true `K`, and (Section 3f below) the truth-sized candidate inside the sweep
+is itself rotationally scrambled, so its loadings cannot be inspected to
+detect the problem. `print(r)` therefore flags an orthogonal sweep that
+lands on the lower boundary as *weak evidence about K* rather than issuing
+the generic advice to extend the window.
+
+Two practical rules follow. First, a `boundary = "lower"` stall in a
+bifactor sweep means "no *separable* extra group factor was found," never
+"the backbone is the true structure." Second, the absorption route runs
+through entries that are free but should not be: if an item is *known* not
+to measure a group factor, encode that as a fixed `0` rather than an
+exploratory `-1` -- that restores an interior selection for the factor
+*count* (though still not interpretable loadings; see Section 3f). The
+clean, interior selections shown in the `pefa` vignette come from
+correlated-factor structure, where an omitted factor produces honest misfit;
+orthogonal bifactor structure is intrinsically the harder case for
+factor-number discovery, and this section is deliberately an example of the
+sweep telling you so.
 
 (`v0 = .001` -- a single fixed spike rather than the default warm-started
 path -- keeps a `Kmin:Kmax` sweep fast. The absorption behaviour above is not
@@ -318,6 +329,57 @@ substantive reading: the *weaker* a cluster's second-order loading, the
 not explain of an item's common variance is exactly what its group factor
 carries. Cluster 3 (true $\gamma = .60$) therefore shows the largest special
 effect and cluster 1 (true $\gamma = .80$) the smallest.
+
+### (f) Can a sweep recover the higher-order structure? No -- and here is the fix
+
+Section 2 showed the absorption problem on generic bifactor data; the same
+question is sharper here, where the population is *exactly* a higher-order
+model: hand the ordinary bifactor backbone (general column, two anchored
+group factors, all else `-1`) to `pefa()` on `Yh` and ask whether it finds
+the true `K = 4`.
+
+```{r ho-sweep}
+Q0h <- matrix(-1L, J, 3)
+Q0h[, 1] <- 1L
+for (k in 1:2) {
+  a <- which(cl == k)[1:2]
+  Q0h[a, 2:3] <- 0L
+  Q0h[a, k + 1] <- 1L
+}
+rh <- pefa(Q0h, Yh, Kmin = 3, Kmax = 6, orthogonal = TRUE, v0 = .001,
+           verbose = FALSE)
+rh
+```
+
+It does not: the selection stalls at the lower boundary `K = 3`, with the
+fit indices at their ceilings for every candidate, for exactly the
+absorption reason -- SL-proportionality buys nothing, because the omitted
+group factor's rank-one block is reproducible by the free entries either
+way. Repeating this at several seeds and at `N = 500` gives the same lower
+boundary selection every time; this is an identification property, not bad
+luck. Worse, the truth-sized `K = 4` candidate *inside* the sweep is not
+interpretable either. Its padded column is never anchored, so nothing pins
+the general/group allocation: here the extra column simply stays empty and
+the absorbed representation persists (cluster 3's group variance sits in
+inflated general loadings plus off-cluster spill), while under other
+settings and seeds the allocation comes out rotated across columns instead.
+Either way, these loadings must not be read, checked for SL proportionality,
+or transformed back:
+
+```{r ho-sweep-k4}
+f4 <- rh$fits[[which(rh$sweep$K == 4)]]
+round(f4$Lam[cl == 3, ], 2)     # cluster-3 rows: compare sim_ho$MLA[cl == 3, ]
+```
+
+The working recipe is two steps, each doing only its own job. If the number
+of group factors is genuinely unknown, run the sweep with every *known*
+absence encoded as a fixed `0` (Section 2) -- that recovers the *count* with
+an interior selection, though its fits stay uninterpretable. Then **refit at
+the selected `K` with anchors on every group factor** -- the partially
+confirmatory design of part (b) -- and do all interpretation there: on that
+refit the fitted columns match the true SL matrix nearly perfectly
+(congruence > .99), which is what parts (c)-(e) relied on. Anchors pin the
+rotation; a sweep's padded columns, by construction, never have them.
 
 ### Caveats
 

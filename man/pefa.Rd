@@ -63,6 +63,27 @@ confirmatory backbone \code{Q0} and padding each model with fully exploratory
 columns, then selects the number of factors with the scale-free gain rule
 (\code{\link[=select_K_elbow]{select_K_elbow()}}). Raw ELBO and BIC optima are reported for reference.
 }
+\section{Orthogonal (bifactor) sweeps are weakly identified}{
+
+With \code{orthogonal = TRUE} and a general column in the backbone, do \strong{not}
+expect a sweep to discover the number of group factors. An omitted
+orthogonal group factor contributes a rank-one within-cluster covariance
+block that the unspecified (\code{-1}) entries of the \emph{remaining} columns can
+reproduce almost exactly, so the smaller candidate is covariance-equivalent
+to the truth: fit indices sit at their ceilings for every candidate, the
+objective typically \emph{falls} with \code{K}, and the selection lands on the lower
+window boundary regardless of the true \code{K}. In simulations from true
+bifactor and true higher-order populations this failure is systematic (it
+is an identification property, not sampling noise), and the truth-sized
+candidate inside such a sweep is itself rotationally scrambled -- its
+loadings must not be interpreted. If a bifactor factor count is needed:
+encode every loading that is \emph{known} to be absent as a fixed \code{0} rather
+than \code{-1} (this restores an interior selection), and then \strong{refit} at the
+selected \code{K} with anchors on each group factor before interpreting
+loadings or transforming to a higher-order solution. The \code{bifactor}
+vignette demonstrates both the failure and the working two-step recipe.
+}
+
 \examples{
 \donttest{
 ## three-factor data; the backbone Q0 anchors only the first two factors,

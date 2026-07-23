@@ -23,6 +23,19 @@ estimator bug fix.
   objective and BIC, their marginal **gains as % of the largest gain** (the
   quantity the selection rule actually thresholds), the fit indices, and a
   marker on the selected row. Raw gains and timing remain in `$comparison`.
+* **Orthogonal (bifactor) sweeps are now flagged as weakly identified.**
+  Simulations from true bifactor and true higher-order populations show the
+  ordinary bifactor sweep (general column + anchored groups, rest `-1`)
+  systematically selects the lower window boundary regardless of the true
+  `K`: an omitted group factor's rank-one covariance block is absorbed by
+  the unspecified entries of the remaining columns, making the candidates
+  covariance-equivalent -- and the truth-sized candidate inside such a sweep
+  is itself not interpretable. `?pefa` gains a dedicated section; the
+  `print()` methods replace the generic "extend the window" advice with an
+  explicit caution when an orthogonal sweep lands on the lower boundary;
+  and the bifactor vignette demonstrates the failure on higher-order data
+  plus the working two-step recipe (count via known zeros encoded as `0`,
+  then an anchored refit at the selected `K` for all interpretation).
 * **Fixed: inflated residual variances for anchored items under local
   dependence.** The posterior variance of fixed-zero (`Q == 0`) loadings was
   left at its initialization value 1 instead of 0, and the LD branch's

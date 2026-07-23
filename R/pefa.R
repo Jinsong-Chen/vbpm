@@ -117,6 +117,25 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #'   `selected_K`. Use [summary.pefa()] for the aggregate results and
 #'   [selected_fit()] to extract the selected fitted model.
 #'
+#' @section Orthogonal (bifactor) sweeps are weakly identified:
+#' With `orthogonal = TRUE` and a general column in the backbone, do **not**
+#' expect a sweep to discover the number of group factors. An omitted
+#' orthogonal group factor contributes a rank-one within-cluster covariance
+#' block that the unspecified (`-1`) entries of the *remaining* columns can
+#' reproduce almost exactly, so the smaller candidate is covariance-equivalent
+#' to the truth: fit indices sit at their ceilings for every candidate, the
+#' objective typically *falls* with `K`, and the selection lands on the lower
+#' window boundary regardless of the true `K`. In simulations from true
+#' bifactor and true higher-order populations this failure is systematic (it
+#' is an identification property, not sampling noise), and the truth-sized
+#' candidate inside such a sweep is itself rotationally scrambled -- its
+#' loadings must not be interpreted. If a bifactor factor count is needed:
+#' encode every loading that is *known* to be absent as a fixed `0` rather
+#' than `-1` (this restores an interior selection), and then **refit** at the
+#' selected `K` with anchors on each group factor before interpreting
+#' loadings or transforming to a higher-order solution. The `bifactor`
+#' vignette demonstrates both the failure and the working two-step recipe.
+#'
 #' @references
 #' Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
 #' Bayesian variable selection: Fit assessment and factor-number selection in
@@ -371,9 +390,20 @@ print.pefa <- function(x, ...) {
               toupper(x$objective_type), x$delta,
               if (is.na(x$selected_K)) "NA" else x$selected_K))
   cat("  objective:", x$objective_type, "\n")
+  orth <- isTRUE(x$fits[[1]]$orthogonal)
   if (x$boundary %in% c("lower", "upper")) {
-    direction <- if (x$boundary == "lower") "downward" else "upward"
-    cat(sprintf("  boundary selection: extend the window %s\n", direction))
+    if (orth && x$boundary == "lower") {
+      ## For orthogonal (bifactor) sweeps the generic advice is misleading:
+      ## the stall is typically absorption of an omitted group factor by the
+      ## unspecified entries, not evidence about K.
+      cat("  boundary selection (orthogonal sweep): WEAK EVIDENCE about K --\n",
+          "  an omitted group factor is absorbed by unspecified entries of the\n",
+          "  remaining columns (covariance-equivalent candidates). Encode known\n",
+          "  zeros as 0, not -1; see ?pefa and vignette('bifactor').\n", sep = "")
+    } else {
+      direction <- if (x$boundary == "lower") "downward" else "upward"
+      cat(sprintf("  boundary selection: extend the window %s\n", direction))
+    }
   }
   cat("Use summary() for all selections and the per-K comparison.\n")
   invisible(x)
@@ -424,6 +454,10 @@ print.summary.pefa <- function(x, digits = 3, ...) {
   cat(sprintf("  converged: %d of %d; boundary: %s; objective: %s\n",
               x$convergence["converged"], x$convergence["total"],
               x$boundary, x$objective_type))
+  if (isTRUE(x$selected_fit$orthogonal) && identical(x$boundary, "lower"))
+    cat("  (orthogonal sweep at the lower boundary: weak evidence about K --\n",
+        "   see ?pefa, section on orthogonal sweeps, and vignette('bifactor'))\n",
+        sep = "")
   ## One table with the raw criteria, the scale-free gain percentages (each
   ## marginal gain as % of the largest gain in the window; NA at Kmin), and
   ## the fit indices, so the selection evidence is read in one place.
