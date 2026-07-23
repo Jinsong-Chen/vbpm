@@ -1,4 +1,4 @@
-citHeader("To cite vbpm in publications, please cite the package and the paper for the estimator you used (Jin & Chen 2025 SEM for vbfa; Jin & Chen 2025 MBR for vbmimic; Chen & Jin 2026 for vb_fit/pefa):")
+citHeader("To cite vbpm in publications, please cite the package and the paper for the estimator you used (Jin & Chen 2025 SEM for vbfa; Jin & Chen 2025 MBR for vbmimic; Chen & Jin 2026 for fit_stats/pefa):")
 
 bibentry(
   bibtype = "Manual",

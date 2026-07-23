@@ -1,10 +1,6 @@
 ## SEM-like fit statistics for vbpm models. Hard selection (posterior
 ## inclusion probability >= tau) is the default for every statistic; soft
-## variants carry an "_S" suffix.
-##
-## fit_stats() is the S3 generic; vb_fit() at the foot of this file is the
-## pre-0.4.0 name, kept as a thin compatibility wrapper. See the roxygen
-## documentation of fit_stats() below.
+## variants carry an "_S" suffix. fit_stats() is the S3 generic.
 
 #' Fit statistics for vbpm models
 #'
@@ -14,8 +10,7 @@
 #' (RMSEA, SRMR, CFI, TLI) and information criteria (AIC, BIC) are returned,
 #' together with the model's ELBO.
 #'
-#' @param object,fit A fitted `vbpm_fit` object. `fit` is the historical
-#'   argument name retained by [vb_fit()].
+#' @param object A fitted `vbpm_fit` object.
 #' @param Y The `N x J` data matrix the model was fit to.
 #' @param Q The `J x K` loading design matrix used in the fit.
 #' @param tau Hard-selection threshold on the posterior inclusion probability
@@ -251,8 +246,3 @@ fit_stats.vbmimic <- function(object, Y = NULL, Q = NULL, tau = 0.5, ...) {
 fit_stats.vbpm_fit <- function(object, ...)
     stop("No fit_stats() method is defined for model class: ", class(object)[1],
          call. = FALSE)
-
-# Historical API retained for v0.4.0 migration.
-#' @rdname fit_stats
-#' @export
-vb_fit <- function(fit, Y, Q = fit$Q, ...) fit_stats(fit, Y = Y, Q = Q, ...)

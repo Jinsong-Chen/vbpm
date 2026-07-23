@@ -62,18 +62,6 @@ working. This is the same convention base R uses: a \code{glm} object has class
 classes, read \verb{$model} for display and bookkeeping.
 }
 
-\section{\code{vbpm_fit} versus \code{vb_fit()}}{
-
-These two names look related and are not, which is worth stating once.
-\code{vbpm_fit} is the \strong{class of a fitted model} -- what \code{\link[=vbfa]{vbfa()}} and
-\code{\link[=vbmimic]{vbmimic()}} return. \code{vb_fit()} was the pre-0.4.0 \strong{name of the function
-that computes fit statistics}, now \code{\link[=fit_stats]{fit_stats()}}; it survives only as a
-thin wrapper for old scripts. So a \code{vbpm_fit} is an input to
-\code{fit_stats()}, never its output, and \code{vb_fit()} never returned a
-\code{vbpm_fit}. New code should use \code{\link[=fit_stats]{fit_stats()}} and can ignore \code{vb_fit()}
-entirely.
-}
-
 \section{What is deliberately NOT hidden}{
 
 Some R packages wrap results in opaque objects whose internals are

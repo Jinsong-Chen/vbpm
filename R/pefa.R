@@ -337,7 +337,15 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
 #' @param object,x A result returned by [pefa()].
 #' @param ... Further arguments. For `plot()`, graphical arguments passed to
 #'   base plotting functions.
-#' @param type Plot type: objective curves, marginal gains, or fit indices.
+#' @param type Plot type. `"objective"` draws the objective (left axis) and
+#'   BIC (right axis) on their own scales; `"gain"` draws the marginal gains
+#'   as a percentage of the largest gain, with the `delta` threshold
+#'   (gains are undefined at `Kmin`, so those curves start one step into the
+#'   window); `"fit"` draws absolute misfit (RMSEA/SRMR) and incremental fit
+#'   (CFI/TLI) in separate panels with conventional cutoffs. All types mark
+#'   the selected `K` with a dotted vertical line.
+#' @param digits Number of decimals for the fit indices in the printed
+#'   comparison table (gain percentages always print with one decimal).
 #' @return `summary.pefa()` returns an object of class `summary.pefa` with
 #'   `selection`, `comparison`, window and tuning metadata, convergence and
 #'   boundary information, and the selected fit. Print methods return their
@@ -402,7 +410,7 @@ summary.pefa <- function(object, ...) {
 
 #' @rdname pefa-methods
 #' @export
-print.summary.pefa <- function(x, ...) {
+print.summary.pefa <- function(x, digits = 3, ...) {
   cat(sprintf("PEFA sweep summary: K = %d:%d; delta = %g%%; sustain = %d\n",
               x$window$Kmin, x$window$Kmax, x$delta, x$sustain))
   cat(sprintf("  %-10s -> K = %s\n", toupper(x$objective_type),
@@ -416,42 +424,114 @@ print.summary.pefa <- function(x, ...) {
   cat(sprintf("  converged: %d of %d; boundary: %s; objective: %s\n",
               x$convergence["converged"], x$convergence["total"],
               x$boundary, x$objective_type))
-  cat("\nComparison:\n")
-  keep <- intersect(c("K", "Objective", "Objective_gain", "Objective_gain_pct",
-                      "ELBO", "ELBO_gain", "ELBO_gain_pct",
-                      "BIC", "BIC_gain", "BIC_gain_pct", "RMSEA", "SRMR",
-                      "CFI", "TLI", "converged", "iter", "secs"),
-                    names(x$comparison))
-  print(x$comparison[, keep, drop = FALSE], row.names = FALSE)
+  ## One table with the raw criteria, the scale-free gain percentages (each
+  ## marginal gain as % of the largest gain in the window; NA at Kmin), and
+  ## the fit indices, so the selection evidence is read in one place.
+  cat("\nComparison (gains in % of the largest marginal gain):\n")
+  d   <- x$comparison
+  lab <- toupper(x$objective_type)
+  tab <- data.frame(K = d$K)
+  tab[[lab]]                      <- round(d$Objective, 1)
+  tab[[paste0(lab, "_gain%")]]    <- round(d$Objective_gain_pct, 1)
+  tab$BIC                         <- round(d$BIC, 1)
+  tab$`BIC_gain%`                 <- round(d$BIC_gain_pct, 1)
+  for (nm in c("RMSEA", "SRMR", "CFI", "TLI"))
+    if (nm %in% names(d)) tab[[nm]] <- round(d[[nm]], digits)
+  tab$converged <- d$converged
+  tab$` ` <- ifelse(!is.na(x$selected_K) & d$K == x$selected_K, "<- selected", "")
+  print(tab, row.names = FALSE)
+  cat("(Raw gains and timing are kept in $comparison / pefa$sweep.)\n")
   invisible(x)
 }
 
 #' @rdname pefa-methods
-#' @importFrom graphics matplot legend abline
+#' @importFrom graphics abline axis legend lines mtext par
 #' @export
 plot.pefa <- function(x, type = c("objective", "gain", "fit"), ...) {
   type <- match.arg(type)
-  d <- x$sweep
+  d    <- x$sweep
+  K    <- d$K
+  Ksel <- x$selected_K
+  lab  <- toupper(x$objective_type)
+  col1 <- "#1f77b4"; col2 <- "#d62728"   # objective/absolute vs BIC/incremental
+  ## headroom at the top of a y-range so the legend never sits on a curve
+  pad <- function(v, top = 0.30) {
+    r <- range(v, na.rm = TRUE); s <- diff(r)
+    if (s == 0) s <- abs(r[1]) * 0.01 + 1
+    c(r[1] - 0.05 * s, r[2] + top * s)
+  }
+  mark_sel <- function() if (!is.na(Ksel)) abline(v = Ksel, lty = 3, col = "grey40")
+
   if (type == "objective") {
-    matplot(d$K, cbind(Objective = d$Objective, `-BIC` = -d$BIC), type = "b",
-            xlab = "Number of factors (K)", ylab = "Oriented criterion",
-            main = "PEFA objective sweep", ...)
-    legend("bottomright", c(toupper(x$objective_type), "-BIC"), col = 1:2, lty = 1:2,
-           pch = 1:2, bty = "n")
+    ## The objective (higher is better) and BIC (lower is better) live on
+    ## different scales; forcing them onto one axis flattens both curves,
+    ## so each gets its own axis.
+    op <- par(mar = c(5, 4.2, 4, 4.2) + 0.1); on.exit(par(op))
+    plot(K, d$Objective, type = "b", pch = 16, lty = 1, col = col1,
+         ylim = pad(d$Objective), xaxt = "n", xlab = "Number of factors (K)",
+         ylab = paste0(lab, " (higher is better)"),
+         main = "PEFA objective sweep", ...)
+    axis(1, at = K)
+    mark_sel()
+    par(new = TRUE)
+    plot(K, d$BIC, type = "b", pch = 17, lty = 2, col = col2,
+         ylim = pad(d$BIC), axes = FALSE, xlab = "", ylab = "")
+    axis(4, col = col2, col.axis = col2)
+    mtext("BIC (lower is better)", side = 4, line = 2.8, col = col2)
+    legend("top", c(paste(lab, "(left axis)"), "BIC (right axis)",
+                    if (!is.na(Ksel)) sprintf("selected K = %d", Ksel)),
+           col = c(col1, col2, if (!is.na(Ksel)) "grey40"),
+           lty = c(1, 2, if (!is.na(Ksel)) 3),
+           pch = c(16, 17, if (!is.na(Ksel)) NA),
+           ncol = 2, bty = "n", cex = 0.9)
   } else if (type == "gain") {
-    matplot(d$K, cbind(Objective = d$Objective_gain_pct, BIC = d$BIC_gain_pct),
-            type = "b", xlab = "Number of factors (K)",
-            ylab = "Marginal gain (% of maximum)",
-            main = sprintf("PEFA gain sweep (delta = %g%%)", x$delta), ...)
+    ## Marginal gains as % of the largest gain; undefined at Kmin, so the
+    ## curves start one step into the window while the axis shows all of it.
+    ylim <- pad(c(d$Objective_gain_pct, d$BIC_gain_pct, x$delta, 0))
+    plot(K, d$Objective_gain_pct, type = "b", pch = 16, lty = 1, col = col1,
+         ylim = ylim, xlim = range(K), xaxt = "n",
+         xlab = "Number of factors (K)",
+         ylab = "Marginal gain (% of largest gain)",
+         main = sprintf("PEFA gain sweep (delta = %g%%)", x$delta), ...)
+    axis(1, at = K)
+    lines(K, d$BIC_gain_pct, type = "b", pch = 17, lty = 2, col = col2)
+    abline(h = 0, col = "grey85")
     abline(h = x$delta, lty = 3)
-    legend("topright", c(paste(toupper(x$objective_type), "gain"), "BIC gain"), col = 1:2,
-           lty = 1:2, pch = 1:2, bty = "n")
+    mark_sel()
+    legend("top", c(paste(lab, "gain"), "BIC gain",
+                    sprintf("delta = %g%%", x$delta),
+                    if (!is.na(Ksel)) sprintf("selected K = %d", Ksel)),
+           col = c(col1, col2, "black", if (!is.na(Ksel)) "grey40"),
+           lty = c(1, 2, 3, if (!is.na(Ksel)) 3),
+           pch = c(16, 17, NA, if (!is.na(Ksel)) NA),
+           ncol = 2, bty = "n", cex = 0.9)
   } else {
-    matplot(d$K, d[, c("RMSEA", "SRMR", "CFI", "TLI"), drop = FALSE],
-            type = "b", xlab = "Number of factors (K)", ylab = "Fit index",
-            main = "PEFA fit-index sweep", ...)
-    legend("right", c("RMSEA", "SRMR", "CFI", "TLI"), col = 1:4,
-           lty = 1:4, pch = 1:4, bty = "n")
+    ## Absolute misfit (RMSEA/SRMR, near 0) and incremental fit (CFI/TLI,
+    ## near 1) are an order of magnitude apart; one panel each, with the
+    ## conventional cutoffs drawn for orientation.
+    op <- par(mfrow = c(1, 2), mar = c(5, 4.2, 3, 1) + 0.1,
+              oma = c(0, 0, 2, 0)); on.exit(par(op))
+    plot(K, d$RMSEA, type = "b", pch = 16, lty = 1, col = col1,
+         ylim = pad(c(0, d$RMSEA, d$SRMR, 0.1), top = 0.35), xaxt = "n",
+         xlab = "Number of factors (K)", ylab = "Index (lower is better)",
+         main = "Absolute misfit", ...)
+    axis(1, at = K)
+    lines(K, d$SRMR, type = "b", pch = 17, lty = 2, col = col2)
+    abline(h = c(0.06, 0.08), lty = 3, col = "grey60")
+    mark_sel()
+    legend("top", c("RMSEA (cutoff .06)", "SRMR (cutoff .08)"),
+           col = c(col1, col2), lty = 1:2, pch = c(16, 17), bty = "n", cex = 0.9)
+    plot(K, d$CFI, type = "b", pch = 16, lty = 1, col = col1,
+         ylim = c(min(c(d$CFI, d$TLI, 0.9), na.rm = TRUE) - 0.02, 1.02),
+         xaxt = "n", xlab = "Number of factors (K)",
+         ylab = "Index (higher is better)", main = "Incremental fit", ...)
+    axis(1, at = K)
+    lines(K, d$TLI, type = "b", pch = 17, lty = 2, col = col2)
+    abline(h = 0.95, lty = 3, col = "grey60")
+    mark_sel()
+    legend("bottom", c("CFI (cutoff .95)", "TLI (cutoff .95)"),
+           col = c(col1, col2), lty = 1:2, pch = c(16, 17), bty = "n", cex = 0.9)
+    mtext("PEFA fit-index sweep", outer = TRUE, font = 2)
   }
   invisible(x)
 }

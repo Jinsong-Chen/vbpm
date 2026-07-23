@@ -17,12 +17,10 @@ with fit statistics, factor-number selection, and two data simulators.
 
 ## R CMD check results
 
-Status: 1 NOTE.
-
-* **"unable to verify current time"** -- environmental (the check machine could
-  not reach a time server); unrelated to the package.
-
-There are no ERRORs or WARNINGs.
+Status: OK -- no ERRORs, WARNINGs, or NOTEs on the local check. (An
+environmental "unable to verify current time" NOTE has appeared on this
+machine when the time server was unreachable; it is unrelated to the
+package.)
 
 ## Notes for the reviewer
 

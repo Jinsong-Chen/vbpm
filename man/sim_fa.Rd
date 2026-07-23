@@ -15,6 +15,7 @@ sim_fa(
   alt_sign = TRUE,
   phi = 0.5,
   ph12 = -1,
+  gamma = NULL,
   ecr = 0,
   ome_out = FALSE,
   cati = NULL,
@@ -61,6 +62,20 @@ cross-loading items (default \code{TRUE}).}
 \code{phi}). Shared with \code{\link[=sim_lvm]{sim_lvm()}}, which uses \code{ph1} for a
 different purpose (correlation among latent predictors); see \code{\link[=sim_lvm]{sim_lvm()}}
 for that distinction.}
+
+\item{gamma}{Optional second-order loadings for direct \strong{higher-order}
+generation: a scalar or length-\code{K} vector in \eqn{(0, 1)}. When
+supplied, each group factor \eqn{\eta_k} is driven by a general factor
+\eqn{\xi} through \eqn{\eta_k = \gamma_k \xi + \zeta_k}, and the data are
+generated from the equivalent Schmid-Leiman orthogonal bifactor matrix:
+general loadings \eqn{\lambda_j \gamma_k} and group loadings
+\eqn{\lambda_j \sqrt{1 - \gamma_k^2}} (a testlet model is the same model).
+The returned \code{MLA} is this \eqn{J \times (K+1)} bifactor matrix
+(general factor first), \code{PHI} is the identity, and the first-order
+matrix and \code{gamma} are returned as \code{MLA1} and \code{gamma}.
+Incompatible with \code{mla}, \code{cpf > 0}, \code{add_ind},
+\code{add1_ind}, \code{minor}, and \code{zero_it}; \code{phi}/\code{ph12}
+are ignored (the SL solution is orthogonal by construction).}
 
 \item{ecr}{Residual correlation (local dependence).}
 
@@ -138,5 +153,11 @@ mla <- matrix(0, 12, 2)
 mla[1:6, 1] <- .7; mla[7:12, 2] <- c(.8, .7, .6, .7, .8, .6)
 s <- sim_fa(N = 300, mla = mla, phi = .3, rseed = 4)
 s$MLA                      # the generating matrix, as supplied
+
+## higher-order (testlet) data, generated directly: 3 group factors driven
+## by one general factor with second-order loadings .8, .7, .6
+s <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, gamma = c(.8, .7, .6))
+round(s$MLA, 2)            # J x 4 Schmid-Leiman bifactor matrix (general first)
+s$gamma                    # the second-order loadings
 
 }

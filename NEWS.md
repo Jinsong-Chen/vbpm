@@ -3,6 +3,26 @@
 Documentation-and-parallelism release preparing the CRAN submission, plus one
 estimator bug fix.
 
+* **Removed: `vb_fit()`.** The pre-0.4.0 name for `fit_stats()` survived
+  0.4.x as a thin wrapper; it is gone as of this release (before any CRAN
+  submission, so no released API is broken). Use `fit_stats()`.
+* `sim_fa()` gains `gamma` for **direct higher-order (testlet) generation**:
+  a scalar or per-factor vector of second-order loadings in (0, 1) makes each
+  group factor load on one general factor, and the data are generated from
+  the equivalent Schmid-Leiman orthogonal bifactor matrix (returned as `MLA`,
+  with the first-order matrix and `gamma` as `MLA1`/`gamma`). This replaces
+  the hand-built-matrix recipe previously shown in the bifactor vignette.
+* `plot.pefa()` redesigned. The objective panel gives the objective and BIC
+  their own axes (one shared axis flattened both curves into unreadable
+  lines); the fit panel splits absolute misfit (RMSEA/SRMR) and incremental
+  fit (CFI/TLI) into side-by-side panels with conventional cutoffs; all
+  panels use real plotting symbols that match their legends (previously
+  `matplot()` drew digit characters while the legends showed symbols) and
+  mark the selected `K` with a dotted vertical line.
+* `print.summary.pefa()` now prints one compact comparison table with the raw
+  objective and BIC, their marginal **gains as % of the largest gain** (the
+  quantity the selection rule actually thresholds), the fit indices, and a
+  marker on the selected row. Raw gains and timing remain in `$comparison`.
 * **Fixed: inflated residual variances for anchored items under local
   dependence.** The posterior variance of fixed-zero (`Q == 0`) loadings was
   left at its initialization value 1 instead of 0, and the LD branch's
@@ -21,22 +41,32 @@ estimator bug fix.
   `ph1` -> `ph12` to match `sim_lvm()`, so `ph1` now exists only in
   `sim_lvm()`, where it is the correlation among latent predictors. Both help
   pages gained matrix-driven examples and now read as a matched pair.
-* New vignette **bifactor**: orthogonal bifactor estimation, a `pefa()` sweep
-  over bifactor candidates, and the higher-order/testlet connection --
-  simulating from a higher-order CFA via Schmid-Leiman-proportional loadings,
-  checking the SL proportionality constraint on the fitted bifactor,
-  transforming back to higher-order parameters, and computing testlet
-  effect sizes (Zhang & Chen, 2024).
+* New vignette **bifactor**: orthogonal bifactor estimation on true bifactor
+  data, a `pefa()` sweep over bifactor candidates -- including an explicit
+  note that `Kmin`/`Kmax` count the general factor, and a demonstration of
+  why factor-number discovery is intrinsically hard for orthogonal bifactor
+  structure (an omitted group factor is absorbed by the unspecified entries
+  of the remaining columns) -- and the higher-order/testlet connection:
+  simulating a higher-order CFA directly via `sim_fa(gamma = )`, checking the
+  Schmid-Leiman constraint with a mean-CV rule (approximately higher-order
+  when mean CV < .1), transforming back to higher-order parameters via the
+  per-cluster mean ratio, and computing special-effect sizes by Eq. 16 of
+  Zhang & Chen (2024) with posterior-inclusion-based selection of unspecified
+  loadings. The testlet and higher-order models are noted as mathematically
+  equivalent.
 * `vbfa` vignette reorganized: restricted-`Qe` local dependence (testlet-block
   design matrices), a diagonal-vs-LD model comparison via `fit_stats()`,
   executed `v0`-path comparisons, an `ld_control` demonstration, and a
   "Missing data" section stating the missing-at-random assumption
   (Chen, 2021) with simulated and empirical demonstrations. The factor-number
   and bifactor material moved to the `pefa` and `bifactor` vignettes.
-* `pefa` vignette expanded: checkpoint/resume with the provenance manifest
-  (including the refusal on changed settings), executed `plot()` panels,
-  a boundary-extension demonstration, and a sweep on data with minor factors
-  showing the gain rule ignoring dust dimensions.
+* `pefa` vignette expanded: the lead sweep now runs `vbfa()`'s default
+  warm-started `v0` path on a true K = 4 simulation (N = 500, window 2:6 on a
+  K0 = 2 backbone) and recovers it in the interior; checkpoint/resume with
+  the provenance manifest (including the refusal on changed settings),
+  executed `plot()` panels, a boundary demonstration on the same data, and a
+  sweep on data with minor factors showing the gain rule ignoring dust
+  dimensions.
 * `vbmimic` vignette: missing responses in `Y` demonstrated.
 * Housekeeping: stale `tmp/` artifacts and the sibling `vbpm.Rcheck/` removed;
   references across README and vignettes made consistent, adding Chen (2021,

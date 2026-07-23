@@ -36,16 +36,17 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
   plus the model's objective. An S3 generic over fitted models: it builds the
   implied covariance from the residual covariance, so it is correct for
   diagonal *and* local-dependence `vbfa` fits, and it reads `orthogonal`/`ld`
-  from the fit rather than asking you to repeat them. (`vb_fit()` is the
-  pre-0.4.0 name, retained as a wrapper.)
+  from the fit rather than asking you to repeat them.
 - **`pefa()`** / **`select_K_elbow()`** — sweep the number of factors and
   select it with a scale-free gain rule. `pefa()` returns a sweep object with
   `summary()`, `plot()`, and `selected_fit()`.
 - **`sim_fa()`** and **`sim_lvm()`** — two complementary data generators.
   `sim_fa()` is driven by the loading *pattern* (items per factor, alternating
-  cross-loadings, minor factors); `sim_lvm()` is driven by a loading *matrix*
-  and covers predictor designs (observed and latent) and mixed response
-  formats. Both simulate local dependence, categorical items, and missingness.
+  cross-loadings, minor factors) and can generate **higher-order/testlet**
+  data directly (`gamma =` second-order loadings, via the Schmid-Leiman
+  equivalence); `sim_lvm()` is driven by a loading *matrix* and covers
+  predictor designs (observed and latent) and mixed response formats. Both
+  simulate local dependence, categorical items, and missingness.
 
 ## Installation
 

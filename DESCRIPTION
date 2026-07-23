@@ -7,7 +7,7 @@ Authors@R: c(
            role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-0157-5469")),
     person("Yi", "Jin", role = "aut",
-           comment = "first author of the method papers and the estimator"))
+           comment = c(ORCID = "0000-0002-8604-5992")))
 Description: Variational Bayes estimation for a family of psychometric
     measurement models. Two models are provided. Variational Bayes factor
     analysis (vbfa) is a regularized partially confirmatory factor model

@@ -40,6 +40,20 @@
 #' different purpose (correlation among latent predictors); see [sim_lvm()]
 #' for that distinction.
 #'
+#' @param gamma Optional second-order loadings for direct \strong{higher-order}
+#' generation: a scalar or length-\code{K} vector in \eqn{(0, 1)}. When
+#' supplied, each group factor \eqn{\eta_k} is driven by a general factor
+#' \eqn{\xi} through \eqn{\eta_k = \gamma_k \xi + \zeta_k}, and the data are
+#' generated from the equivalent Schmid-Leiman orthogonal bifactor matrix:
+#' general loadings \eqn{\lambda_j \gamma_k} and group loadings
+#' \eqn{\lambda_j \sqrt{1 - \gamma_k^2}} (a testlet model is the same model).
+#' The returned \code{MLA} is this \eqn{J \times (K+1)} bifactor matrix
+#' (general factor first), \code{PHI} is the identity, and the first-order
+#' matrix and \code{gamma} are returned as \code{MLA1} and \code{gamma}.
+#' Incompatible with \code{mla}, \code{cpf > 0}, \code{add_ind},
+#' \code{add1_ind}, \code{minor}, and \code{zero_it}; \code{phi}/\code{ph12}
+#' are ignored (the SL solution is orthogonal by construction).
+#'
 #' @param ecr Residual correlation (local dependence).
 #'
 #' @param ome_out Output factor score or not.
@@ -109,10 +123,16 @@
 #' s <- sim_fa(N = 300, mla = mla, phi = .3, rseed = 4)
 #' s$MLA                      # the generating matrix, as supplied
 #'
+#' ## higher-order (testlet) data, generated directly: 3 group factors driven
+#' ## by one general factor with second-order loadings .8, .7, .6
+#' s <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, gamma = c(.8, .7, .6))
+#' round(s$MLA, 2)            # J x 4 Schmid-Leiman bifactor matrix (general first)
+#' s$gamma                    # the second-order loadings
+#'
 #' @importFrom MASS mvrnorm
 #' @export
 sim_fa <- function(N = 1000, mla = NULL, K = 3, ipf = 8, cpf = 2, lam = 0.7, lac = 0.3, alt_sign = TRUE, phi = 0.5, ph12 = -1,
-        ecr = .0, ome_out = FALSE,cati = NULL, noc = c(4), misp = 0, rseed = 333,
+        gamma = NULL, ecr = .0, ome_out = FALSE,cati = NULL, noc = c(4), misp = 0, rseed = 333,
         necw=K,necb=K,add_ind=c(),add_la=0,add_phi=0,
         add1_ind=c(), add1_la=0, add1_phi=0, zero_it=0, minor=NULL, digits = 4) {
 
@@ -134,6 +154,22 @@ sim_fa <- function(N = 1000, mla = NULL, K = 3, ipf = 8, cpf = 2, lam = 0.7, lac
     on.exit(options(oo))  # code line i+1
     # old_digits <- getOption("digits")
     options(digits = digits)
+
+    use_ho <- !is.null(gamma)
+    if (use_ho) {
+        if (!is.null(mla))
+            stop("gamma (higher-order generation) cannot be combined with a supplied mla.", call. = FALSE)
+        if ((!missing(cpf) && cpf > 0) || length(add_ind) > 0 ||
+            length(add1_ind) > 0 || length(minor) > 0 || zero_it > 0)
+            stop("gamma (higher-order generation) is incompatible with cpf > 0, add_ind, add1_ind, minor, and zero_it.", call. = FALSE)
+        cpf <- 0                      # simple structure at the first order
+        if (!is.numeric(gamma) || any(!is.finite(gamma)) ||
+            any(gamma <= 0) || any(gamma >= 1))
+            stop("gamma must be numeric in (0, 1).", call. = FALSE)
+        if (length(gamma) != 1L && length(gamma) != K)
+            stop("gamma must be a scalar or a length-K vector.", call. = FALSE)
+        gamma <- rep_len(as.numeric(gamma), K)
+    }
 
     use_mla <- !is.null(mla)
     if (use_mla) {
@@ -176,6 +212,22 @@ sim_fa <- function(N = 1000, mla = NULL, K = 3, ipf = 8, cpf = 2, lam = 0.7, lac
 
     J <- K * ipf
     K1<-K
+
+    ## higher-order generation: replace the first-order structure by its
+    ## Schmid-Leiman orthogonal bifactor equivalent. For item j on group
+    ## factor k with first-order loading lambda_j and second-order loading
+    ## gamma_k: general loading = lambda_j * gamma_k, group loading =
+    ## lambda_j * sqrt(1 - gamma_k^2). With cpf = 0 each row of mla has a
+    ## single nonzero entry, so mla %*% gamma gives the general column.
+    if (use_ho) {
+        mla1 <- mla                                  # first-order J x K
+        gen  <- as.vector(mla1 %*% gamma)
+        grp  <- sweep(mla1, 2, sqrt(1 - gamma^2), "*")
+        mla  <- cbind(gen, grp, deparse.level = 0)
+        K1   <- K + 1
+        PHI  <- diag(K1)                             # orthogonal by construction
+    }
+
     if(length(add_ind)>0){
         # len<-length(add_ind)
         K1<-K+1
@@ -262,6 +314,10 @@ sim_fa <- function(N = 1000, mla = NULL, K = 3, ipf = 8, cpf = 2, lam = 0.7, lac
     eigen <- diag(crossprod(mla))
 
     out <- list(N = N, PHI = PHI, MLA = mla, Eigen = eigen, PSX = ecm, scale = scale)
+    if (use_ho) {
+        out$MLA1  <- mla1                 # first-order loading matrix (J x K)
+        out$gamma <- gamma                # second-order loadings
+    }
     if (ome_out)
         out$OME <- eta
 

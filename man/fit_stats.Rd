@@ -5,7 +5,6 @@
 \alias{fit_stats.vbfa}
 \alias{fit_stats.vbmimic}
 \alias{fit_stats.vbpm_fit}
-\alias{vb_fit}
 \title{Fit statistics for vbpm models}
 \usage{
 fit_stats(object, ...)
@@ -25,12 +24,9 @@ fit_stats(object, ...)
 \method{fit_stats}{vbmimic}(object, Y = NULL, Q = NULL, tau = 0.5, ...)
 
 \method{fit_stats}{vbpm_fit}(object, ...)
-
-vb_fit(fit, Y, Q = fit$Q, ...)
 }
 \arguments{
-\item{object, fit}{A fitted \code{vbpm_fit} object. \code{fit} is the historical
-argument name retained by \code{\link[=vb_fit]{vb_fit()}}.}
+\item{object}{A fitted \code{vbpm_fit} object.}
 
 \item{...}{Further arguments passed to methods. Unused by the methods
 supplied with the package.}

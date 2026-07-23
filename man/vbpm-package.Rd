@@ -22,7 +22,7 @@ Useful links:
 Authors:
 \itemize{
   \item Jinsong Chen \email{jinsong.chen@live.com} (\href{https://orcid.org/0000-0002-0157-5469}{ORCID})
-  \item Yi Jin (first author of the method papers and the estimator)
+  \item Yi Jin (\href{https://orcid.org/0000-0002-8604-5992}{ORCID})
 }
 
 }

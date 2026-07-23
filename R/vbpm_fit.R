@@ -54,16 +54,6 @@
 #' `c("glm", "lm")`, not class `"lm"` with a family field. So: dispatch on the
 #' classes, read `$model` for display and bookkeeping.
 #'
-#' @section `vbpm_fit` versus `vb_fit()`:
-#' These two names look related and are not, which is worth stating once.
-#' `vbpm_fit` is the **class of a fitted model** -- what [vbfa()] and
-#' [vbmimic()] return. `vb_fit()` was the pre-0.4.0 **name of the function
-#' that computes fit statistics**, now [fit_stats()]; it survives only as a
-#' thin wrapper for old scripts. So a `vbpm_fit` is an input to
-#' `fit_stats()`, never its output, and `vb_fit()` never returned a
-#' `vbpm_fit`. New code should use [fit_stats()] and can ignore `vb_fit()`
-#' entirely.
-#'
 #' @section What is deliberately NOT hidden:
 #' Some R packages wrap results in opaque objects whose internals are
 #' discouraged territory. `vbpm` does the opposite: the list components are

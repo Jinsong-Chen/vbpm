@@ -18,17 +18,36 @@ comparison table, but is not itself a fitted probability model. "Path" is
 reserved for within-fit continuation sequences such as `v0` or `xi0`.
 
 ```{r sweep}
-s <- sim_fa(N = 250, K = 3, ipf = 5, rseed = 19)
-Y <- s$dat
-Q0 <- matrix(-1L, ncol(Y), 2)
+sim <- sim_fa(N = 500, K = 4, ipf = 5, cpf = 0, lam = .7, phi = .3, rseed = 123)
+Y <- sim$dat
+Q0 <- matrix(-1L, ncol(Y), 2)      # K0 = 2 backbone
 Q0[1:2, ] <- 0L; Q0[1:2, 1] <- 1L
 Q0[6:7, ] <- 0L; Q0[6:7, 2] <- 1L
-
-p <- pefa(Q0, Y, Kmin = 2, Kmax = 4, v0 = 0.001, max_it = 500,
-          verbose = FALSE)
+p <- pefa(Q0, Y, Kmin = 2, Kmax = 6, verbose = FALSE)
 summary(p)
 selected_fit(p)
 ```
+
+The data were simulated with a true K = 4, and the sweep recovers it: all five
+candidates converge, and the gain rule stops at K = 4 in the interior of the
+2:6 window. No `v0` or `max_it` was passed to `pefa()` here -- the call runs
+with `vbfa()`'s default warm-started path, `v0 = c(.01, .005, .002, .001)`,
+which is the estimator's recommended mode, so the sweep needed no tuning at
+all.
+
+The summary's comparison table lines up the evidence that the gain rule acts
+on next to the fit indices that a reader would sanity-check it against. ELBO
+climbs sharply from K = 2 to K = 3 to K = 4, then *drops* at K = 5 and K = 6 --
+adding factors beyond the true number no longer improves the objective, it
+makes the fit slightly worse. The `ELBO_gain%` column expresses each marginal
+step as a percentage of the largest gain seen anywhere in the window (here the
+K = 2 -> 3 step, fixed at 100): K = 3 -> 4 keeps 83.7% of that gain, while
+K = 4 -> 5 and K = 5 -> 6 are negative. BIC gain tells the same story (87.9%,
+then -2.0%, then 0.0%). RMSEA falls from .118 to .082 to .014 and then flattens
+at .012; CFI rises from .629 to .823 to .995 and then flattens at .996. Every
+criterion -- objective, BIC, and the fit indices -- agrees that the structure
+is exhausted at K = 4 and that K = 5 and K = 6 add nothing but two more free
+factors chasing noise.
 
 The summary reports raw objective, objective-gain, raw BIC, and BIC-gain
 selections (plus raw ELBO/ELBO-gain when the objective is the ELBO). The
@@ -73,57 +92,63 @@ select_K_elbow(p$sweep$K, p$sweep$Objective)
 
 ## Visualizing the sweep
 
-`plot.pefa()` has three panels: the oriented objective and `-BIC` curves, the
-marginal-gain curves against the `delta` threshold line, and the fit-index
-curves.
+`plot.pefa()` has three panel types, selected with `type`.
 
-```{r plots, fig.width=6, fig.height=4}
+`type = "objective"` puts the oriented objective (ELBO here; higher is
+better) on the left axis and `BIC` (lower is better) on its own right axis --
+the two live on different scales, so forcing them onto one shared axis would
+flatten both curves. A dotted vertical line marks the selected K.
+
+```{r plot-objective, fig.width=7, fig.height=4.5}
 plot(p, type = "objective")
+```
+
+`type = "gain"` plots the marginal gains as a percentage of the largest gain
+in the window, together with the `delta` threshold line and the selected-K
+line. Gains are undefined at `Kmin` (there is no step into the first
+candidate), so both curves start one step into the window even though the
+x-axis spans the whole thing.
+
+```{r plot-gain, fig.width=7, fig.height=4.5}
 plot(p, type = "gain")
+```
+
+`type = "fit"` draws two panels side by side: absolute misfit (RMSEA and
+SRMR, with the conventional .06/.08 cutoffs shown as dotted lines) and
+incremental fit (CFI and TLI, with the conventional .95 cutoff). Both panels
+mark the selected K.
+
+```{r plot-fit, fig.width=9, fig.height=4.5}
 plot(p, type = "fit")
 ```
 
 ## Boundary selections: a prompt to extend, not an answer
 
 If the window is too narrow, the gain rule can only pick the largest K it was
-offered -- that is a boundary selection, not evidence that K is correct. Take
-data simulated with a true K = 4, and sweep only K = 2:4:
-
-```{r boundary-sim}
-sim4 <- sim_fa(N = 400, K = 4, ipf = 5, lam = .7, lac = .3, rseed = 7)
-Y4 <- sim4$dat
-J4 <- ncol(Y4)
-Q0_4 <- matrix(-1L, J4, 2)
-for (k in 1:2) {
-  a <- which(rep(1:4, each = 5) == k)[1:2]
-  Q0_4[a, ] <- 0L; Q0_4[a, k] <- 1L
-}
-```
+offered -- that is a boundary selection, not evidence that K is correct. Reuse
+the same `Y` from the lead sweep (true K = 4), but this time restrict the
+window to K = 2:4:
 
 ```{r boundary-narrow}
-p_narrow <- pefa(Q0_4, Y4, Kmin = 2, Kmax = 4, v0 = 0.001, max_it = 500,
-                 verbose = FALSE)
+p_narrow <- pefa(Q0, Y, Kmin = 2, Kmax = 4, verbose = FALSE)
 p_narrow$selected_K
 summary(p_narrow)$boundary
 ```
 
-`summary()$boundary` is `"upper"`: the sweep picked the top of the window it
-was given, which is exactly what a window that stops too early looks like.
-Extend `Kmax` and check again:
+`summary()$boundary` is `"upper"`: within 2:4 both marginal gains stay above
+the `delta` threshold, so the rule never finds a sustained sub-threshold run
+and simply stops at the top of the window it was given -- exactly what a
+window that stops too early looks like, even though K = 4 happens to be the
+right answer here.
 
-```{r boundary-wide}
-p_wide <- pefa(Q0_4, Y4, Kmin = 2, Kmax = 6, v0 = 0.001, max_it = 500,
-               verbose = FALSE)
-p_wide$selected_K
-summary(p_wide)$boundary
-```
-
-Now the selection is `"interior"` at the true K = 4: two more candidates on
-either side confirm nothing better is being left out. The rule for using
-`boundary`: a `"lower"` or `"upper"` result is never a settled answer about
-dimensionality by itself, only an instruction to widen the window in that
-direction and re-run until the selection lands in the interior (or a
-principled reason exists to stop, e.g. `Kmin`/`Kmax` are already at a
+The lead sweep `p` already shows what widening the window resolves: run on
+the same data with `Kmax = 6` instead of 4, the selection lands in the
+interior at K = 4 (`summary(p)$boundary` is `"interior"`), because two more
+candidates on either side confirm nothing better is being left out. The rule
+for using `boundary`: a `"lower"` or `"upper"` result is never a settled
+answer about dimensionality by itself, only an instruction to widen the
+window in that direction and re-run until the selection lands in the interior
+(or a principled reason exists to stop, e.g. `Kmin`/`Kmax` are already at a
 substantive limit).
 
 ## Minor factors: reading dust as dust
@@ -133,7 +158,10 @@ weak it barely deserves the name "factor". `sim_fa(..., minor = c("weak",
 "moderate"))` plants two orthogonal minor factors that load weakly (or
 moderately) on every item, following the minor-factor definitions of
 Auerswald and Moshagen (2019) -- these are not noise, they are real
-population parameters, just tiny ones.
+population parameters, just tiny ones. The auxiliary sweeps below fix
+`v0 = 0.001` (skipping the warm-started default's earlier stages) so the
+vignette builds quickly; the lead sweep above is the one run in `vbfa()`'s
+recommended default mode.
 
 ```{r minor-sim}
 simM <- sim_fa(N = 400, K = 3, ipf = 6, lam = .7, lac = .3,

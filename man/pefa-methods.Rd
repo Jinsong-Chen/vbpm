@@ -18,7 +18,7 @@ selected_fit(object, ...)
 
 \method{summary}{pefa}(object, ...)
 
-\method{print}{summary.pefa}(x, ...)
+\method{print}{summary.pefa}(x, digits = 3, ...)
 
 \method{plot}{pefa}(x, type = c("objective", "gain", "fit"), ...)
 }
@@ -28,7 +28,16 @@ selected_fit(object, ...)
 \item{...}{Further arguments. For \code{plot()}, graphical arguments passed to
 base plotting functions.}
 
-\item{type}{Plot type: objective curves, marginal gains, or fit indices.}
+\item{digits}{Number of decimals for the fit indices in the printed
+comparison table (gain percentages always print with one decimal).}
+
+\item{type}{Plot type. \code{"objective"} draws the objective (left axis) and
+BIC (right axis) on their own scales; \code{"gain"} draws the marginal gains
+as a percentage of the largest gain, with the \code{delta} threshold
+(gains are undefined at \code{Kmin}, so those curves start one step into the
+window); \code{"fit"} draws absolute misfit (RMSEA/SRMR) and incremental fit
+(CFI/TLI) in separate panels with conventional cutoffs. All types mark
+the selected \code{K} with a dotted vertical line.}
 }
 \value{
 \code{summary.pefa()} returns an object of class \code{summary.pefa} with

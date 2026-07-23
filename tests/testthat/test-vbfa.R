@@ -134,7 +134,7 @@ test_that("the ld switch governs Qe", {
   expect_equal(dim(f2$Psi), c(24L, 24L))
 })
 
-test_that("fit_stats is generic, preserves vb_fit, and supports LD fits", {
+test_that("fit_stats is generic and supports LD fits", {
   d <- make_dat()
   f <- vbfa(d$Y, d$Q, convChk = FALSE)
   fs <- fit_stats(f)
@@ -143,22 +143,21 @@ test_that("fit_stats is generic, preserves vb_fit, and supports LD fits", {
   ## for a diagonal fit the objective IS the ELBO; under LD it is the VECM
   ## objective, where ELBO is NA. The README promises this element.
   expect_equal(unname(fs["objective"]), unname(fs["ELBO"]))
-  expect_identical(unname(vb_fit(f, d$Y, d$Q)), unname(fs))
   fl <- vbfa(d$Y, d$Q, ld = TRUE, convChk = FALSE, max_it = 300, tolVal = 1e-3)
   fsl <- fit_stats(fl)
   expect_true(all(is.finite(fsl[c("RMSEA", "SRMR", "CFI", "TLI", "BIC")])))
   expect_identical(attr(fsl, "objective_type"), "vecm")
 })
 
-test_that("vb_fit reads orthogonal from the fit (the bifactor footgun)", {
+test_that("fit_stats reads orthogonal from the fit (the bifactor footgun)", {
   d  <- make_dat()
   Qb <- cbind(1L, d$Q)
   fb <- vbfa(d$Y, Qb, orthogonal = TRUE, convChk = FALSE)
 
   ## the default call now counts the bifactor correctly: no free factor
   ## correlations. Before the fix it silently added K(K-1)/2 of them.
-  fs_default  <- vb_fit(fb, d$Y, Qb)
-  fs_explicit <- vb_fit(fb, d$Y, Qb, orthogonal = TRUE)
+  fs_default  <- fit_stats(fb, Y = d$Y, Q = Qb)
+  fs_explicit <- fit_stats(fb, Y = d$Y, Q = Qb, orthogonal = TRUE)
   expect_identical(fs_default, fs_explicit)
   K <- ncol(Qb)
   expect_equal(unname(fs_default["t_nom"]),
@@ -166,9 +165,9 @@ test_that("vb_fit reads orthogonal from the fit (the bifactor footgun)", {
                                             p[Qb == 0] <- 0; p >= .5})) + 24)
 
   ## a contradictory value errors instead of miscounting
-  expect_error(vb_fit(fb, d$Y, Qb, orthogonal = FALSE), "contradicts")
+  expect_error(fit_stats(fb, Y = d$Y, Q = Qb, orthogonal = FALSE), "contradicts")
   fo <- vbfa(d$Y, d$Q, convChk = FALSE)
-  expect_error(vb_fit(fo, d$Y, d$Q, orthogonal = TRUE), "contradicts")
+  expect_error(fit_stats(fo, Y = d$Y, Q = d$Q, orthogonal = TRUE), "contradicts")
 })
 
 test_that("pefa selects a factor number within the window", {
