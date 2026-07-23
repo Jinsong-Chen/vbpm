@@ -14,7 +14,7 @@ library(vbpm)
 
 `pefa()` evaluates a factor-number *window*. The returned `pefa` object is also
 a `vbpm_sweep`: it contains the candidate `vbpm_fit` objects and their
-comparison table, but is not itself a fitted probability model. “Path” is
+comparison table, but is not itself a fitted probability model. "Path" is
 reserved for within-fit continuation sequences such as `v0` or `xi0`.
 
 ```{r sweep}
@@ -24,20 +24,217 @@ Q0 <- matrix(-1L, ncol(Y), 2)
 Q0[1:2, ] <- 0L; Q0[1:2, 1] <- 1L
 Q0[6:7, ] <- 0L; Q0[6:7, 2] <- 1L
 
-p <- pefa(Q0, Y, Kmin = 2, Kmax = 4, v0 = 0.001,
+p <- pefa(Q0, Y, Kmin = 2, Kmax = 4, v0 = 0.001, max_it = 500,
           verbose = FALSE)
 summary(p)
 selected_fit(p)
 ```
 
-The summary reports raw objective, objective-gain, raw ELBO, ELBO-gain, raw
-BIC, and BIC-gain selections. For ordinary `vbfa` the objective is the ELBO.
-For LD-aware sweeps it is the manuscript V4 VECM objective, so the ELBO fields
-are intentionally `NA`. The primary rule is always `objective_gain`; a
-boundary result is a prompt to extend the candidate window in that direction.
+The summary reports raw objective, objective-gain, raw BIC, and BIC-gain
+selections (plus raw ELBO/ELBO-gain when the objective is the ELBO). The
+primary rule is always `objective_gain`; a boundary result is a prompt to
+extend the candidate window in that direction. The rest of this vignette
+unpacks that rule, shows it on plots and on two deliberately awkward
+simulations, and demonstrates checkpointing a long sweep.
 
-```{r plots, eval=FALSE}
+## The gain rule
+
+`pefa()` selects K with `select_K_elbow()`, exported so it can be applied to
+any criterion curve, not only a `pefa` sweep. The idea: walk the window from
+`Kmin` to `Kmax` and look at the *marginal* gain of each added factor (the
+step-to-step change in the criterion, with the criterion oriented so that
+larger is better). A factor is worth keeping while its marginal gain is at
+least `delta` percent of the largest gain seen anywhere in the window;
+selection stops at the first *sustained* run of `sustain` consecutive
+sub-threshold steps (or, if the run never sustains, at `Kmax`). Because the
+threshold is a fraction of the window's own largest gain, the rule is
+scale-free: it does not care about sample size, item count, or the units of
+the criterion.
+
+A toy curve makes the mechanics concrete. Suppose ELBO keeps climbing sharply
+through K = 4, then only creeps:
+
+```{r elbow-toy}
+elbo <- c(-5400, -5100, -4900, -4895, -4892)
+select_K_elbow(2:6, elbo)
+```
+
+The gains are `r diff(elbo)`: two large jumps, then two small ones. The
+largest gain is 300 (K = 3 -> 4), so with the default `delta = 10` the
+threshold is 30; both remaining steps (5 and 3) fall under it, `sustain = 2`
+is satisfied immediately, and the rule stops at K = 4.
+
+The same function reads directly off a sweep's own comparison table --
+`select_K_elbow()` is exactly what `pefa()` calls internally on `Objective`:
+
+```{r elbow-sweep}
+select_K_elbow(p$sweep$K, p$sweep$Objective)
+```
+
+## Visualizing the sweep
+
+`plot.pefa()` has three panels: the oriented objective and `-BIC` curves, the
+marginal-gain curves against the `delta` threshold line, and the fit-index
+curves.
+
+```{r plots, fig.width=6, fig.height=4}
 plot(p, type = "objective")
 plot(p, type = "gain")
 plot(p, type = "fit")
 ```
+
+## Boundary selections: a prompt to extend, not an answer
+
+If the window is too narrow, the gain rule can only pick the largest K it was
+offered -- that is a boundary selection, not evidence that K is correct. Take
+data simulated with a true K = 4, and sweep only K = 2:4:
+
+```{r boundary-sim}
+sim4 <- sim_fa(N = 400, K = 4, ipf = 5, lam = .7, lac = .3, rseed = 7)
+Y4 <- sim4$dat
+J4 <- ncol(Y4)
+Q0_4 <- matrix(-1L, J4, 2)
+for (k in 1:2) {
+  a <- which(rep(1:4, each = 5) == k)[1:2]
+  Q0_4[a, ] <- 0L; Q0_4[a, k] <- 1L
+}
+```
+
+```{r boundary-narrow}
+p_narrow <- pefa(Q0_4, Y4, Kmin = 2, Kmax = 4, v0 = 0.001, max_it = 500,
+                 verbose = FALSE)
+p_narrow$selected_K
+summary(p_narrow)$boundary
+```
+
+`summary()$boundary` is `"upper"`: the sweep picked the top of the window it
+was given, which is exactly what a window that stops too early looks like.
+Extend `Kmax` and check again:
+
+```{r boundary-wide}
+p_wide <- pefa(Q0_4, Y4, Kmin = 2, Kmax = 6, v0 = 0.001, max_it = 500,
+               verbose = FALSE)
+p_wide$selected_K
+summary(p_wide)$boundary
+```
+
+Now the selection is `"interior"` at the true K = 4: two more candidates on
+either side confirm nothing better is being left out. The rule for using
+`boundary`: a `"lower"` or `"upper"` result is never a settled answer about
+dimensionality by itself, only an instruction to widen the window in that
+direction and re-run until the selection lands in the interior (or a
+principled reason exists to stop, e.g. `Kmin`/`Kmax` are already at a
+substantive limit).
+
+## Minor factors: reading dust as dust
+
+A harder case is data that truly *does* have extra structure, but structure so
+weak it barely deserves the name "factor". `sim_fa(..., minor = c("weak",
+"moderate"))` plants two orthogonal minor factors that load weakly (or
+moderately) on every item, following the minor-factor definitions of
+Auerswald and Moshagen (2019) -- these are not noise, they are real
+population parameters, just tiny ones.
+
+```{r minor-sim}
+simM <- sim_fa(N = 400, K = 3, ipf = 6, lam = .7, lac = .3,
+               minor = c("weak", "moderate"), rseed = 11)
+Ym <- simM$dat
+Jm <- ncol(Ym)
+Q0m <- matrix(-1L, Jm, 2)
+for (k in 1:2) {
+  a <- which(rep(1:3, each = 6) == k)[1:2]
+  Q0m[a, ] <- 0L; Q0m[a, k] <- 1L
+}
+pm <- pefa(Q0m, Ym, Kmin = 2, Kmax = 6, v0 = 0.001, max_it = 500,
+           verbose = FALSE)
+pm$selected_K
+pm$sweep[, c("K", "Objective", "Objective_gain_pct", "BIC",
+             "RMSEA", "SRMR", "CFI", "TLI")]
+```
+
+The gain rule stops at K = 3 -- the three substantive factors -- even though
+the population has two more, very real, orthogonal minor factors on top.
+Look at `SRMR`: it keeps falling all the way to K = 6, because two more
+free factors always let the model absorb a little more residual covariance,
+however trivial. A criterion read on its raw scale (lowest SRMR, or highest
+CFI/TLI) would keep climbing the window and never stop cleanly. The
+scale-free gain threshold does not: past K = 3 the marginal improvement is a
+small fraction of the K = 2 -> 3 jump, so it reads as dust rather than
+structure. This is the gain rule's core selling point -- it is built to tell
+substantive dimensions from minor ones, not just to find *some* local
+improvement.
+
+## Checkpointing a sweep: the provenance manifest
+
+Each candidate in a window is a full `vbfa()` fit, so a wide sweep can be
+slow enough to want resuming across sessions. `save_path` writes a CSV
+checkpoint plus a sidecar `<save_path>.manifest`:
+
+```{r checkpoint-run}
+cp <- tempfile(fileext = ".csv")
+p1 <- pefa(Q0, Y, Kmin = 2, Kmax = 4, v0 = 0.001, max_it = 500,
+           save_path = cp, verbose = FALSE)
+file.exists(cp)
+file.exists(paste0(cp, ".manifest"))
+```
+
+Calling `pefa()` again with the *same* data, design, window, and settings
+finds the checkpoint and reuses every row instead of refitting:
+
+```{r checkpoint-resume}
+p2 <- pefa(Q0, Y, Kmin = 2, Kmax = 4, v0 = 0.001, max_it = 500,
+           save_path = cp, verbose = TRUE)
+identical(p1$selected_K, p2$selected_K)
+all.equal(summary(p1)$comparison$Objective, summary(p2)$comparison$Objective)
+```
+
+The `(from checkpoint)` lines above show every K being served from the CSV;
+`vbfa()` is deterministic, so the reused rows agree with a fresh fit to
+floating-point precision.
+
+Now change one setting that affects comparability -- say `v0` -- and try to
+resume from the same checkpoint:
+
+```{r checkpoint-refuse}
+bad <- try(
+  pefa(Q0, Y, Kmin = 2, Kmax = 4, v0 = 0.01, max_it = 500,
+       save_path = cp, verbose = FALSE),
+  silent = TRUE
+)
+cat(conditionMessage(attr(bad, "condition")))
+```
+
+```{r checkpoint-cleanup, include=FALSE}
+unlink(c(cp, paste0(cp, ".manifest")))
+```
+
+The manifest records the data, design, window, and every tuning setting that
+affects comparability (including anything passed through `...`, such as
+`v0`), and names exactly what differs. Resuming by matching `K` alone would
+silently pool candidates fit under different regularization -- rows that look
+comparable in a table but are not -- so the checkpoint refuses instead.
+Delete the checkpoint (or pick a new `save_path`) to start over deliberately.
+
+## Objective-type discipline
+
+`pefa()` does not assume the objective is always the ELBO. For ordinary
+(diagonal) `vbfa` sweeps it is the ELBO; for LD-aware sweeps (`ld = TRUE`) it
+is the manuscript V4 terminal VECM objective instead, and the ELBO-specific
+columns and selections (`elbo`, `elbo_gain`) are `NA` because the residual
+precision there is point-updated rather than given a full variational
+distribution. `objective_gain` remains the primary rule in both cases, just
+computed on whichever objective the candidates actually share. What `pefa()`
+will not do is mix the two silently: every candidate in a window is fit with
+the same `ld` setting, but if a sweep is ever assembled from candidates whose
+`objective_type` differs, `pefa()` refuses with an explicit error rather than
+comparing ELBO to a VECM objective as though they were the same scale.
+
+## References
+
+* Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
+  Bayesian variable selection: Fit assessment and factor-number selection in
+  partially exploratory factor analysis. *arXiv preprint* arXiv:2607.07159.
+* Auerswald, M., & Moshagen, M. (2019). How to determine the number of
+  factors to retain in exploratory factor analysis: A comparison of
+  extraction methods under realistic conditions. *Psychological Methods*,
+  24(4), 468-491.

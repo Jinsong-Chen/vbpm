@@ -177,6 +177,10 @@ Chen, J., Guo, Z., Zhang, L., & Pan, J. (2021). A partially confirmatory
 approach to scale development with the Bayesian Lasso. \emph{Psychological
 Methods}, 26(2), 210-235. \doi{10.1037/met0000293}
 
+Chen, J. (2021). A generalized partially confirmatory factor analysis
+framework with mixed Bayesian Lasso methods. \emph{Multivariate Behavioral
+Research}, 57(6), 879-894. \doi{10.1080/00273171.2021.1925520}
+
 Jin, Y., & Chen, J. (2025). Regularized variational approximation for
 partially confirmatory factor analysis. \emph{Structural Equation Modeling: A
 Multidisciplinary Journal}, 32(3), 437-449.

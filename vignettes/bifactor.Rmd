@@ -1,0 +1,240 @@
+---
+title: "Bifactor, higher-order, and testlet structures"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Bifactor, higher-order, and testlet structures}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(vbpm)
+```
+
+This vignette collects three related structures that all attach "extra"
+factors to a set of primary or group factors: the orthogonal **bifactor**
+model, sweeping a **factor-number window** over bifactor candidates with
+`pefa()`, and the connection between bifactor, **higher-order**, and
+**testlet** parameterizations via the Schmid-Leiman transformation. All data
+here are simulated; nothing is loaded from disk.
+
+## 1. Orthogonal bifactor basics
+
+`orthogonal = TRUE` fixes the factor correlation matrix at the identity. With
+a design whose first column is a general factor (every item loads) plus group
+columns, this is an identified orthogonal bifactor model.
+
+```{r bifactor-simulate}
+sim <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
+Y <- sim$dat
+
+## two anchors per factor; everything else left to the data
+Q <- matrix(-1L, ncol(Y), 3)
+for (k in 1:3) {
+  a <- which(rep(1:3, each = 6) == k)[1:2]
+  Q[a, ] <- 0L
+  Q[a, k] <- 1L
+}
+```
+
+Prepend a general column that every item loads on -- `Qb <- cbind(1L, Q)` --
+and fit with `orthogonal = TRUE`:
+
+```{r bifactor-fit}
+Qb <- cbind(1L, Q)
+fb <- vbfa(Y, Qb, orthogonal = TRUE)
+fb$Phi                 # identity by construction, not estimated
+round(fit_stats(fb), 3)
+```
+
+`fit_stats()` reads `orthogonal` (and `ld`) from the fit object itself, so a
+bifactor fit needs no extra argument at the `fit_stats()` call -- and
+supplying a contradictory one is an error, not a silent miscount.
+
+## 2. A pefa sweep over bifactor candidates
+
+The same gain-rule sweep from `pefa()` works with a bifactor backbone: keep the
+general column fixed and specified, anchor two items per group factor, and let
+`pefa()` pad the rest of the window with exploratory group columns.
+
+```{r pefa-sweep}
+cl <- rep(1:3, each = 6)
+
+## backbone: general column (every item loads) + 2 anchored group columns
+Q0 <- matrix(-1L, ncol(Y), 3)
+Q0[, 1] <- 1L                              # general factor
+for (k in 1:2) {
+  a <- which(cl == k)[1:2]
+  Q0[a, 2:3] <- 0L
+  Q0[a, k + 1] <- 1L
+}
+
+r <- pefa(Q0, Y, Kmin = 3, Kmax = 5, orthogonal = TRUE, v0 = .001,
+          verbose = FALSE)
+summary(r)$selection
+summary(r)$comparison[, c("K", "ELBO", "ELBO_gain", "BIC", "BIC_gain", "CFI")]
+```
+
+`Kmin = 3` is the backbone as specified (general + 2 group factors); `Kmax = 5`
+lets `pefa()` try one and two additional exploratory group factors. Here the
+gain rule keeps the backbone at `K = 3`, matching the three-cluster design the
+data were simulated from.
+
+## 3. Higher-order CFA, Schmid-Leiman, and the bifactor connection
+
+A higher-order (HO) model has items loading on first-order factors (loadings
+$\lambda_j$), which in turn load on a single second-order factor (loadings
+$\gamma_k$, one per first-order factor $k$). This is mathematically equivalent
+to an **orthogonal bifactor** model whose loadings satisfy the Schmid-Leiman
+(SL) proportionality constraint: for every item $j$ in cluster $k$,
+
+$$b^{general}_j = \lambda_j \gamma_k \qquad\qquad b^{group}_j = \lambda_j \sqrt{1 - \gamma_k^2}.$$
+
+So within each cluster the ratio $b^{group}_j / b^{general}_j =
+\sqrt{1-\gamma_k^2}/\gamma_k$ is **constant** across items -- that constancy
+is the testable signature of an HO model hiding inside a bifactor fit. The
+testlet model is the same structure read as method/testlet effects (Zhang &
+Chen, 2024).
+
+### (a) Simulate from a true HO model
+
+Rather than simulate an HO model and hope some estimator recovers it, we build
+the SL-equivalent bifactor loading matrix directly from $\lambda$ and $\gamma$
+and hand it to `sim_lvm()`. Passing `phi = 0` together with a supplied `mla`
+makes the factor correlation matrix the identity -- an orthogonal bifactor,
+exactly the SL parameterization -- so the general and group factors are
+generated as uncorrelated from the start.
+
+```{r ho-simulate}
+K <- 3; ipf <- 6; J <- K * ipf
+gamma_true <- c(.80, .70, .60)          # second-order (general) loadings
+
+set.seed(1)
+lambda_true <- round(runif(J, .6, .8), 2)   # first-order loadings, varied a bit
+cl <- rep(1:K, each = ipf)                  # cluster (first-order factor) of each item
+
+## column 1: general factor, b_general_j = lambda_j * gamma_k(j)
+## columns 2:4: group factors, blockwise b_group_j = lambda_j * sqrt(1 - gamma_k^2)
+mla <- matrix(0, J, K + 1)
+mla[, 1] <- lambda_true * gamma_true[cl]
+for (k in 1:K) {
+  idx <- which(cl == k)
+  mla[idx, k + 1] <- lambda_true[idx] * sqrt(1 - gamma_true[k]^2)
+}
+
+sim <- sim_lvm(N = 800, mla = mla, phi = 0, rseed = 11)
+Y <- sim$dat
+round(sim$PHI, 2)      # identity: phi = 0 with a supplied mla
+```
+
+### (b) Fit a confirmatory orthogonal bifactor
+
+The design is fully confirmatory: column 1 (general) is `1` for every item;
+columns 2:4 (group) are `1` within their own cluster and `0` elsewhere.
+
+```{r ho-fit}
+Q <- matrix(0L, J, K + 1)
+Q[, 1] <- 1L
+for (k in 1:K) Q[cl == k, k + 1] <- 1L
+
+fit <- vbfa(Y, Q, orthogonal = TRUE)
+fit
+```
+
+### (c) Check the SL constraint on the fitted loadings
+
+A few lines of plain R -- deliberately not a package function, since this is a
+descriptive diagnostic, not a fitted model. Per cluster, compute the ratio of
+the group to the general loading for every item, then its mean and coefficient
+of variation (CV = sd/mean). A near-zero CV means the bifactor solution is
+SL-admissible, i.e. approximately a higher-order model.
+
+```{r ho-sl-check}
+b_gen <- fit$Lam[, 1]
+ratio_tab <- t(sapply(1:K, function(k) {
+  idx <- which(cl == k)
+  r <- abs(fit$Lam[idx, k + 1]) / abs(b_gen[idx])  # abs(): guards an arbitrary sign flip
+  c(mean = mean(r), sd = sd(r), cv = sd(r) / mean(r))
+}))
+rownames(ratio_tab) <- paste0("cluster", 1:K)
+round(ratio_tab, 3)
+```
+
+The CVs are small (well under 0.2) relative to the means, so the fitted
+bifactor loadings are close to SL-proportional within each cluster -- as they
+should be, since the data were generated that way.
+
+### (d) Transform back to HO parameters
+
+Given the SL relations, $\gamma_k$ and $\lambda_j$ can be recovered from the
+mean ratio in each cluster: $\hat\gamma_k = 1/\sqrt{1 + \bar r_k^2}$ and
+$\hat\lambda_j = b^{general}_j / \hat\gamma_{k(j)}$.
+
+```{r ho-transform}
+gamma_hat <- 1 / sqrt(1 + ratio_tab[, "mean"]^2)
+names(gamma_hat) <- paste0("cluster", 1:K)
+rbind(true = gamma_true, hat = round(gamma_hat, 3))
+
+lambda_hat <- numeric(J)
+for (k in 1:K) {
+  idx <- which(cl == k)
+  lambda_hat[idx] <- abs(b_gen[idx]) / gamma_hat[k]
+}
+max(abs(lambda_hat - lambda_true))   # worst-case first-order loading error
+```
+
+$\hat\gamma$ recovers the true second-order loadings `c(.80, .70, .60)` to
+within about 0.08, and the worst first-order loading is off by less than 0.1 --
+both well within the range expected from a single sample of `N = 800`.
+
+### (e) Testlet effect size (Zhang & Chen, 2024)
+
+Whether the model is read as a bifactor, an HO model, or a testlet model, the
+group/testlet factor's share of an item's variance quantifies how much local
+structure the general factor does *not* absorb. Per cluster, define
+
+$$\omega_k = \frac{\sum_j (b^{group}_j)^2}{\sum_j \left[(b^{general}_j)^2 + (b^{group}_j)^2 + \psi_j\right]}$$
+
+with $\psi_j = 1/\text{PsiInv}_j$ the residual (unique) variance.
+
+```{r ho-omega}
+psi <- 1 / fit$PsiInv
+omega <- sapply(1:K, function(k) {
+  idx <- which(cl == k)
+  bg <- fit$Lam[idx, 1]; bs <- fit$Lam[idx, k + 1]
+  sum(bs^2) / sum(bg^2 + bs^2 + psi[idx])
+})
+names(omega) <- paste0("cluster", 1:K)
+round(omega, 3)
+```
+
+Cluster 3 (true $\gamma = .60$, the weakest second-order loading) has the
+largest testlet effect and cluster 1 (true $\gamma = .80$) the smallest --
+the less a cluster's items are explained by the general factor, the more
+residual local structure is left for the group factor to carry.
+
+### Caveats
+
+This check is descriptive, not a hypothesis test: there is no p-value or
+threshold that certifies "this bifactor is really an HO model." Sampling error
+alone makes the CV strictly positive even when the data are generated exactly
+under an HO model, as they are here. And the diagnostic runs both ways -- a
+clearly non-constant ratio (a large CV, items in the same cluster with wildly
+different group-to-general ratios) is informative in its own right: it means
+the bifactor solution is genuinely richer than any higher-order representation
+of it, and collapsing it to a single second-order factor per cluster would
+discard real structure.
+
+## 4. References
+
+* Zhang, Y., & Chen, J. (2024). Accommodating and extending various models for
+  special effects within the generalized partially confirmatory factor
+  analysis framework. *Applied Psychological Measurement*, 48(4-5), 208-229.
+  \doi{10.1177/01466216241261704}
+* Chen, J. (2021). A generalized partially confirmatory factor analysis
+  framework with mixed Bayesian Lasso methods. *Multivariate Behavioral
+  Research*, 57(6), 879-894. \doi{10.1080/00273171.2021.1925520}
+* Jin, Y., & Chen, J. (2025). Regularized variational approximation for
+  partially confirmatory factor analysis. *Structural Equation Modeling*,
+  32(3), 437-449. \doi{10.1080/10705511.2024.2432612}

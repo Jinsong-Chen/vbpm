@@ -93,6 +93,40 @@ round(fit$A, 2)[1:6, ]
 round(fit$Phi, 2)            # factor correlations, from the disturbances
 ```
 
+## Missing responses
+
+`vbmimic()` accepts `NA` in `Y`; a handful of missing item responses is
+enough to demonstrate it:
+
+```{r missing}
+Ym <- Y
+Ym[cbind(1:20, rep(1:4, each = 5))] <- NA
+sum(is.na(Ym))
+
+fitm <- vbmimic(Ym, X, Q_A, Q_B)
+fitm$preprocess$n_missing
+
+## structural and measurement recovery are essentially unaffected
+max(abs(fitm$B - fit$B))
+max(abs(fitm$A - fit$A))
+```
+
+The residual covariance here is diagonal (`vbmimic()` has no LD branch), so a
+missing response is replaced in-loop by its conditional mean `eta_i A'`, with
+the conditional variance `1 / V_j` carried into the residual sum of squares —
+the same conditional-moment logic as `vbfa()`'s diagonal case, simplified
+because there is no cross-item residual covariance to condition on. As with
+`vbfa()`, this in-loop treatment is valid under **missing at random (MAR)**
+(Chen, 2021).
+
+`X` must be **complete**. Covariates are conditioned on, not modelled, so
+there is no distribution to impute them from:
+
+```{r missing-x, error = TRUE}
+Xm <- X; Xm[1, 1] <- NA
+vbmimic(Y, Xm, Q_A, Q_B)
+```
+
 ## Options worth knowing
 
 * **`v0` path.** As in `vbfa()`, a decreasing vector gives a warm-started
@@ -103,15 +137,25 @@ round(fit$Phi, 2)            # factor correlations, from the disturbances
   `standardize = TRUE` for the analogous behaviour.
 * **Determinism.** Like `vbfa()`, the estimator consumes no random numbers —
   no seed argument, bit-identical reruns.
-* **No ELBO yet.** The published algorithm converges on a residual criterion,
-  not the bound; `fit$ELBO` is `NA`. `pefa()` therefore refuses
-  `vbmimic` fits rather than reporting wrong statistics. An implemented ELBO
-  is on the roadmap.
+* **Fit statistics.** The published algorithm converges on a residual
+  criterion, not an ELBO; `fit$ELBO` is `NA`. `fit_stats()` accepts a
+  `vbmimic` fit (it dispatches to a dedicated method) but returns a
+  deliberately limited result: `NA` for every SEM-like index (`RMSEA`, `BIC`,
+  `ELBO`, `objective`, ...) and a single `n_active_coef` — the count of
+  soft-selected measurement plus structural coefficients, not a full
+  parameter count, and not to be fed to an information criterion. `pefa()`
+  has no such accommodation: it is built around `vbfa()`'s single `Q`, not a
+  measurement/structural pair, so it refuses `vbmimic` fits outright rather
+  than selecting a factor count that does not apply to this model. An
+  implemented ELBO for `vbmimic()` is on the roadmap.
 
 ## References
 
 * Jin, Y., & Chen, J. (2025). Regularized variational Bayesian approximations
   for variable selection in extended multiple-indicators multiple-causes
   models. *Multivariate Behavioral Research*.
+* Chen, J. (2021). A generalized partially confirmatory factor analysis
+  framework with mixed Bayesian Lasso methods. *Multivariate Behavioral
+  Research*, 57(6), 879–894. https://doi.org/10.1080/00273171.2021.1925520
 * Ročková, V., & George, E. I. (2018). The spike-and-slab LASSO. *Journal of
   the American Statistical Association*, 113(521), 431–444.

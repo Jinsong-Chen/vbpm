@@ -1,3 +1,48 @@
+# vbpm 0.5.0
+
+Documentation-and-parallelism release preparing the CRAN submission, plus one
+estimator bug fix.
+
+* **Fixed: inflated residual variances for anchored items under local
+  dependence.** The posterior variance of fixed-zero (`Q == 0`) loadings was
+  left at its initialization value 1 instead of 0, and the LD branch's
+  expected residual covariance summed loading variances over all columns --
+  adding roughly +1 per fixed-zero column to the residual variance of every
+  item that had any. On the standard test design, anchored items' residual
+  variances came out ~5x too large (loadings and residual-edge selection were
+  unaffected). Diagonal (`ld = FALSE`) results are unchanged -- the r1.1
+  bit-exactness fixture still passes -- and the reported `Lam_var` is now 0
+  for fixed-zero entries in both modes. The defect is inherited from the
+  reference implementation `ld-vb_r.R`, which computes the same term the same
+  way.
+* `sim_fa()` gains `mla`: supplying a population loading matrix switches it to
+  matrix-driven generation (pattern arguments are then ignored), with the same
+  convention as `sim_lvm()`. Its factor-1-2 correlation argument is renamed
+  `ph1` -> `ph12` to match `sim_lvm()`, so `ph1` now exists only in
+  `sim_lvm()`, where it is the correlation among latent predictors. Both help
+  pages gained matrix-driven examples and now read as a matched pair.
+* New vignette **bifactor**: orthogonal bifactor estimation, a `pefa()` sweep
+  over bifactor candidates, and the higher-order/testlet connection --
+  simulating from a higher-order CFA via Schmid-Leiman-proportional loadings,
+  checking the SL proportionality constraint on the fitted bifactor,
+  transforming back to higher-order parameters, and computing testlet
+  effect sizes (Zhang & Chen, 2024).
+* `vbfa` vignette reorganized: restricted-`Qe` local dependence (testlet-block
+  design matrices), a diagonal-vs-LD model comparison via `fit_stats()`,
+  executed `v0`-path comparisons, an `ld_control` demonstration, and a
+  "Missing data" section stating the missing-at-random assumption
+  (Chen, 2021) with simulated and empirical demonstrations. The factor-number
+  and bifactor material moved to the `pefa` and `bifactor` vignettes.
+* `pefa` vignette expanded: checkpoint/resume with the provenance manifest
+  (including the refusal on changed settings), executed `plot()` panels,
+  a boundary-extension demonstration, and a sweep on data with minor factors
+  showing the gain rule ignoring dust dimensions.
+* `vbmimic` vignette: missing responses in `Y` demonstrated.
+* Housekeeping: stale `tmp/` artifacts and the sibling `vbpm.Rcheck/` removed;
+  references across README and vignettes made consistent, adding Chen (2021,
+  Multivariate Behavioral Research) and Zhang & Chen (2024, Applied
+  Psychological Measurement).
+
 # vbpm 0.4.0
 
 * `vbmimic()` now also accepts missing responses in `Y`. Its residual

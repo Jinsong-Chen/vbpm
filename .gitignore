@@ -25,3 +25,5 @@ workbench.html
 vignettes/*.html
 vignettes/*.R
 inst/doc
+# knitr figure output from knitting vignettes at the repo root
+figure/

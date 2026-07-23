@@ -16,14 +16,16 @@
 #' latent predictors (MIMIC / structural models), cross-loadings, local
 #' dependence, categorical or mixed response formats, and missingness.
 #'
-#' `sim_lvm()` and [sim_fa()] are complementary rather than interchangeable:
+#' `sim_lvm()` and [sim_fa()] are complementary rather than interchangeable.
+#' Both accept a population loading matrix directly (`mla`, identical
+#' semantics in either function); where they differ is what drives the
+#' pattern-based path when `mla = NULL`, and what else each one models:
 #'
 #' \describe{
-#'   \item{`sim_lvm()`}{is the *model-side* generator. Use it when the data
-#'     structure is driven by a supplied loading matrix (`mla`), or when the
-#'     design involves **predictors** -- observed covariates (`P`, `b`) or
-#'     latent predictors (`K1`, `ph1`, `b1`) -- or **mixed response formats**
-#'     per item (`ilvl`). This is the generator for [vbmimic()].}
+#'   \item{`sim_lvm()`}{is the *model-side* generator. Use it when the design
+#'     involves **predictors** -- observed covariates (`P`, `b`) or latent
+#'     predictors (`K1`, `ph1`, `b1`) -- or **mixed response formats** per
+#'     item (`ilvl`). This is the generator for [vbmimic()].}
 #'   \item{[sim_fa()]}{is the *structure-side* generator. Use it when the
 #'     question is about the loading pattern itself: items per factor (`ipf`),
 #'     alternating-sign cross-loadings (`alt_sign`), or minor factors
@@ -31,11 +33,10 @@
 #'     generator for [vbfa()].}
 #' }
 #'
-#' Note one deliberate difference in argument naming, inherited from the two
-#' functions' separate histories: `sim_lvm()` uses `ph12` for the factor 1-2
-#' correlation and `ph1` for correlations **among latent predictors**, whereas
-#' [sim_fa()] uses `ph1` for the factor 1-2 correlation. They are not
-#' interchangeable; check which function you are calling.
+#' The two generators share `ph12` for the factor 1-2 correlation. `ph1`
+#' exists only in `sim_lvm()`, where it means something different: the
+#' correlation **among latent predictors** (`K1`), not the factor 1-2
+#' correlation.
 #'
 #' @param N Sample size.
 #' @param mla Population loading matrix. If supplied, `K`, `J` and `cpf` are
@@ -115,6 +116,12 @@
 #' s2 <- sim_lvm(N = 500, K = 3, J = 18, P = 9, b = B, phx = 0, phd = .3,
 #'               rseed = 1)
 #' round(s2$PHI, 2)
+#'
+#' ## matrix-driven: supply the population loading matrix directly
+#' mla <- matrix(0, 12, 2)
+#' mla[1:6, 1] <- .7; mla[7:12, 2] <- c(.8, .7, .6, .7, .8, .6)
+#' s3 <- sim_lvm(N = 300, mla = mla, phi = .3, rseed = 4)
+#' s3$MLA                     # the generating matrix, as supplied
 #'
 #' @importFrom MASS mvrnorm
 #' @export

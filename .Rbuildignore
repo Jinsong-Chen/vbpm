@@ -11,3 +11,4 @@
 ^tmp$
 ^workbench\.html$
 ^\.agents$
+^figure$

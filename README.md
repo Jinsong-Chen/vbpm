@@ -125,12 +125,21 @@ fit <- vbmimic(Y, X, Q_A, Q_B)
 round(fit$B, 2)                      # which covariates predict which factors
 ```
 
-## Methods
+## References
 
 - Partially confirmatory factor analysis with the Bayesian Lasso: Chen, J.,
   Guo, Z., Zhang, L., & Pan, J. (2021). A partially confirmatory approach to
   scale development with the Bayesian Lasso. *Psychological Methods*, 26(2),
   210–235. <https://doi.org/10.1037/met0000293>
+- Generalized PCFA (mixed response formats; missing data under MAR): Chen, J.
+  (2021). A generalized partially confirmatory factor analysis framework with
+  mixed Bayesian Lasso methods. *Multivariate Behavioral Research*, 57(6),
+  879–894. <https://doi.org/10.1080/00273171.2021.1925520>
+- Bifactor, higher-order, and testlet effects within GPCFA (including effect
+  sizes for testlet effects): Zhang, Y., & Chen, J. (2024). Accommodating and
+  extending various models for special effects within the generalized
+  partially confirmatory factor analysis framework. *Applied Psychological
+  Measurement*, 48(4–5), 208–229. <https://doi.org/10.1177/01466216241261704>
 - Fully and partially exploratory factor analysis: Chen, J. (2023). Fully and
   partially exploratory factor analysis with bi-level Bayesian regularization.
   *Behavior Research Methods*, 55(4), 2125–2142.

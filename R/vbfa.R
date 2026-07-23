@@ -145,6 +145,10 @@ logC_igw <- function(xi, Lam, P) {
 #' approach to scale development with the Bayesian Lasso. *Psychological
 #' Methods*, 26(2), 210-235. \doi{10.1037/met0000293}
 #'
+#' Chen, J. (2021). A generalized partially confirmatory factor analysis
+#' framework with mixed Bayesian Lasso methods. *Multivariate Behavioral
+#' Research*, 57(6), 879-894. \doi{10.1080/00273171.2021.1925520}
+#'
 #' Jin, Y., & Chen, J. (2025). Regularized variational approximation for
 #' partially confirmatory factor analysis. *Structural Equation Modeling: A
 #' Multidisciplinary Journal*, 32(3), 437-449.
@@ -296,7 +300,15 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
   mu.q.Lam <- mu.q.Lam_sq <- matrix(0.8, J, P)
   mu.q.Lam[Q == -1] <- mu.q.Lam_sq[Q == -1] <- 0.2
   mu.q.Lam[Q == 0]  <- mu.q.Lam_sq[Q == 0]  <- 0
+  ## Fixed-zero loadings have no posterior, so their variance must be 0. The
+  ## update loops skip Q == 0, so this initial value persists; leaving it at 1
+  ## (as ld-vb_r.R does) silently adds sum_p E[eta_p^2] * 1 to the expected
+  ## residual covariance diagonal of every item with fixed-zero entries in the
+  ## LD branch -- ~ +1 per zero column after the /N -- inflating anchored
+  ## items' residual variances ~5x. Found 2026-07-23; the V4 reference shares
+  ## the defect.
   sigsq.q.Lam <- matrix(1, J, P)
+  sigsq.q.Lam[Q == 0] <- 0
 
   mu.q.eta <- mu.q.eta_sq <- matrix(1, N, P)
   mu.q.d <- matrix(1, J, P)

@@ -6,6 +6,7 @@
 \usage{
 sim_fa(
   N = 1000,
+  mla = NULL,
   K = 3,
   ipf = 8,
   cpf = 2,
@@ -13,7 +14,7 @@ sim_fa(
   lac = 0.3,
   alt_sign = TRUE,
   phi = 0.5,
-  ph1 = -1,
+  ph12 = -1,
   ecr = 0,
   ome_out = FALSE,
   cati = NULL,
@@ -36,6 +37,11 @@ sim_fa(
 \arguments{
 \item{N}{Sample size.}
 
+\item{mla}{Population loading matrix (J x K). If supplied, the pattern
+arguments (\code{ipf}, \code{cpf}, \code{lam}, \code{lac}, \code{alt_sign},
+\code{add_*}, \code{minor}, \code{zero_it}) are ignored and \code{K},
+\code{J} are taken from it -- the same convention as \code{\link[=sim_lvm]{sim_lvm()}}.}
+
 \item{K}{Number of factors.}
 
 \item{ipf}{Items per factor.}
@@ -51,7 +57,10 @@ cross-loading items (default \code{TRUE}).}
 
 \item{phi}{Homogeneous correlations between any two factors.}
 
-\item{ph1}{Correlation between factor 1 and 2 (if it's different from \code{phi}.}
+\item{ph12}{Correlation between factor 1 and 2 (if it's different from
+\code{phi}). Shared with \code{\link[=sim_lvm]{sim_lvm()}}, which uses \code{ph1} for a
+different purpose (correlation among latent predictors); see \code{\link[=sim_lvm]{sim_lvm()}}
+for that distinction.}
 
 \item{ecr}{Residual correlation (local dependence).}
 
@@ -99,6 +108,16 @@ An object of class \code{list} containing the data, loading, and factorial corre
 \code{sim_fa} can simulate data based on factor analysis or
 item response models with different response formats (continuous or categorical),
 loading patterns and residual covariance (local dependence) structures.
+
+\code{sim_fa()} and \code{\link[=sim_lvm]{sim_lvm()}} are complementary rather than
+interchangeable: \code{sim_fa()} is the \emph{structure-side} generator, driven
+by the loading pattern itself -- items per factor (\code{ipf}), alternating-sign
+cross-loadings (\code{alt_sign}), or minor factors (\code{minor}, definition-based
+per Auerswald & Moshagen, 2019) -- and is the generator for \code{\link[=vbfa]{vbfa()}}.
+\code{\link[=sim_lvm]{sim_lvm()}} is the \emph{model-side} generator, adding observed/latent
+predictors (\code{P}/\code{b}, \code{K1}/\code{ph1}/\code{b1}) and mixed response formats (\code{ilvl}),
+and is the generator for \code{\link[=vbmimic]{vbmimic()}}. Both generators also accept a
+population loading matrix directly (\code{mla}) with identical semantics.
 }
 \examples{
 
@@ -113,5 +132,11 @@ out <- sim_fa(N=1000,K=3,ipf=6,lam = .7, lac=.4,cati=-1,noc=4,misp=.1)
 summary(out$dat)
 out$MLA
 out$ofd_ind
+
+## matrix-driven: supply the population loading matrix directly
+mla <- matrix(0, 12, 2)
+mla[1:6, 1] <- .7; mla[7:12, 2] <- c(.8, .7, .6, .7, .8, .6)
+s <- sim_fa(N = 300, mla = mla, phi = .3, rseed = 4)
+s$MLA                      # the generating matrix, as supplied
 
 }

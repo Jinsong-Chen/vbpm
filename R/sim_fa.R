@@ -4,9 +4,24 @@
 #' item response models with different response formats (continuous or categorical),
 #' loading patterns and residual covariance (local dependence) structures.
 #'
+#' \code{sim_fa()} and [sim_lvm()] are complementary rather than
+#' interchangeable: \code{sim_fa()} is the *structure-side* generator, driven
+#' by the loading pattern itself -- items per factor (`ipf`), alternating-sign
+#' cross-loadings (`alt_sign`), or minor factors (`minor`, definition-based
+#' per Auerswald & Moshagen, 2019) -- and is the generator for [vbfa()].
+#' [sim_lvm()] is the *model-side* generator, adding observed/latent
+#' predictors (`P`/`b`, `K1`/`ph1`/`b1`) and mixed response formats (`ilvl`),
+#' and is the generator for [vbmimic()]. Both generators also accept a
+#' population loading matrix directly (`mla`) with identical semantics.
+#'
 #' @name sim_fa
 #'
 #' @param N Sample size.
+#'
+#' @param mla Population loading matrix (J x K). If supplied, the pattern
+#' arguments (\code{ipf}, \code{cpf}, \code{lam}, \code{lac}, \code{alt_sign},
+#' \code{add_*}, \code{minor}, \code{zero_it}) are ignored and \code{K},
+#' \code{J} are taken from it -- the same convention as [sim_lvm()].
 #'
 #' @param K Number of factors.
 #'
@@ -20,7 +35,10 @@
 #'
 #' @param phi Homogeneous correlations between any two factors.
 #'
-#' @param ph1 Correlation between factor 1 and 2 (if it's different from \code{phi}.
+#' @param ph12 Correlation between factor 1 and 2 (if it's different from
+#' \code{phi}). Shared with [sim_lvm()], which uses \code{ph1} for a
+#' different purpose (correlation among latent predictors); see [sim_lvm()]
+#' for that distinction.
 #'
 #' @param ecr Residual correlation (local dependence).
 #'
@@ -85,9 +103,15 @@
 #' out$MLA
 #' out$ofd_ind
 #'
+#' ## matrix-driven: supply the population loading matrix directly
+#' mla <- matrix(0, 12, 2)
+#' mla[1:6, 1] <- .7; mla[7:12, 2] <- c(.8, .7, .6, .7, .8, .6)
+#' s <- sim_fa(N = 300, mla = mla, phi = .3, rseed = 4)
+#' s$MLA                      # the generating matrix, as supplied
+#'
 #' @importFrom MASS mvrnorm
 #' @export
-sim_fa <- function(N = 1000, K = 3, ipf = 8, cpf = 2, lam = 0.7, lac = 0.3, alt_sign = TRUE, phi = 0.5, ph1 = -1,
+sim_fa <- function(N = 1000, mla = NULL, K = 3, ipf = 8, cpf = 2, lam = 0.7, lac = 0.3, alt_sign = TRUE, phi = 0.5, ph12 = -1,
         ecr = .0, ome_out = FALSE,cati = NULL, noc = c(4), misp = 0, rseed = 333,
         necw=K,necb=K,add_ind=c(),add_la=0,add_phi=0,
         add1_ind=c(), add1_la=0, add1_phi=0, zero_it=0, minor=NULL, digits = 4) {
@@ -111,10 +135,27 @@ sim_fa <- function(N = 1000, K = 3, ipf = 8, cpf = 2, lam = 0.7, lac = 0.3, alt_
     # old_digits <- getOption("digits")
     options(digits = digits)
 
+    use_mla <- !is.null(mla)
+    if (use_mla) {
+        ## ---- matrix-driven: supplied mla IS the population loading matrix.
+        ## Pattern arguments (ipf, cpf, lam, lac, alt_sign, add_*, minor,
+        ## zero_it) are ignored; K, J, ipf, cpf follow sim_lvm's convention.
+        ## Determined here (before PHI is built) so PHI comes out K x K.
+        mla <- as.matrix(mla)
+        K   <- ncol(mla)
+        J   <- nrow(mla)
+        K1  <- K
+        ipf <- J / K
+        cpf <- 0
+        if (ecr > 0 && J %% K != 0)
+            stop("Local dependence (ecr > 0) with a supplied mla assumes J is divisible by K; use ecr = 0 with an unbalanced mla.", call. = FALSE)
+    }
+
     PHI <- matrix(phi, K, K)
     diag(PHI) <- 1
-    if (ph1 > -1 && ph1 < 1) PHI[1,2] <- PHI[2,1]<-ph1
+    if (ph12 > -1 && ph12 < 1) PHI[1,2] <- PHI[2,1]<-ph12
 
+    if (!use_mla) {
     if (alt_sign) {
       cross_vals <- rep(c(lac, -lac), length.out = cpf)
     } else {
@@ -122,7 +163,7 @@ sim_fa <- function(N = 1000, K = 3, ipf = 8, cpf = 2, lam = 0.7, lac = 0.3, alt_
     }
     lam0 <- c(rep(lam, ipf), rep(0, ipf - cpf), cross_vals, rep(0, (K - 2) * ipf))
     # lam0 <- c(rep(lam, ipf), rep(0, ipf - cpf), rep(lac, cpf), rep(0, (K - 2) * ipf))
-    
+
     lam1 <- matrix(lam0, ipf, K)
 
     mla <- c()
@@ -144,7 +185,7 @@ sim_fa <- function(N = 1000, K = 3, ipf = 8, cpf = 2, lam = 0.7, lac = 0.3, alt_
         PHI<-rbind(PHI,add_phi)
         PHI[K1,K1]<-1
     }
-    
+
     if(length(add1_ind)>0){
       # len<-length(add_ind)
       K1<-K1+1
@@ -172,6 +213,7 @@ sim_fa <- function(N = 1000, K = 3, ipf = 8, cpf = 2, lam = 0.7, lac = 0.3, alt_
     if (zero_it>0){
         J <- J + zero_it
         mla <- rbind(mla,matrix(0,zero_it,K1))
+    }
     }
 
     ecm <- matrix(0, J, J)

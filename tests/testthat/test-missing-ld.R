@@ -383,3 +383,22 @@ test_that("pefa validates its window", {
   expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, tau = 1.5, verbose = FALSE),
                "tau")
 })
+
+test_that("anchored items' residual variances are not inflated under LD", {
+  ## Regression for the fixed-zero variance leak: sigsq.q.Lam[Q == 0] held its
+  ## initialization value 1 and the LD branch's expected residual covariance
+  ## summed loading variances over ALL columns, adding ~1 per zero column to
+  ## anchored items' S diagonal (~5x variance inflation; loadings unaffected).
+  ## Inherited from ld-vb_r.R, which shares the defect.
+  d <- ld_dat(N = 400, seed = 2)
+  anch <- which(rowSums(d$Q == 0L) > 0)          # anchored rows have Q == 0 cells
+  f  <- vbfa(d$Y, d$Q, ld = TRUE, max_it = 300, tolVal = 1e-3)
+  fd <- vbfa(d$Y, d$Q, v0 = .001, max_it = 500)
+  ## LD residual variances at anchored items must be commensurate with the
+  ## diagonal fit's, not multiples of it (pre-fix ratio was ~5)
+  ratio <- diag(f$W)[anch] / (1 / fd$PsiInv[anch])
+  expect_true(all(ratio < 2))
+  ## and the reported posterior variance of a fixed-zero loading is 0
+  expect_true(all(f$Lam_var[d$Q == 0L] == 0))
+  expect_true(all(fd$Lam_var[d$Q == 0L] == 0))
+})

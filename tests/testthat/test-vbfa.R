@@ -144,7 +144,7 @@ test_that("fit_stats is generic, preserves vb_fit, and supports LD fits", {
   ## objective, where ELBO is NA. The README promises this element.
   expect_equal(unname(fs["objective"]), unname(fs["ELBO"]))
   expect_identical(unname(vb_fit(f, d$Y, d$Q)), unname(fs))
-  fl <- vbfa(d$Y, d$Q, ld = TRUE, convChk = FALSE, max_it = 100)
+  fl <- vbfa(d$Y, d$Q, ld = TRUE, convChk = FALSE, max_it = 300, tolVal = 1e-3)
   fsl <- fit_stats(fl)
   expect_true(all(is.finite(fsl[c("RMSEA", "SRMR", "CFI", "TLI", "BIC")])))
   expect_identical(attr(fsl, "objective_type"), "vecm")

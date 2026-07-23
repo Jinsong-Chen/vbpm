@@ -124,14 +124,16 @@ latent predictors (MIMIC / structural models), cross-loadings, local
 dependence, categorical or mixed response formats, and missingness.
 }
 \details{
-\code{sim_lvm()} and \code{\link[=sim_fa]{sim_fa()}} are complementary rather than interchangeable:
+\code{sim_lvm()} and \code{\link[=sim_fa]{sim_fa()}} are complementary rather than interchangeable.
+Both accept a population loading matrix directly (\code{mla}, identical
+semantics in either function); where they differ is what drives the
+pattern-based path when \code{mla = NULL}, and what else each one models:
 
 \describe{
-\item{\code{sim_lvm()}}{is the \emph{model-side} generator. Use it when the data
-structure is driven by a supplied loading matrix (\code{mla}), or when the
-design involves \strong{predictors} -- observed covariates (\code{P}, \code{b}) or
-latent predictors (\code{K1}, \code{ph1}, \code{b1}) -- or \strong{mixed response formats}
-per item (\code{ilvl}). This is the generator for \code{\link[=vbmimic]{vbmimic()}}.}
+\item{\code{sim_lvm()}}{is the \emph{model-side} generator. Use it when the design
+involves \strong{predictors} -- observed covariates (\code{P}, \code{b}) or latent
+predictors (\code{K1}, \code{ph1}, \code{b1}) -- or \strong{mixed response formats} per
+item (\code{ilvl}). This is the generator for \code{\link[=vbmimic]{vbmimic()}}.}
 \item{\code{\link[=sim_fa]{sim_fa()}}}{is the \emph{structure-side} generator. Use it when the
 question is about the loading pattern itself: items per factor (\code{ipf}),
 alternating-sign cross-loadings (\code{alt_sign}), or minor factors
@@ -139,11 +141,10 @@ alternating-sign cross-loadings (\code{alt_sign}), or minor factors
 generator for \code{\link[=vbfa]{vbfa()}}.}
 }
 
-Note one deliberate difference in argument naming, inherited from the two
-functions' separate histories: \code{sim_lvm()} uses \code{ph12} for the factor 1-2
-correlation and \code{ph1} for correlations \strong{among latent predictors}, whereas
-\code{\link[=sim_fa]{sim_fa()}} uses \code{ph1} for the factor 1-2 correlation. They are not
-interchangeable; check which function you are calling.
+The two generators share \code{ph12} for the factor 1-2 correlation. \code{ph1}
+exists only in \code{sim_lvm()}, where it means something different: the
+correlation \strong{among latent predictors} (\code{K1}), not the factor 1-2
+correlation.
 }
 \examples{
 ## MIMIC data: 18 items on 3 factors, 9 covariates in disjoint blocks of 3.
@@ -161,6 +162,12 @@ s$mb            # the generating structural coefficients
 s2 <- sim_lvm(N = 500, K = 3, J = 18, P = 9, b = B, phx = 0, phd = .3,
               rseed = 1)
 round(s2$PHI, 2)
+
+## matrix-driven: supply the population loading matrix directly
+mla <- matrix(0, 12, 2)
+mla[1:6, 1] <- .7; mla[7:12, 2] <- c(.8, .7, .6, .7, .8, .6)
+s3 <- sim_lvm(N = 300, mla = mla, phi = .3, rseed = 4)
+s3$MLA                     # the generating matrix, as supplied
 
 }
 \references{

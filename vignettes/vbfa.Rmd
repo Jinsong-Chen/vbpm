@@ -20,9 +20,11 @@ spike-and-slab priors select the rest from the data.
 
 This vignette walks the factor-analysis side of the package: designing a `Q`
 matrix, fitting with `vbfa()`, reading the fit, computing fit statistics with
-`fit_stats()`, selecting the number of factors with `pefa()`, and two special
-modes (bifactor and local dependence). It ends with an empirical example and
-with a recipe for turning *graded* prior knowledge into a `Q` matrix.
+`fit_stats()`, and local-dependence (residual-correlation) estimation.
+Selecting the number of factors is covered in `vignette("pefa")`; bifactor and
+higher-order structures are covered in `vignette("bifactor")`. It ends with an
+empirical example, a look at missing data, and a recipe for turning *graded*
+prior knowledge into a `Q` matrix.
 
 ## The design matrix Q
 
@@ -81,12 +83,45 @@ Two properties worth knowing. The estimator is **deterministic** — fixed
 initialization, no random numbers — so there is no seed to set and two runs are
 bit-identical. And the default `v0` is a decreasing *vector*, a warm-started
 regularization path; a scalar `v0 = 0.001` reproduces the fixed-spike estimator
-of Jin & Chen (2025) exactly. When a hard model fails to converge, prefer a
-gentler, longer path over raising `max_it`:
+of Jin & Chen (2025) exactly. A third option is a gentler, longer, log-spaced
+path, useful when a harder model fails to converge. All three run to
+convergence below, on the same (smaller, for speed) data, with the total
+iteration count, ELBO, and the largest loading discrepancy against the default
+path:
 
-```{r path, eval = FALSE}
-fit_gentle <- vbfa(Y, Q, v0 = exp(seq(log(0.05), log(0.001), length.out = 10)))
+```{r v0path}
+sim2 <- sim_fa(N = 300, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
+Y2 <- sim2$dat
+Q2 <- matrix(-1L, ncol(Y2), 3)
+for (k in 1:3) {
+  a <- which(rep(1:3, each = 6) == k)[1:2]
+  Q2[a, ] <- 0L
+  Q2[a, k] <- 1L
+}
+
+f_default <- vbfa(Y2, Q2)                                # (a) default 4-stage path
+f_fixed   <- vbfa(Y2, Q2, v0 = 0.001)                     # (b) scalar fixed spike
+f_gentle  <- vbfa(Y2, Q2,                                 # (c) gentle 8-stage path
+                   v0 = exp(seq(log(0.05), log(0.001), length.out = 8)))
+
+data.frame(
+  path = c("default (4-stage)", "fixed spike (v0 = 0.001)", "gentle (8-stage)"),
+  iterations = c(f_default$iter, f_fixed$iter, f_gentle$iter),
+  ELBO = round(c(f_default$ELBO, f_fixed$ELBO, f_gentle$ELBO), 2),
+  max_abs_Lam_diff_vs_default = round(c(
+    0,
+    max(abs(f_fixed$Lam  - f_default$Lam)),
+    max(abs(f_gentle$Lam - f_default$Lam))), 3)
+)
 ```
+
+On this easy, well-identified simulation all three agree closely: the largest
+loading discrepancy is a few hundredths, concentrated at a single entry near
+the spike/slab boundary, and the average discrepancy is an order of magnitude
+smaller still. Say this honestly: the regularization path earns its keep on
+*hard* landscapes — near-singular designs, weak signal, fits that fail to
+converge within `max_it` — not on easy ones like this. Prefer the gentle path
+over raising `max_it` when a fit misbehaves.
 
 ## Fit statistics
 
@@ -102,46 +137,9 @@ are the usual absolute and information indices. The function reads `orthogonal`
 and `ld` from the fit object itself, so a bifactor fit needs no extra argument
 — and supplying a contradictory one is an error, not a silent miscount.
 
-## How many factors? pefa() and the gain rule
-
-`pefa()` sweeps a window of factor counts, holding your partially confirmatory
-backbone fixed and padding with exploratory columns, then selects K with a
-scale-free *gain rule*: a factor is worth keeping while its marginal ELBO gain
-is at least `delta` percent of the largest gain in the window (with a
-sustained-drop guard against transient dips).
-
-```{r pefa}
-Q0 <- Q[, 1:2, drop = FALSE]   # pretend we only know two factors exist
-r  <- pefa(Q0, Y, Kmin = 2, Kmax = 4, verbose = FALSE)
-s  <- summary(r)                # aggregate sweep result
-s$selection                     # ELBO, ELBO gain, BIC, BIC gain
-s$comparison[, c("K", "ELBO", "ELBO_gain", "BIC", "BIC_gain", "CFI")]
-selected_fit(r)                 # the selected vbpm_fit candidate
-```
-
-The candidate range is the PEFA *window*; the fitted collection and its
-selection results form a `vbpm_sweep`. Each candidate remains an ordinary
-`vbpm_fit`. The word *path* is reserved for continuation paths such as the
-ordered `v0` stages inside `vbfa()`.
-
-The rule itself is exported, so you can apply it to any criterion curve:
-
-```{r elbow}
-select_K_elbow(K = r$sweep$K, score = r$sweep$ELBO)
-```
-
-## Bifactor models
-
-`orthogonal = TRUE` fixes the factor correlation at the identity. With a design
-whose first column is a general factor (all items load) plus group columns,
-this is an identified orthogonal bifactor model:
-
-```{r bifactor}
-Qb <- cbind(1L, Q)
-fb <- vbfa(Y, Qb, orthogonal = TRUE)
-fb$Phi[1:3, 1:3]           # identity by construction
-round(fit_stats(fb), 3)
-```
+Selecting the number of factors (the gain rule implemented by `pefa()`) is
+covered in `vignette("pefa")`; bifactor and higher-order models are covered in
+`vignette("bifactor")`.
 
 ## Local dependence
 
@@ -161,28 +159,145 @@ which(Poff >= sort(Poff, decreasing = TRUE)[3], arr.ind = TRUE)
 simLD$ofd_ind
 ```
 
-For LD fits, `fit_stats()` uses the estimated residual covariance `W`. The returned
-`objective` is the manuscript V4 terminal VECM criterion; `ELBO` remains `NA`
-because the residual precision is point-updated rather than assigned a full
-variational distribution.
+For LD fits, `fit_stats()` uses the estimated residual covariance `W`. The
+returned `objective` is the manuscript V4 terminal VECM criterion; `ELBO`
+remains `NA` because the residual precision is point-updated rather than
+assigned a full variational distribution.
 
-## Incomplete continuous responses
+### Restricting the search: Qe
+
+`Qe` mirrors `Q`'s three codes, but on the residual side: `1` frees an edge
+(estimated, penalized only by the slab), `0` fixes it at zero, `-1` leaves it
+to the spike-and-slab search. Suppose items 1-3 are a known testlet and a
+specific block of items is known a priori to be residually independent —
+everything else stays exploratory:
+
+```{r ld-restricted}
+J <- ncol(simLD$dat)
+Qe <- matrix(-1L, J, J)
+Qe[1:3, 1:3] <- 1L    # a known testlet: freely estimated among these 3 items
+Qe[4:6, 7:9] <- 0L    # a block known to be residually independent
+Qe[7:9, 4:6] <- 0L
+isSymmetric(unname(Qe))
+
+fRestricted <- vbfa(simLD$dat, Q, ld = TRUE, Qe = Qe, max_it = 300,
+                    tolVal = 1e-3)
+
+round(fRestricted$Psi[1:3, 1:3], 3)   # freely estimated: off-diagonal is not forced
+round(fRestricted$Psi[4:6, 7:9], 3)   # fixed absent: driven to (numerical) zero
+```
+
+The fixed-zero block comes back exactly zero; the fixed-one block is free to
+take on whatever value the data support. This is the residual-side analogue of
+`Q`: `1`/`0` remove an entry from the search entirely (anchored in or out), and
+`-1` is the only code the spike-and-slab prior actually chooses between.
+
+### Diagonal vs. local dependence: does modeling residual correlation matter?
+
+Fit both a diagonal and an LD model to the same residually-correlated data and
+compare with `fit_stats()`. It builds each fit's model-implied covariance from
+its own estimated residual covariance (`W` under LD, the diagonal `1/PsiInv`
+otherwise), so the `BIC`/`RMSEA` comparison below is fair even though the two
+fits' `objective` values are not: `objective` is comparable only across fits
+sharing one `objective_type` (`"elbo"` here, `"vecm"` under LD) — which is
+exactly why the comparison uses the covariance-based statistics instead.
+
+```{r ld-compare}
+## fully exploratory loadings isolate the comparison to the residual side
+Qexp <- matrix(-1L, J, 3)
+
+fDiag <- vbfa(simLD$dat, Qexp)
+fLDc  <- vbfa(simLD$dat, Qexp, ld = TRUE, max_it = 300, tolVal = 1e-3)
+
+round(rbind(diagonal = fit_stats(fDiag)[c("BIC", "RMSEA")],
+            ld       = fit_stats(fLDc)[c("BIC", "RMSEA")]), 3)
+```
+
+On data simulated with planted residual correlations, the LD fit wins on both
+counts, as it should.
+
+### The ld_control knob
+
+`ld_control` exposes the local-dependence path and penalty settings without
+changing the call's shape. For instance, a shorter, coarser `xi0` path (the
+spike-penalty schedule, in units of `N`):
+
+```{r ld-control}
+fCtrl <- vbfa(simLD$dat, Q, ld = TRUE, max_it = 300, tolVal = 1e-3,
+              ld_control = list(xi0 = c(0.1, 0.5, 1)))
+fCtrl$flag
+```
+
+`diag_penalty` (whether the residual precision diagonal is penalized by `xi1`;
+default `1`) lives in the same list, along with `xi1`, `quic_eps`,
+`quic_max_it`, and the Beta prior parameters `a1`/`b1` on the LD proportion —
+see `?vbfa` for the full set.
+
+## Missing data
 
 `vbfa()` accepts `NA` values in continuous response matrices. At each
 iteration it updates all missing entries within a person jointly from their
-Gaussian conditional mean and adds the conditional covariance to the expected
-residual cross-product. This deterministic conditional-moment update is the
-VB counterpart of the LAWBL/PCFA MCMC data augmentation. Entirely missing rows
-or items are rejected because their location or scale is not identified.
+Gaussian conditional mean (given that person's *observed* entries and the
+current factor-model fit) and adds the conditional covariance to the expected
+residual cross-product — the deterministic VB counterpart of the LAWBL/PCFA
+MCMC data augmentation. This in-loop treatment is valid under **missing at
+random (MAR)**: missingness may depend on observed data (other items,
+covariates, or the current factor estimates) but not on the missing value
+itself. Missing-data handling under MAR in the (G)PCFA framework was
+established by Chen (2021). Entirely missing rows or items are rejected
+because their location or scale is not identified.
 
-## An empirical example: NLSY 1997
+### A simulated illustration
+
+To make the MAR mechanism concrete: two items are made missing with a
+probability that depends on the *observed* value of an anchor item from a
+different factor block — never on the missing item's own value.
+
+```{r mar-sim}
+simM <- sim_fa(N = 400, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
+Ym0  <- simM$dat
+Qm   <- matrix(-1L, ncol(Ym0), 3)
+for (k in 1:3) {
+  a <- which(rep(1:3, each = 6) == k)[1:2]
+  Qm[a, ] <- 0L
+  Qm[a, k] <- 1L
+}
+
+## items 5 and 11 go missing depending on the OBSERVED value of anchor items
+## 1 and 7 (higher values make missingness more likely); the anchors
+## themselves stay fully observed. This is MAR, not MCAR: the probability of
+## missingness varies systematically with observed, not missing, data.
+set.seed(42)
+Ymar <- Ym0
+p5  <- ifelse(Ym0[, 1] > stats::median(Ym0[, 1]), .40, .05)
+p11 <- ifelse(Ym0[, 7] > stats::median(Ym0[, 7]), .40, .05)
+Ymar[stats::rbinom(nrow(Ym0), 1, p5)  == 1, 5]  <- NA
+Ymar[stats::rbinom(nrow(Ym0), 1, p11) == 1, 11] <- NA
+sum(is.na(Ymar))
+
+fMar <- vbfa(Ymar, Qm)
+fMar$preprocess$n_missing
+round(fMar$Lam[c(1, 5, 7, 11), ], 2)   # loadings recovered despite the missingness
+```
+
+Against a fit to the same data with no missingness at all, the loadings are
+close, with the largest discrepancy well within the range expected from
+losing part of two items' data:
+
+```{r mar-sim-clean}
+fClean <- vbfa(Ym0, Qm)
+max(abs(fMar$Lam - fClean$Lam))    # largest discrepancy
+mean(abs(fMar$Lam - fClean$Lam))   # typical discrepancy is much smaller
+```
+
+### Empirical: NLSY 1997
 
 `nlsy27` ships with the package: 3,458 respondents, 27 mixed-type items, and an
 initial three-factor design with two to three anchors per factor.
 
 The data are 1.12% incomplete, which exercises the missing-response path from
-the previous section: the `NA`s are passed straight to `vbfa()` and imputed
-in-loop, with no listwise deletion.
+above: the `NA`s are passed straight to `vbfa()` and imputed in-loop, with no
+listwise deletion.
 
 ```{r nlsy}
 data(nlsy27)
@@ -212,8 +327,9 @@ nrow(Yn) - sum(stats::complete.cases(Yn))   # respondents listwise deletion drop
 
 Prior knowledge is often *graded* rather than crisp — say, a membership score
 `S[j, k]` in `[0, 1]` for item `j` on factor `k`, from expert ratings, text
-similarity, or a clustering consensus. A practical thresholding rule turns such
-scores into a partially confirmatory `Q`:
+similarity, or a clustering consensus. This kind of graded membership matrix is
+what the measurement literature calls a **"soft" Q matrix**. A practical
+thresholding rule turns such scores into a partially confirmatory (hard) `Q`:
 
 * **anchor** (`1`) where the evidence is strong: `S > .80`;
 * **leave to the data** (`-1`) where it is equivocal: `.20 <= S <= .80`;
@@ -236,15 +352,22 @@ fsoft$flag
 
 This costs no new machinery — it is simply a disciplined way to build `Q` — and
 it uses the graded information honestly: strong evidence anchors, equivocal
-evidence is *tested* rather than assumed, absence excludes. (A deeper version,
-in which the graded scores enter the prior itself as per-element inclusion
-probabilities, is on the package roadmap.)
+evidence is *tested* rather than assumed, absence excludes. One honest
+limitation: the package's simulators (`sim_fa()`, `sim_lvm()`) cannot yet
+generate data *from* a soft Q — they take hard population patterns/matrices as
+input — so the workflow only runs in the direction shown above: threshold soft
+knowledge into a hard `-1/0/1` Q for *estimation*, not simulation. (A deeper
+version, in which the graded scores enter the prior itself as per-element
+inclusion probabilities, is on the package roadmap.)
 
 ## References
 
 * Chen, J., Guo, Z., Zhang, L., & Pan, J. (2021). A partially confirmatory
   approach to scale development with the Bayesian Lasso. *Psychological
   Methods*, 26(2), 210–235.
+* Chen, J. (2021). A generalized partially confirmatory factor analysis
+  framework with mixed Bayesian Lasso methods. *Multivariate Behavioral
+  Research*, 57(6), 879–894. https://doi.org/10.1080/00273171.2021.1925520
 * Chen, J. (2023). Fully and partially exploratory factor analysis with
   bi-level Bayesian regularization. *Behavior Research Methods*, 55(4),
   2125–2142.
