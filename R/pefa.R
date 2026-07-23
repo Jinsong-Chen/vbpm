@@ -17,7 +17,7 @@
 #' @param K Candidate numbers of factors (any order).
 #' @param score A criterion for which larger is better. For an information
 #'   criterion (smaller is better), pass `score = -IC`.
-#' @param delta Threshold as a percentage (0–100) of the largest marginal gain
+#' @param delta Threshold as a percentage (0-100) of the largest marginal gain
 #'   (default `10`).
 #' @param sustain Consecutive sub-threshold steps required to call the elbow
 #'   (default `2`).

@@ -93,7 +93,7 @@ logC_igw <- function(xi, Lam, P) {
 #'   `xi1`, `0` leaves it unpenalized), `quic_eps`, `quic_max_it`, and the Beta
 #'   prior parameters `a1`, `b1` on the local-dependence proportion.
 #'
-#' @return An object of class `c("vbfa", "vbpm_fit")` — a named list (see
+#' @return An object of class `c("vbfa", "vbpm_fit")` -- a named list (see
 #'   [vbpm_fit] for what the class does and does not change) with elements:
 #'   \describe{
 #'     \item{Lam}{`J x K` posterior mean loadings.}
@@ -143,15 +143,15 @@ logC_igw <- function(xi, Lam, P) {
 #' @references
 #' Chen, J., Guo, Z., Zhang, L., & Pan, J. (2021). A partially confirmatory
 #' approach to scale development with the Bayesian Lasso. *Psychological
-#' Methods*, 26(2), 210–235. \doi{10.1037/met0000293}
+#' Methods*, 26(2), 210-235. \doi{10.1037/met0000293}
 #'
 #' Jin, Y., & Chen, J. (2025). Regularized variational approximation for
 #' partially confirmatory factor analysis. *Structural Equation Modeling: A
-#' Multidisciplinary Journal*, 32(3), 437–449.
+#' Multidisciplinary Journal*, 32(3), 437-449.
 #' \doi{10.1080/10705511.2024.2432612}
 #'
-#' Ročková, V., & George, E. I. (2018). The spike-and-slab LASSO.
-#' *Journal of the American Statistical Association*, 113(521), 431–444.
+#' Rockova, V., & George, E. I. (2018). The spike-and-slab LASSO.
+#' *Journal of the American Statistical Association*, 113(521), 431-444.
 #'
 #' @examples
 #' ## partially confirmatory: two anchors per factor, the rest exploratory
@@ -181,9 +181,11 @@ logC_igw <- function(xi, Lam, P) {
 #'
 #' ## empirical illustration: NLSY 1997 (27 mixed-type items, 3 factors).
 #' ## Missing continuous responses are handled in-loop; the polytomous items
-#' ## are treated as continuous for this illustration.
+#' ## are treated as continuous for this illustration. A subset keeps the
+#' ## example quick -- the vignette fits all 3,458 respondents.
 #' data(nlsy27)
-#' Yn <- as.matrix(nlsy27$dat)
+#' Yn <- as.matrix(nlsy27$dat)[1:1000, ]
+#' sum(is.na(Yn))            # incomplete cells, imputed in-loop
 #' fn <- vbfa(Yn, nlsy27$Q)
 #' round(fn$Lam, 2)
 #' }

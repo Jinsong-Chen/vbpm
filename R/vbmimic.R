@@ -38,7 +38,7 @@
 #'   for the regression of the `K` factors on the `P` covariates.
 #' @param v0 Spike variance. A scalar gives a single fixed spike; a decreasing
 #'   vector gives a warm-started regularization path, each stage initialized at
-#'   the previous stage's solution (Ročková & George, 2018). The same schedule
+#'   the previous stage's solution (Rockova & George, 2018). The same schedule
 #'   is applied to the measurement and structural parts. `v0 = 0.001` (the
 #'   default) is the fixed spike of the published estimator.
 #' @param standardize Logical; standardize `Y` and `X` before fitting. The
@@ -51,7 +51,7 @@
 #' @param tolVal Convergence tolerance on the maximum absolute change in the
 #'   weighted residual vector.
 #'
-#' @return An object of class `c("vbmimic", "vbpm_fit")` — a named list (see
+#' @return An object of class `c("vbmimic", "vbpm_fit")` -- a named list (see
 #'   [vbpm_fit]) with components:
 #'   \describe{
 #'     \item{A}{`J x K` posterior mean measurement loadings.}
@@ -90,7 +90,7 @@
 #' models. *Multivariate Behavioral Research*.
 #' \doi{10.1080/00273171.2025.2483253}
 #'
-#' Ročková, V., & George, E. I. (2018). The spike-and-slab LASSO.
+#' Rockova, V., & George, E. I. (2018). The spike-and-slab LASSO.
 #' *Journal of the American Statistical Association*, 113(521), 431-444.
 #'
 #' @seealso [vbfa()] for the measurement model alone, [sim_lvm()] to simulate

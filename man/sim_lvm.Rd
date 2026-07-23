@@ -129,8 +129,8 @@ dependence, categorical or mixed response formats, and missingness.
 \describe{
 \item{\code{sim_lvm()}}{is the \emph{model-side} generator. Use it when the data
 structure is driven by a supplied loading matrix (\code{mla}), or when the
-design involves \strong{predictors} — observed covariates (\code{P}, \code{b}) or
-latent predictors (\code{K1}, \code{ph1}, \code{b1}) — or \strong{mixed response formats}
+design involves \strong{predictors} -- observed covariates (\code{P}, \code{b}) or
+latent predictors (\code{K1}, \code{ph1}, \code{b1}) -- or \strong{mixed response formats}
 per item (\code{ilvl}). This is the generator for \code{\link[=vbmimic]{vbmimic()}}.}
 \item{\code{\link[=sim_fa]{sim_fa()}}}{is the \emph{structure-side} generator. Use it when the
 question is about the loading pattern itself: items per factor (\code{ipf}),

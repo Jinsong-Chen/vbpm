@@ -40,7 +40,10 @@ pefa(
 
 \item{orthogonal}{Passed to \code{\link[=vbfa]{vbfa()}} and \code{\link[=fit_stats]{fit_stats()}}.}
 
-\item{save_path}{Optional CSV checkpoint path (resume-safe).}
+\item{save_path}{Optional CSV checkpoint path. A sidecar
+\verb{<save_path>.manifest} records the data, design and every setting that
+affects comparability; resuming refuses to proceed if any of them differ,
+rather than pooling incomparable candidates.}
 
 \item{verbose}{Logical; print per-model progress.}
 

@@ -13,7 +13,7 @@ practice, because "S3 class" sounds like more machinery than it is.
 \section{What an S3 class actually is}{
 
 An S3 class is nothing more than a \strong{label attached to an ordinary R
-object}. A \code{vbpm_fit} is still a plain named list — the class attribute
+object}. A \code{vbpm_fit} is still a plain named list -- the class attribute
 changes none of its contents and none of the ways you already use it:
 \itemize{
 \item \code{fit$Lam}, \code{fit$eta}, \code{fit$ELBO}, ... work exactly as before;
@@ -38,7 +38,7 @@ on it.
 
 The specific class (\code{"vbfa"}, \code{"vbmimic"}) comes first, the family class
 \code{"vbpm_fit"} second. Methods written for \code{vbpm_fit} therefore apply to
-every model in the family unless a model overrides them — one \code{print}
+every model in the family unless a model overrides them -- one \code{print}
 method serves all estimators, and future family members (e.g. further
 variational models) inherit sensible behaviour on day one.
 }
@@ -46,7 +46,7 @@ variational models) inherit sensible behaviour on day one.
 \section{\code{vbpm_fit} versus \code{vb_fit()}}{
 
 These two names look related and are not, which is worth stating once.
-\code{vbpm_fit} is the \strong{class of a fitted model} — what \code{\link[=vbfa]{vbfa()}} and
+\code{vbpm_fit} is the \strong{class of a fitted model} -- what \code{\link[=vbfa]{vbfa()}} and
 \code{\link[=vbmimic]{vbmimic()}} return. \code{vb_fit()} was the pre-0.4.0 \strong{name of the function
 that computes fit statistics}, now \code{\link[=fit_stats]{fit_stats()}}; it survives only as a
 thin wrapper for old scripts. So a \code{vbpm_fit} is an input to

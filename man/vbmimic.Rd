@@ -38,7 +38,7 @@ for the regression of the \code{K} factors on the \code{P} covariates.}
 
 \item{v0}{Spike variance. A scalar gives a single fixed spike; a decreasing
 vector gives a warm-started regularization path, each stage initialized at
-the previous stage's solution (Ročková & George, 2018). The same schedule
+the previous stage's solution (Rockova & George, 2018). The same schedule
 is applied to the measurement and structural parts. \code{v0 = 0.001} (the
 default) is the fixed spike of the published estimator.}
 
@@ -56,7 +56,7 @@ analogous behaviour here.}
 weighted residual vector.}
 }
 \value{
-An object of class \code{c("vbmimic", "vbpm_fit")} — a named list (see
+An object of class \code{c("vbmimic", "vbpm_fit")} -- a named list (see
 \link{vbpm_fit}) with components:
 \describe{
 \item{A}{\verb{J x K} posterior mean measurement loadings.}
@@ -132,7 +132,7 @@ for variable selection in extended multiple-indicators multiple-causes
 models. \emph{Multivariate Behavioral Research}.
 \doi{10.1080/00273171.2025.2483253}
 
-Ročková, V., & George, E. I. (2018). The spike-and-slab LASSO.
+Rockova, V., & George, E. I. (2018). The spike-and-slab LASSO.
 \emph{Journal of the American Statistical Association}, 113(521), 431-444.
 }
 \seealso{

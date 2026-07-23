@@ -21,8 +21,8 @@
 #' \describe{
 #'   \item{`sim_lvm()`}{is the *model-side* generator. Use it when the data
 #'     structure is driven by a supplied loading matrix (`mla`), or when the
-#'     design involves **predictors** — observed covariates (`P`, `b`) or
-#'     latent predictors (`K1`, `ph1`, `b1`) — or **mixed response formats**
+#'     design involves **predictors** -- observed covariates (`P`, `b`) or
+#'     latent predictors (`K1`, `ph1`, `b1`) -- or **mixed response formats**
 #'     per item (`ilvl`). This is the generator for [vbmimic()].}
 #'   \item{[sim_fa()]}{is the *structure-side* generator. Use it when the
 #'     question is about the loading pattern itself: items per factor (`ipf`),

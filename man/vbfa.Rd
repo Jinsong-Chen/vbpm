@@ -76,7 +76,7 @@ default \code{0.01}), \code{diag_penalty} (\code{1} penalizes the precision diag
 prior parameters \code{a1}, \code{b1} on the local-dependence proportion.}
 }
 \value{
-An object of class \code{c("vbfa", "vbpm_fit")} — a named list (see
+An object of class \code{c("vbfa", "vbpm_fit")} -- a named list (see
 \link{vbpm_fit} for what the class does and does not change) with elements:
 \describe{
 \item{Lam}{\verb{J x K} posterior mean loadings.}
@@ -162,9 +162,11 @@ simLD$ofd_ind
 
 ## empirical illustration: NLSY 1997 (27 mixed-type items, 3 factors).
 ## Missing continuous responses are handled in-loop; the polytomous items
-## are treated as continuous for this illustration.
+## are treated as continuous for this illustration. A subset keeps the
+## example quick -- the vignette fits all 3,458 respondents.
 data(nlsy27)
-Yn <- as.matrix(nlsy27$dat)
+Yn <- as.matrix(nlsy27$dat)[1:1000, ]
+sum(is.na(Yn))            # incomplete cells, imputed in-loop
 fn <- vbfa(Yn, nlsy27$Q)
 round(fn$Lam, 2)
 }
@@ -173,13 +175,13 @@ round(fn$Lam, 2)
 \references{
 Chen, J., Guo, Z., Zhang, L., & Pan, J. (2021). A partially confirmatory
 approach to scale development with the Bayesian Lasso. \emph{Psychological
-Methods}, 26(2), 210–235. \doi{10.1037/met0000293}
+Methods}, 26(2), 210-235. \doi{10.1037/met0000293}
 
 Jin, Y., & Chen, J. (2025). Regularized variational approximation for
 partially confirmatory factor analysis. \emph{Structural Equation Modeling: A
-Multidisciplinary Journal}, 32(3), 437–449.
+Multidisciplinary Journal}, 32(3), 437-449.
 \doi{10.1080/10705511.2024.2432612}
 
-Ročková, V., & George, E. I. (2018). The spike-and-slab LASSO.
-\emph{Journal of the American Statistical Association}, 113(521), 431–444.
+Rockova, V., & George, E. I. (2018). The spike-and-slab LASSO.
+\emph{Journal of the American Statistical Association}, 113(521), 431-444.
 }

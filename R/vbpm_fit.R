@@ -11,7 +11,7 @@
 #'
 #' @section What an S3 class actually is:
 #' An S3 class is nothing more than a **label attached to an ordinary R
-#' object**. A `vbpm_fit` is still a plain named list — the class attribute
+#' object**. A `vbpm_fit` is still a plain named list -- the class attribute
 #' changes none of its contents and none of the ways you already use it:
 #'
 #' * `fit$Lam`, `fit$eta`, `fit$ELBO`, ... work exactly as before;
@@ -33,13 +33,13 @@
 #' @section Why the family shares a parent class:
 #' The specific class (`"vbfa"`, `"vbmimic"`) comes first, the family class
 #' `"vbpm_fit"` second. Methods written for `vbpm_fit` therefore apply to
-#' every model in the family unless a model overrides them — one `print`
+#' every model in the family unless a model overrides them -- one `print`
 #' method serves all estimators, and future family members (e.g. further
 #' variational models) inherit sensible behaviour on day one.
 #'
 #' @section `vbpm_fit` versus `vb_fit()`:
 #' These two names look related and are not, which is worth stating once.
-#' `vbpm_fit` is the **class of a fitted model** — what [vbfa()] and
+#' `vbpm_fit` is the **class of a fitted model** -- what [vbfa()] and
 #' [vbmimic()] return. `vb_fit()` was the pre-0.4.0 **name of the function
 #' that computes fit statistics**, now [fit_stats()]; it survives only as a
 #' thin wrapper for old scripts. So a `vbpm_fit` is an input to
@@ -62,8 +62,8 @@ NULL
 
 #' Compact display of a fitted vbpm model
 #'
-#' Prints a short summary — model type, dimensions, convergence, timing, and
-#' selection results — instead of dumping the full list. Access the parts as
+#' Prints a short summary -- model type, dimensions, convergence, timing, and
+#' selection results -- instead of dumping the full list. Access the parts as
 #' usual (`fit$Lam` etc.; see [vbpm_fit]); `str(fit)` shows everything.
 #'
 #' @param x A fit returned by [vbfa()] or [vbmimic()].

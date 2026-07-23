@@ -12,7 +12,7 @@ select_K_elbow(K, score, delta = 10, sustain = 2)
 \item{score}{A criterion for which larger is better. For an information
 criterion (smaller is better), pass \code{score = -IC}.}
 
-\item{delta}{Threshold as a percentage (0–100) of the largest marginal gain
+\item{delta}{Threshold as a percentage (0-100) of the largest marginal gain
 (default \code{10}).}
 
 \item{sustain}{Consecutive sub-threshold steps required to call the elbow

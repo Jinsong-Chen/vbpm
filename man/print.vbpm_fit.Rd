@@ -19,8 +19,8 @@ the "active loadings" line (default \code{0.5}, matching \code{\link[=fit_stats]
 can be used in pipes without losing the object).
 }
 \description{
-Prints a short summary — model type, dimensions, convergence, timing, and
-selection results — instead of dumping the full list. Access the parts as
+Prints a short summary -- model type, dimensions, convergence, timing, and
+selection results -- instead of dumping the full list. Access the parts as
 usual (\code{fit$Lam} etc.; see \link{vbpm_fit}); \code{str(fit)} shows everything.
 }
 \examples{

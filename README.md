@@ -52,23 +52,22 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
 A C++ toolchain is required to compile the QUIC solver (Rtools on Windows,
 Xcode command line tools on macOS).
 
-The repository is currently **private**, so `install_github()` needs a GitHub
-personal access token with `repo` scope — create one at
-<https://github.com/settings/tokens>, then:
-
 ```r
 # install.packages("remotes")
-remotes::install_github("Jinsong-Chen/vbpm",
-                        auth_token   = "ghp_...",   # or set GITHUB_PAT
-                        build_vignettes = TRUE)
+remotes::install_github("Jinsong-Chen/vbpm", build_vignettes = TRUE)
 ```
 
-Or, avoiding tokens entirely, clone and install from source:
+Or clone and install from source:
 
 ```sh
 git clone https://github.com/Jinsong-Chen/vbpm.git
 R CMD INSTALL vbpm
 ```
+
+While the repository is private, `install_github()` additionally needs a GitHub
+personal access token with `repo` scope — create one at
+<https://github.com/settings/tokens> and pass `auth_token = "ghp_..."`, or set
+`GITHUB_PAT`. Cloning over SSH avoids this.
 
 Then:
 
