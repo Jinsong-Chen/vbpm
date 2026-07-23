@@ -17,15 +17,9 @@ with fit statistics, factor-number selection, and two data simulators.
 
 ## R CMD check results
 
-Status: OK, with the following NOTEs.
+Status: 1 NOTE.
 
-* **"Found the following (possibly) invalid URLs"** for
-  `https://github.com/Jinsong-Chen/vbpm` and its `/issues` page.
-  The repository is private at the time of the local check, so an anonymous
-  request receives a 404. Both URLs resolve normally once the repository is
-  public, which it is at submission.
-
-* **"unable to verify current time"** — environmental (the check machine could
+* **"unable to verify current time"** -- environmental (the check machine could
   not reach a time server); unrelated to the package.
 
 There are no ERRORs or WARNINGs.
