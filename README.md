@@ -20,8 +20,12 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
   - **Dynamic exploration**: pass `v0` a decreasing vector for a warm-started
     regularization path (Ročková & George, 2018); a scalar `v0` is a single
     fixed spike. `v0 = 0.001` reproduces the fixed-spike estimator exactly.
-  - **Bifactor**: `orthogonal = TRUE` fixes the factor correlation to the
-    identity (one general + orthogonal group factors).
+  - **Bifactor**: `bifactor = TRUE` fits one general factor plus `K`
+    orthogonal group factors, with `Q` supplying only the group design --
+    so `K` counts group factors, comparable to an oblique `K`-factor
+    model. The `general` argument designs the general column (including
+    bifactor-(S-1)-style zeros). `orthogonal = TRUE` remains available
+    for plain orthogonal models (or hand-built bifactor designs).
   - **Local dependence**: set `ld = TRUE` to estimate a sparse residual
     precision by a graphical spike-and-slab prior (QUIC) — fully exploratory
     by default, or restricted by a residual design matrix `Qe`.

@@ -237,3 +237,57 @@ test_that("sim_fa produces data with planted local dependence", {
   expect_false(anyNA(s$dat))
   expect_gt(nrow(s$ofd_ind), 0)
 })
+
+test_that("bifactor mode equals the hand-built general column bit-for-bit", {
+  d  <- make_dat()
+  fb <- vbfa(d$Y, d$Q, bifactor = TRUE)
+  fh <- vbfa(d$Y, cbind(1L, d$Q), orthogonal = TRUE)
+  expect_identical(fb$Lam, fh$Lam)
+  expect_identical(fb$ELBO, fh$ELBO)
+  expect_identical(fb$pi, fh$pi)
+  ## bookkeeping fields
+  expect_true(fb$bifactor); expect_identical(fb$n_general, 1L)
+  expect_identical(fb$Q, cbind(rep(1L, nrow(d$Q)), d$Q, deparse.level = 0))
+  expect_true(fb$orthogonal)
+  ## print shows the general/group split
+  expect_output(print(fb), "1 general [+] 3 group factors")
+})
+
+test_that("bifactor = TRUE overrides orthogonal = FALSE, with a message", {
+  d <- make_dat()
+  expect_message(
+    f <- suppressWarnings(          # max_it deliberately tiny; iteration
+      vbfa(d$Y, d$Q, bifactor = TRUE, orthogonal = FALSE, max_it = 50)),
+    "overridden")
+  expect_true(f$orthogonal)
+  ## no message when orthogonal is left at its default
+  expect_no_message(suppressWarnings(
+    vbfa(d$Y, d$Q, bifactor = TRUE, max_it = 50)))
+})
+
+test_that("bifactor mode validates general and rejects a general column in Q", {
+  d <- make_dat()
+  expect_error(vbfa(d$Y, cbind(1L, d$Q), bifactor = TRUE), "all-specified")
+  expect_error(vbfa(d$Y, d$Q, bifactor = TRUE, general = 2), "-1, 0, or 1")
+  expect_error(vbfa(d$Y, d$Q, bifactor = TRUE, general = 0), "at least one")
+  ## bifactor-(S-1)-style: zero general loadings where general = 0
+  g <- rep(1L, ncol(d$Y)); g[1:4] <- 0L
+  f <- suppressWarnings(            # truncated run; only the zeros matter
+    vbfa(d$Y, d$Q, bifactor = TRUE, general = g, max_it = 200))
+  expect_true(all(f$Lam[1:4, 1] == 0))
+})
+
+test_that("pefa bifactor sweep counts group factors and carries K_total", {
+  d  <- make_dat()
+  Q0 <- d$Q[, 1:2, drop = FALSE]
+  r  <- pefa(Q0, d$Y, Kmin = 2, Kmax = 3, bifactor = TRUE, v0 = .001,
+             max_it = 500, verbose = FALSE)
+  expect_true(isTRUE(r$bifactor))
+  expect_identical(r$sweep$K, 2:3)
+  expect_identical(r$sweep$K_total, 3:4)
+  expect_true(all(vapply(r$fits, function(f) isTRUE(f$bifactor), logical(1))))
+  ## selected fit's Q has the general column prepended
+  expect_identical(ncol(selected_fit(r)$Q), r$selected_K + 1L)
+  expect_output(print(r), "group factors [(][+] 1 general[)]")
+  expect_output(print(summary(r)), "K_total")
+})

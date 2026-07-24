@@ -16,6 +16,8 @@ pefa(
   max_it = 10000,
   tau = 0.5,
   orthogonal = FALSE,
+  bifactor = FALSE,
+  general = 1,
   save_path = NULL,
   verbose = TRUE,
   ...
@@ -39,6 +41,19 @@ pefa(
 \item{max_it, tau}{Passed to \code{\link[=vbfa]{vbfa()}} / \code{\link[=fit_stats]{fit_stats()}} (\code{max_it} is per stage).}
 
 \item{orthogonal}{Passed to \code{\link[=vbfa]{vbfa()}} and \code{\link[=fit_stats]{fit_stats()}}.}
+
+\item{bifactor}{Logical. If \code{TRUE}, sweep \strong{bifactor} candidates with
+\code{Q0} supplying only the group backbone: every candidate gets a general
+column internally (see \code{general}), and \code{Kmin}/\code{Kmax} and the reported
+\code{K} count \strong{group factors} -- directly comparable to an oblique sweep
+over the same window. The sweep table gains a \code{K_total} column
+(\code{K + 1}). Implies orthogonal factors; \code{bifactor = TRUE} overrides
+\code{orthogonal = FALSE} (with a message). The identification warning below
+applies with full force.}
+
+\item{general}{Design of the general column when \code{bifactor = TRUE};
+passed to \code{\link[=vbfa]{vbfa()}} (scalar or length-\code{J} vector of \code{1}/\code{0}/\code{-1},
+default \code{1}).}
 
 \item{save_path}{Optional CSV checkpoint path. A sidecar
 \verb{<save_path>.manifest} records the data, design and every setting that
@@ -65,7 +80,8 @@ columns, then selects the number of factors with the scale-free gain rule
 }
 \section{Orthogonal (bifactor) sweeps are weakly identified}{
 
-With \code{orthogonal = TRUE} and a general column in the backbone, do \strong{not}
+With \code{bifactor = TRUE} (or, equivalently, \code{orthogonal = TRUE} and a
+hand-built general column in the backbone), do \strong{not}
 expect a sweep to discover the number of group factors. An omitted
 orthogonal group factor contributes a rank-one within-cluster covariance
 block that the unspecified (\code{-1}) entries of the \emph{remaining} columns can
@@ -113,6 +129,13 @@ r <- pefa(Q0, sim$dat, Kmin = 2, Kmax = 4, verbose = FALSE)
 summary(r)            # objective, objective-gain, BIC and BIC-gain selections
 r$sweep               # the full sweep table (ELBO, gains, fit, timing)
 selected_fit(r)$flag  # the refitted selected model is returned
+
+## bifactor sweep: Q0 is the GROUP backbone and the window counts GROUP
+## factors (the general column is added internally to every candidate).
+## Read the identification warning above before interpreting one.
+rb <- pefa(Q0, sim$dat, Kmin = 2, Kmax = 4, bifactor = TRUE, v0 = .001,
+           verbose = FALSE)
+rb$sweep[, c("K", "K_total", "BIC")]
 }
 
 }

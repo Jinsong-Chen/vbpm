@@ -1,3 +1,35 @@
+# vbpm 0.6.0
+
+* **New `bifactor` mode in `vbfa()` and `pefa()`.** Previously a bifactor
+  was expressed by hand-building a general column into `Q` under
+  `orthogonal = TRUE`, which made the user-facing factor count include the
+  general factor -- off by one against the comparable oblique model, a
+  recurring source of confusion in sweeps ("`Kmin = 3` means 2 group
+  factors"). With `bifactor = TRUE`, `Q` (and `pefa()`'s `Q0`) supply only
+  the **group** design; the general column is added internally, and `K`
+  everywhere means group factors, directly comparable to an oblique
+  `K`-factor model. Details:
+  - `bifactor = TRUE` implies orthogonal factors and **overrides
+    `orthogonal = FALSE`** (with a message when the latter was passed
+    explicitly).
+  - A new `general` argument designs the general column (`1`/`0`/`-1` per
+    item, default all `1`), so bifactor-(S-1)-style designs (some items
+    with no general loading) and partially exploratory general columns are
+    now expressible.
+  - Passing a `Q` that already contains an all-specified column together
+    with `bifactor = TRUE` is an error rather than a silent double count.
+  - Fits carry `bifactor`, `n_general`, and `general`; `print()` shows
+    "1 general + K group factors". The pefa sweep table gains a `K_total`
+    column and the print methods label the window as group factors.
+  - The long form (`cbind(1L, Q)` with `orthogonal = TRUE`) still works
+    and is bit-identical -- the new mode is bookkeeping, not a new
+    estimator -- and a regression test enforces that equality.
+  - The relabeling changes none of the identification facts: bifactor
+    sweeps remain weakly identified and the `?pefa` warnings keep full
+    force.
+  - Non-bifactor `orthogonal = TRUE` fits now print as "orthogonal"
+    rather than "orthogonal/bifactor".
+
 # vbpm 0.5.0
 
 Documentation-and-parallelism release preparing the CRAN submission, plus one

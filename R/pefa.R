@@ -103,6 +103,17 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #' @param cutoffs Named absolute-fit cutoffs used when `fit_cut = TRUE`.
 #' @param max_it,tau Passed to [vbfa()] / [fit_stats()] (`max_it` is per stage).
 #' @param orthogonal Passed to [vbfa()] and [fit_stats()].
+#' @param bifactor Logical. If `TRUE`, sweep **bifactor** candidates with
+#'   `Q0` supplying only the group backbone: every candidate gets a general
+#'   column internally (see `general`), and `Kmin`/`Kmax` and the reported
+#'   `K` count **group factors** -- directly comparable to an oblique sweep
+#'   over the same window. The sweep table gains a `K_total` column
+#'   (`K + 1`). Implies orthogonal factors; `bifactor = TRUE` overrides
+#'   `orthogonal = FALSE` (with a message). The identification warning below
+#'   applies with full force.
+#' @param general Design of the general column when `bifactor = TRUE`;
+#'   passed to [vbfa()] (scalar or length-`J` vector of `1`/`0`/`-1`,
+#'   default `1`).
 #' @param save_path Optional CSV checkpoint path. A sidecar
 #'   `<save_path>.manifest` records the data, design and every setting that
 #'   affects comparability; resuming refuses to proceed if any of them differ,
@@ -118,7 +129,8 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #'   [selected_fit()] to extract the selected fitted model.
 #'
 #' @section Orthogonal (bifactor) sweeps are weakly identified:
-#' With `orthogonal = TRUE` and a general column in the backbone, do **not**
+#' With `bifactor = TRUE` (or, equivalently, `orthogonal = TRUE` and a
+#' hand-built general column in the backbone), do **not**
 #' expect a sweep to discover the number of group factors. An omitted
 #' orthogonal group factor contributes a rank-one within-cluster covariance
 #' block that the unspecified (`-1`) entries of the *remaining* columns can
@@ -174,6 +186,13 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #' summary(r)            # objective, objective-gain, BIC and BIC-gain selections
 #' r$sweep               # the full sweep table (ELBO, gains, fit, timing)
 #' selected_fit(r)$flag  # the refitted selected model is returned
+#'
+#' ## bifactor sweep: Q0 is the GROUP backbone and the window counts GROUP
+#' ## factors (the general column is added internally to every candidate).
+#' ## Read the identification warning above before interpreting one.
+#' rb <- pefa(Q0, sim$dat, Kmin = 2, Kmax = 4, bifactor = TRUE, v0 = .001,
+#'            verbose = FALSE)
+#' rb$sweep[, c("K", "K_total", "BIC")]
 #' }
 #'
 #' @seealso [vbfa()], [select_K_elbow()]
@@ -181,11 +200,26 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
                     cutoffs = c(RMSEA = .06, SRMR = .10, CFI = .90, TLI = .90),
                     max_it = 10000, tau = 0.50,
-                    orthogonal = FALSE, save_path = NULL, verbose = TRUE, ...) {
+                    orthogonal = FALSE, bifactor = FALSE, general = 1,
+                    save_path = NULL, verbose = TRUE, ...) {
   call <- match.call()
   Y  <- as.matrix(Y); Q0 <- as.matrix(Q0)
   J  <- ncol(Y); K0 <- ncol(Q0)
   if (nrow(Q0) != J) stop("nrow(Q0) must equal ncol(Y).", call. = FALSE)
+  ## bifactor sweep: Q0 is the GROUP backbone, the window counts GROUP
+  ## factors, and every candidate gets the general column from vbfa()
+  ## internally. bifactor = TRUE overrides orthogonal = FALSE.
+  bifactor <- isTRUE(bifactor)
+  if (bifactor) {
+    if (any(apply(Q0 == 1, 2, all)))
+      stop("Q0 contains an all-specified column. With bifactor = TRUE, ",
+           "supply only the GROUP backbone in Q0; the general column is ",
+           "added internally (see the `general` argument).", call. = FALSE)
+    if (!missing(orthogonal) && !isTRUE(orthogonal))
+      message("bifactor = TRUE implies orthogonal factors; ",
+              "orthogonal = FALSE is overridden.")
+    orthogonal <- TRUE
+  }
   ## Validate the window before fitting: Kmin:Kmax silently reverses when
   ## Kmax < Kmin, which would sweep a different set than the user asked for.
   for (nm in c("Kmin", "Kmax")) {
@@ -216,6 +250,8 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
     Y_sig  = c(sum(Y), sum(Y^2), sum(Y * seq_len(nrow(Y)))),
     Q0_sig = paste(Q0, collapse = ""),
     orthogonal = orthogonal, tau = tau, max_it = max_it,
+    bifactor = bifactor,
+    general = if (bifactor) paste(rep_len(general, J), collapse = "") else NULL,
     delta = delta, sustain = sustain,
     fit_cut = isTRUE(fit_cut), cutoffs = cutoffs,
     dots = vapply(list(...), function(z) paste(format(z), collapse = ","),
@@ -253,12 +289,17 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
       if (verbose) cat(sprintf("K=%2d  (from checkpoint)\n", K)); next
     }
     t0  <- Sys.time()
-    fit <- vbfa(Y, pad(K), max_it = max_it, convChk = FALSE,
-                orthogonal = orthogonal, ...)
-    fs  <- fit_stats(fit, Y, pad(K), tau = tau, orthogonal = orthogonal)
+    fit <- if (bifactor)
+      vbfa(Y, pad(K), max_it = max_it, convChk = FALSE,
+           bifactor = TRUE, general = general, ...)
+    else
+      vbfa(Y, pad(K), max_it = max_it, convChk = FALSE,
+           orthogonal = orthogonal, ...)
+    fs  <- fit_stats(fit, Y, fit$Q, tau = tau, orthogonal = orthogonal)
     fits[[i]] <- fit
     rows[[i]] <- data.frame(
-      K = K, ELBO = as.numeric(fit$ELBO),
+      K = K, K_total = K + as.integer(bifactor),
+      ELBO = as.numeric(fit$ELBO),
       Objective = as.numeric(fit$objective),
       objective_type = fit$objective_type,
       AIC = fs["AIC"], BIC = fs["BIC"],
@@ -320,9 +361,13 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
   sel_fit <- sel_stats <- NULL
   if (!is.na(K_sel)) {
     sel_fit <- fits[[as.character(K_sel)]]
-    if (is.null(sel_fit)) sel_fit <- vbfa(Y, pad(K_sel), max_it = max_it, convChk = FALSE,
-                                          orthogonal = orthogonal, ...)
-    sel_stats <- fit_stats(sel_fit, Y, pad(K_sel), tau = tau, orthogonal = orthogonal)
+    if (is.null(sel_fit)) sel_fit <- if (bifactor)
+        vbfa(Y, pad(K_sel), max_it = max_it, convChk = FALSE,
+             bifactor = TRUE, general = general, ...)
+      else
+        vbfa(Y, pad(K_sel), max_it = max_it, convChk = FALSE,
+             orthogonal = orthogonal, ...)
+    sel_stats <- fit_stats(sel_fit, Y, sel_fit$Q, tau = tau, orthogonal = orthogonal)
   }
 
   if (verbose) {
@@ -346,10 +391,13 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
   out <- list(call = call,
        selected_K = K_sel, selection = selection, fit = sel_fit,
        selected_fit = sel_fit, fits = fits,
-       fit_stats = sel_stats, Q_selected = if (!is.na(K_sel)) pad(K_sel) else NULL,
+       fit_stats = sel_stats,
+       Q_selected = if (is.na(K_sel)) NULL else
+                    if (bifactor) sel_fit$Q else pad(K_sel),
        sweep = sweep,
        window = list(K = Ks, Kmin = min(Ks), Kmax = max(Ks), K0 = K0),
        K0 = K0, delta = delta, sustain = sustain,
+       bifactor = bifactor, n_general = if (bifactor) 1L else 0L,
        boundary = boundary, objective_type = types,
        fit_cut = isTRUE(fit_cut), cutoffs = cutoffs)
   class(out) <- c("pefa", "vbpm_sweep")
@@ -399,8 +447,9 @@ selected_fit.pefa <- function(object, ...) object$selected_fit
 #' @export
 print.pefa <- function(x, ...) {
   nconv <- sum(x$sweep$converged)
-  cat(sprintf("PEFA sweep: K = %d:%d (%d of %d converged)\n",
-              x$window$Kmin, x$window$Kmax, nconv, nrow(x$sweep)))
+  klab  <- if (isTRUE(x$bifactor)) " group factors (+ 1 general)" else ""
+  cat(sprintf("PEFA sweep: K = %d:%d%s (%d of %d converged)\n",
+              x$window$Kmin, x$window$Kmax, klab, nconv, nrow(x$sweep)))
   cat(sprintf("  %s gain (delta = %g%%) -> K = %s\n",
               toupper(x$objective_type), x$delta,
               if (is.na(x$selected_K)) "NA" else x$selected_K))
@@ -429,6 +478,7 @@ print.pefa <- function(x, ...) {
 summary.pefa <- function(object, ...) {
   z <- list(
     call = object$call,
+    bifactor = isTRUE(object$bifactor),
     window = object$window,
     delta = object$delta,
     sustain = object$sustain,
@@ -456,8 +506,9 @@ summary.pefa <- function(object, ...) {
 #' @rdname pefa-methods
 #' @export
 print.summary.pefa <- function(x, digits = 3, ...) {
-  cat(sprintf("PEFA sweep summary: K = %d:%d; delta = %g%%; sustain = %d\n",
-              x$window$Kmin, x$window$Kmax, x$delta, x$sustain))
+  klab <- if (isTRUE(x$bifactor)) " group factors (+ 1 general)" else ""
+  cat(sprintf("PEFA sweep summary: K = %d:%d%s; delta = %g%%; sustain = %d\n",
+              x$window$Kmin, x$window$Kmax, klab, x$delta, x$sustain))
   cat(sprintf("  %-10s -> K = %s\n", toupper(x$objective_type),
               x$selection["objective"]))
   cat(sprintf("  %-10s -> K = %s  (delta = %g%%; primary)\n",
@@ -480,6 +531,7 @@ print.summary.pefa <- function(x, digits = 3, ...) {
   d   <- x$comparison
   lab <- toupper(x$objective_type)
   tab <- data.frame(K = d$K)
+  if (isTRUE(x$bifactor) && "K_total" %in% names(d)) tab$K_total <- d$K_total
   tab[[lab]]                      <- round(d$Objective, 1)
   tab[[paste0(lab, "_gain%")]]    <- round(d$Objective_gain_pct, 1)
   tab$BIC                         <- round(d$BIC, 1)

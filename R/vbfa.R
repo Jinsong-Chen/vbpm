@@ -61,9 +61,26 @@ logC_igw <- function(xi, Lam, P) {
 #'   selected by spike-and-slab), `0` (shrunk to zero). Symmetric; its diagonal
 #'   is ignored. The default `NULL` means fully exploratory local dependence,
 #'   i.e. `Qe = matrix(-1, J, J)`.
-#' @param orthogonal Logical. If `TRUE`, the factor correlation is fixed at the
-#'   identity (an orthogonal bifactor model: one general plus orthogonal group
-#'   factors). Default `FALSE` (oblique; factor correlation estimated).
+#' @param bifactor Logical. If `TRUE`, fit an orthogonal bifactor model with
+#'   `Q` supplying only the **group** design (`J x K` for `K` group factors):
+#'   the general column is added internally according to `general`, so the
+#'   user-facing `K` counts group factors and is directly comparable to an
+#'   oblique `K`-factor model. Implies orthogonal factors --
+#'   `bifactor = TRUE` overrides `orthogonal = FALSE` (with a message).
+#'   Supplying a `Q` that already contains an all-specified column is an
+#'   error: with `bifactor = TRUE` the general column must come from
+#'   `general`, not from `Q`.
+#' @param general Design of the general column when `bifactor = TRUE`: a
+#'   scalar or length-`J` vector with the usual codes (`1` specified, `0`
+#'   fixed zero, `-1` unspecified). The default `1` gives the standard
+#'   bifactor (every item loads on the general factor). A vector with `0`
+#'   entries yields bifactor-(S-1)-style designs in which some items carry
+#'   no general loading; at least one entry must be `1`.
+#' @param orthogonal Logical. If `TRUE`, the factor correlation is fixed at
+#'   the identity (a plain orthogonal factor model; also the engine under a
+#'   hand-built bifactor design). Default `FALSE` (oblique; factor
+#'   correlation estimated). For bifactor models prefer `bifactor = TRUE`,
+#'   which implies orthogonality and keeps `K` counting group factors.
 #' @param v0 Loading-spike variance. A decreasing **vector** gives a
 #'   warm-started dynamic regularization path (each stage runs to convergence
 #'   and warm-starts the next); a **scalar** gives a single fixed spike. The
@@ -168,10 +185,13 @@ logC_igw <- function(xi, Lam, P) {
 #' round(fit$pi, 2)            # posterior inclusion probabilities
 #'
 #' \donttest{
-#' ## orthogonal bifactor: one general column plus the group factors
-#' Qb  <- cbind(1L, Q)
-#' fb  <- vbfa(sim$dat, Qb, orthogonal = TRUE)
+#' ## orthogonal bifactor, preferred form: Q holds only the GROUP design and
+#' ## K counts group factors (comparable to an oblique K-factor model)
+#' fb <- vbfa(sim$dat, Q, bifactor = TRUE, v0 = .001)  # fixed spike: fast demo
+#' fb                          # prints "1 general + 3 group factors"
 #' fb$Phi                      # identity by construction
+#' ## the long form vbfa(sim$dat, cbind(1L, Q), orthogonal = TRUE) is
+#' ## bit-identical -- enforced by a regression test
 #'
 #' ## local dependence: simulate correlated residuals, then set ld = TRUE
 #' simLD <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, lac = .3, ecr = .3,
@@ -196,6 +216,7 @@ logC_igw <- function(xi, Lam, P) {
 #'
 #' @export
 vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
+                 bifactor = FALSE, general = 1,
                  v0 = c(0.01, 0.005, 0.002, 0.001),
                  max_it = 5000, convChk = FALSE, tolVal = 1e-4,
                  ld_control = list()) {
@@ -215,6 +236,29 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
     stop("The numbers of items in data and Q are unequal.", call. = FALSE)
   if (!all(Q %in% c(-1, 0, 1)))
     stop("Q entries must be in {-1, 0, 1}.", call. = FALSE)
+
+  ## ---- bifactor mode: Q is the GROUP design; the general column is built
+  ## here, so user-facing K counts group factors (comparable to an oblique
+  ## K-factor model). bifactor = TRUE overrides orthogonal = FALSE.
+  bifactor <- isTRUE(bifactor)
+  if (bifactor) {
+    if (!is.numeric(general) || anyNA(general) || !all(general %in% c(-1, 0, 1)))
+      stop("general must contain only -1, 0, or 1 (scalar or length-J vector).",
+           call. = FALSE)
+    general <- rep_len(as.integer(general), ncol(Y))
+    if (!any(general == 1))
+      stop("general must specify (1) the general loading for at least one item.",
+           call. = FALSE)
+    if (any(apply(Q == 1, 2, all)))
+      stop("Q contains an all-specified column. With bifactor = TRUE, supply ",
+           "only the GROUP design in Q; the general column is added ",
+           "internally (see the `general` argument).", call. = FALSE)
+    if (!missing(orthogonal) && !isTRUE(orthogonal))
+      message("bifactor = TRUE implies orthogonal factors; ",
+              "orthogonal = FALSE is overridden.")
+    orthogonal <- TRUE
+    Q <- cbind(general, Q, deparse.level = 0)
+  }
 
   ld <- isTRUE(ld)
   if (!ld) {
@@ -704,6 +748,9 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
               ## (fit_stats, print) need not be told twice
               Q = Q, Qe = if (ld) Qe else NULL,
               orthogonal = orthogonal, ld = ld,
+              bifactor = bifactor,
+              n_general = if (bifactor) 1L else 0L,
+              general = if (bifactor) general else NULL,
               design = list(Q = Q, Qe = if (ld) Qe else NULL),
               coefficients = list(Lam = mu.q.Lam,
                                   Phi = if (orthogonal) diag(1, P, P) else
@@ -712,6 +759,7 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
               posterior = list(pi = q, Lam_var = sigsq.q.Lam,
                                eta_mean = mu.q.eta, eta_cov = PHI.q.eta),
               settings = list(orthogonal = orthogonal, ld = ld,
+                              bifactor = bifactor,
                               v0 = v0_seq,
                               xi0 = if (ld) xi0_seq else NULL),
               preprocess = list(center = center, scale = scale_,

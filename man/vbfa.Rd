@@ -10,6 +10,8 @@ vbfa(
   ld = FALSE,
   Qe = NULL,
   orthogonal = FALSE,
+  bifactor = FALSE,
+  general = 1,
   v0 = c(0.01, 0.005, 0.002, 0.001),
   max_it = 5000,
   convChk = FALSE,
@@ -38,9 +40,28 @@ selected by spike-and-slab), \code{0} (shrunk to zero). Symmetric; its diagonal
 is ignored. The default \code{NULL} means fully exploratory local dependence,
 i.e. \code{Qe = matrix(-1, J, J)}.}
 
-\item{orthogonal}{Logical. If \code{TRUE}, the factor correlation is fixed at the
-identity (an orthogonal bifactor model: one general plus orthogonal group
-factors). Default \code{FALSE} (oblique; factor correlation estimated).}
+\item{orthogonal}{Logical. If \code{TRUE}, the factor correlation is fixed at
+the identity (a plain orthogonal factor model; also the engine under a
+hand-built bifactor design). Default \code{FALSE} (oblique; factor
+correlation estimated). For bifactor models prefer \code{bifactor = TRUE},
+which implies orthogonality and keeps \code{K} counting group factors.}
+
+\item{bifactor}{Logical. If \code{TRUE}, fit an orthogonal bifactor model with
+\code{Q} supplying only the \strong{group} design (\verb{J x K} for \code{K} group factors):
+the general column is added internally according to \code{general}, so the
+user-facing \code{K} counts group factors and is directly comparable to an
+oblique \code{K}-factor model. Implies orthogonal factors --
+\code{bifactor = TRUE} overrides \code{orthogonal = FALSE} (with a message).
+Supplying a \code{Q} that already contains an all-specified column is an
+error: with \code{bifactor = TRUE} the general column must come from
+\code{general}, not from \code{Q}.}
+
+\item{general}{Design of the general column when \code{bifactor = TRUE}: a
+scalar or length-\code{J} vector with the usual codes (\code{1} specified, \code{0}
+fixed zero, \code{-1} unspecified). The default \code{1} gives the standard
+bifactor (every item loads on the general factor). A vector with \code{0}
+entries yields bifactor-(S-1)-style designs in which some items carry
+no general loading; at least one entry must be \code{1}.}
 
 \item{v0}{Loading-spike variance. A decreasing \strong{vector} gives a
 warm-started dynamic regularization path (each stage runs to convergence
@@ -145,10 +166,13 @@ round(fit$Lam, 2)           # loadings
 round(fit$pi, 2)            # posterior inclusion probabilities
 
 \donttest{
-## orthogonal bifactor: one general column plus the group factors
-Qb  <- cbind(1L, Q)
-fb  <- vbfa(sim$dat, Qb, orthogonal = TRUE)
+## orthogonal bifactor, preferred form: Q holds only the GROUP design and
+## K counts group factors (comparable to an oblique K-factor model)
+fb <- vbfa(sim$dat, Q, bifactor = TRUE, v0 = .001)  # fixed spike: fast demo
+fb                          # prints "1 general + 3 group factors"
 fb$Phi                      # identity by construction
+## the long form vbfa(sim$dat, cbind(1L, Q), orthogonal = TRUE) is
+## bit-identical -- enforced by a regression test
 
 ## local dependence: simulate correlated residuals, then set ld = TRUE
 simLD <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, lac = .3, ecr = .3,

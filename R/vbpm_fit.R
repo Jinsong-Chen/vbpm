@@ -102,9 +102,13 @@ print.vbpm_fit <- function(x, tau = 0.5, ...) {
   } else {
     J <- nrow(x$Lam); K <- ncol(x$Lam); N <- nrow(x$eta)
     cat("vbfa: VB partially confirmatory factor analysis\n")
-    cat(sprintf("  %d items, %d factors, N = %d  (%s%s)\n", J, K, N,
-                if (isTRUE(x$orthogonal)) "orthogonal/bifactor" else "oblique",
-                if (isTRUE(x$ld)) ", local dependence" else ""))
+    if (isTRUE(x$bifactor))
+      cat(sprintf("  %d items, 1 general + %d group factors, N = %d  (bifactor%s)\n",
+                  J, K - 1L, N, if (isTRUE(x$ld)) ", local dependence" else ""))
+    else
+      cat(sprintf("  %d items, %d factors, N = %d  (%s%s)\n", J, K, N,
+                  if (isTRUE(x$orthogonal)) "orthogonal" else "oblique",
+                  if (isTRUE(x$ld)) ", local dependence" else ""))
   }
 
   n_stage <- x$path$n_stage
