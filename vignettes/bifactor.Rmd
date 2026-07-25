@@ -382,6 +382,27 @@ not explain of an item's common variance is exactly what its group factor
 carries. Cluster 3 (true $\gamma = .60$) therefore shows the largest special
 effect and cluster 1 (true $\gamma = .80$) the smallest.
 
+### (f) All of the above in one call: `special_effects()`
+
+Parts (c)-(e) were written out in plain R because the mathematics deserves
+to be seen once. In practice, `special_effects()` computes all three
+summaries from the fit directly -- per-group ratio CVs and the
+item-weighted mean CV, the higher-order parameters $\hat\gamma_k$ (with
+$\hat\lambda_j$ in `$items`), and the Eq.-16 effect sizes -- inferring
+group membership from the design and the posterior inclusion
+probabilities, and flagging any items it had to set aside:
+
+```{r ho-special-effects}
+special_effects(fit)
+```
+
+The numbers match parts (c)-(e) exactly. Note what the function does
+*not* do: it takes no cutoff argument and renders no verdict. The `.1`
+convention for the mean CV is suggestive, and the higher-order parameters
+and effect sizes are reported regardless -- reading them faithfully (a
+re-expression) or loosely (a lossy summary of a genuine bifactor) is the
+analyst's call, informed by the CVs.
+
 ## 5. Can a sweep recover the higher-order structure? No
 
 Section 3 showed the absorption problem on genuine bifactor data; the same
@@ -520,9 +541,9 @@ large mean CV says the general factor is genuinely its own thing:
 
 ```{r step3-bifactor}
 f4b <- vbfa(Y, Q3, bifactor = TRUE)
-rt  <- sapply(1:J, function(j) abs(f4b$Lam[j, cl[j] + 1]) / abs(f4b$Lam[j, 1]))
-cvs <- sapply(1:K, function(k) { r <- rt[cl == k]; sd(r) / mean(r) })
-sum(table(cl) * cvs) / J          # item-weighted mean CV
+se  <- special_effects(f4b)
+se$mean_cv
+se$groups[, c("group", "mean_ratio", "cv", "gamma", "D")]
 ```
 
 Here it is about `.39` -- far above the line, so these data keep their full

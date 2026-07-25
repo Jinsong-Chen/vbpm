@@ -1,3 +1,21 @@
+# vbpm 0.6.1
+
+* **New `special_effects()`** post-processes an orthogonal bifactor fit
+  into the three summaries of the `bifactor` vignette in one call: the
+  Schmid-Leiman proportionality check (per-group and item-weighted mean CV
+  of the group/general loading ratio), the approximate higher-order
+  parameterization (`gamma` per group factor, `lambda` per item), and the
+  testlet/special effect sizes of Zhang & Chen (2024, Eq. 16) with
+  posterior-inclusion gating of unspecified loadings. Group membership is
+  inferred from anchors and inclusion probabilities; unassigned,
+  cross-loaded, and no-general-loading items are flagged rather than
+  silently pooled. Deliberately descriptive: no cutoff argument and no
+  verdict -- the conventional `.1` reading of the mean CV is mentioned as
+  suggestive, and all quantities are reported regardless. Accepts
+  `bifactor = TRUE` fits natively and legacy hand-built designs (one
+  all-specified column under `orthogonal = TRUE`). Tests pin the function
+  to an independent reimplementation of the vignette's plain-R code.
+
 # vbpm 0.6.0
 
 * **New `bifactor` mode in `vbfa()` and `pefa()`.** Previously a bifactor

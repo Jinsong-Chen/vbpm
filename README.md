@@ -41,6 +41,10 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
   implied covariance from the residual covariance, so it is correct for
   diagonal *and* local-dependence `vbfa` fits, and it reads `orthogonal`/`ld`
   from the fit rather than asking you to repeat them.
+- **`special_effects()`** — post-process a bifactor fit: Schmid-Leiman
+  proportionality CVs, approximate higher-order parameters (second-order
+  loadings per group factor), and testlet/special effect sizes
+  (Zhang & Chen, 2024, Eq. 16).
 - **`pefa()`** / **`select_K_elbow()`** — sweep the number of factors and
   select it with a scale-free gain rule. `pefa()` returns a sweep object with
   `summary()`, `plot()`, and `selected_fit()`.
