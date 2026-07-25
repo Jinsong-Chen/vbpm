@@ -122,7 +122,7 @@ Q[1:2, ] <- 0; Q[1:2, 1] <- 1        # two anchors on factor 1, etc.
 
 fit <- vbfa(Y, Q)                    # dynamic path on by default; quiet
 fit                                  # compact summary (S3 print method)
-idx <- fit_stats(fit)                # reads data/design/settings from the fit
+idx <- fit_stats(fit)                # reads Q, orthogonal and ld from the fit
 ```
 
 Fits are ordinary named lists with a shared `vbpm_fit` class attached — fields
@@ -187,7 +187,7 @@ round(fit$B, 2)                      # which covariates predict which factors
 
 ## Known limitations
 
-As of 0.5.0:
+As of 0.7.1:
 
 - **Response types.** The estimators model **continuous Gaussian responses**,
   and in-loop missing-data support covers that case in both `vbfa()` and
@@ -196,6 +196,18 @@ As of 0.5.0:
   and augmenting latent responses, which is a modelling extension rather than
   a feature. Simulating them is supported (`cati`/`noc` in `sim_fa()`,
   `ilvl` in `sim_lvm()`); estimating from them is not.
+- **Bifactor factor-number sweeps are weakly identified.** A `pefa()` sweep
+  over bifactor candidates should not be used to decide how many *group*
+  factors there are: an omitted group factor is absorbed almost exactly by the
+  unspecified entries of the remaining columns, so candidates are
+  covariance-equivalent and the selection lands on the lower window boundary
+  regardless of the truth. `print()` flags this case, `?pefa` explains it, and
+  the `bifactor` vignette demonstrates it together with the two-step route that
+  does work (an ordinary oblique sweep for the factor count, then an anchored
+  model comparison by BIC).
+- **No DIF paths in `vbmimic()`.** Covariates predict the *factors*
+  (`Q_B`, i.e. impact); there are no direct covariate-to-item paths, so the
+  model cannot currently express or detect differential item functioning.
 - **Complete covariates.** `vbmimic()` requires complete `X`: covariates are
   conditioned on rather than modelled, so the model supplies no distribution
   to impute them from.

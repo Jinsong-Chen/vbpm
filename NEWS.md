@@ -1,3 +1,17 @@
+# vbpm 0.7.1
+
+* Documentation currency pass. The README's "Known limitations" header was
+  still dated 0.5.0, and the list was missing two limitations established
+  since: **bifactor factor-number sweeps are weakly identified** (an omitted
+  group factor is absorbed by the unspecified entries of the remaining
+  columns, so the selection is uninformative -- with a pointer to the
+  two-step route that does work), and **`vbmimic()` has no direct
+  covariate-to-item paths**, so it models impact but cannot express or detect
+  differential item functioning. A quick-start comment that named the
+  `$design`/`$settings` fields removed in 0.7.0 was reworded.
+* Dropped three unused namespace imports (`stats::rnorm`, `stats::var`,
+  `stats::quantile`).
+
 # vbpm 0.7.0
 
 Slimming release: fitted objects now store each quantity exactly once. No
