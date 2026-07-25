@@ -235,5 +235,4 @@ GPL-3.
 ## Authors
 
 - Jinsong Chen (maintainer) — [\@Jinsong-Chen](https://github.com/Jinsong-Chen)
-- Yi Jin — [\@jinyi1998](https://github.com/jinyi1998), first author of the
-  method papers behind `vbfa()` and `vbmimic()`
+- Yi Jin — [\@jinyi1998](https://github.com/jinyi1998)
