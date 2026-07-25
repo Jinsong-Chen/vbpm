@@ -1,3 +1,41 @@
+# vbpm 0.7.0
+
+Slimming release: fitted objects now store each quantity exactly once. No
+estimator changes -- every number a model produces is unchanged.
+
+* **Removed the mirror lists `$coefficients`, `$design`, `$posterior`, and
+  `$settings`** from `vbfa()` and `vbmimic()` fits. Each of their elements
+  duplicated a top-level component (`Lam`, `Phi`, `pi`, `Lam_var`,
+  `eta_cov`, `Q`, `Qe`, `orthogonal`, `ld`, `bifactor`, `v0`); they had no
+  consumers anywhere in the package, its tests, or its vignettes, and
+  `coef()` never read them. `vbmimic()`'s `standardize` setting, the only
+  element that lived solely in a mirror, is now a top-level component.
+* **`preprocess$missing_mask` is stored only when the data actually contain
+  missing values** (`NULL` otherwise). For complete data it was an all-`FALSE`
+  `N x J` matrix and the single largest part of a fit -- 65% of the object at
+  `N = 3000`, `J = 27`. `preprocess$n_missing` still reports the count in all
+  cases.
+* **`pefa()` no longer returns the `$fit` alias**, which was a third copy of
+  the selected model (already available as `$selected_fit` and inside
+  `$fits`) with no consumers.
+* Net effect: a saved `vbfa` fit is about **half** its previous size
+  (144 KB -> 74 KB for `N = 3000`, `J = 27`), and a saved sweep about 20%
+  smaller. A new test pins these invariants so the duplication cannot
+  silently return.
+* Internal: the QUIC wrapper no longer copies the solver's output array into
+  an identical new array.
+* **README: proper C++ toolchain instructions.** Because the package ships
+  compiled code, installing it requires a toolchain -- the one real setup
+  barrier. The installation section now opens with a one-line check
+  (`pkgbuild::has_build_tools(debug = TRUE)`, a genuine compile test on every
+  platform) and, if it fails, per-platform instructions and links: Rtools
+  matched to the R version on Windows, `xcode-select --install` on macOS, and
+  the distribution's R development packages on Linux.
+
+Nothing was on CRAN when these fields were removed, so no released API is
+affected; scripts that read the documented top-level components
+(`fit$Lam`, `fit$pi`, `fit$Q`, ...) are unaffected.
+
 # vbpm 0.6.1
 
 * **New `special_effects()`** post-processes an orthogonal bifactor fit

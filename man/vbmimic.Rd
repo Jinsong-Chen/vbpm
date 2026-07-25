@@ -76,8 +76,15 @@ coefficients.}
 \item{iter, flag, time}{Total iterations, \code{1} if the final stage
 converged within \code{max_it} (else \code{0}), and elapsed time.}
 \item{ELBO}{\code{NA_real_}; see Note.}
+\item{standardize}{The \code{standardize} setting the model was fit with.}
 \item{path}{The \code{v0} schedule and per-stage iteration counts.}
+\item{preprocess}{\code{n_missing}, the response type, and \code{missing_mask} --
+stored only when the data contain missing values, \code{NULL} otherwise.}
 }
+
+Every quantity appears exactly once: as of 0.7.0 the fit no longer
+carries \verb{$coefficients}, \verb{$design}, \verb{$posterior}, or \verb{$settings}, which
+duplicated the elements above.
 }
 \description{
 Fits a partially confirmatory multiple-indicators multiple-causes (MIMIC)

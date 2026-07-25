@@ -58,8 +58,29 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
 
 ## Installation
 
-A C++ toolchain is required to compile the QUIC solver (Rtools on Windows,
-Xcode command line tools on macOS).
+### 1. A C++ toolchain (one-time setup)
+
+`vbpm` ships C++ code — the QUIC solver behind the local-dependence branch —
+so installing it compiles that code and a C++ toolchain must be present.
+Many R users already have one (any package installed *from source* needs it);
+check before installing anything:
+
+```r
+# install.packages("pkgbuild")
+pkgbuild::has_build_tools(debug = TRUE)   # TRUE = you are ready, skip to step 2
+```
+
+If that returns `FALSE`:
+
+| system | what to install | where |
+|---|---|---|
+| **Windows** | **Rtools**, matched to your R version — Rtools45 for R 4.5.x, Rtools44 for R 4.4.x (check with `getRversion()`). Run the installer with its defaults; ≈500 MB installed. | <https://cran.r-project.org/bin/windows/Rtools/> |
+| **macOS** | Xcode **command line tools** (not the full Xcode app): run `xcode-select --install` in Terminal and accept the prompt; ≈1 GB. | <https://mac.r-project.org/tools/> |
+| **Linux** | Your distribution's R development packages: `sudo apt install r-base-dev` (Debian/Ubuntu) or `sudo dnf install R-devel gcc-c++` (Fedora/RHEL); a few tens of MB. | — |
+
+Restart R afterwards, then re-run the `has_build_tools()` check.
+
+### 2. The package
 
 ```r
 # install.packages("remotes")

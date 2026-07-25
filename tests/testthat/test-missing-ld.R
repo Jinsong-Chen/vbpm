@@ -136,7 +136,7 @@ test_that("complete data is unaffected by the missing-data code path", {
   d <- make_dat()
   f <- vbfa(d$Y, d$Q, v0 = .001, max_it = 300)
   expect_equal(f$preprocess$n_missing, 0)
-  expect_false(any(f$preprocess$missing_mask))
+  expect_null(f$preprocess$missing_mask)   # not stored for complete data
   expect_true(is.finite(f$objective))
 })
 
@@ -271,7 +271,7 @@ test_that("complete data is unchanged by the vbmimic missing-data path", {
   f <- vbmimic(s$dat[, 1:18], s$dat[, 19:27],
                matrix(-1L, 18, 3), matrix(-1L, 3, 9))
   expect_equal(f$preprocess$n_missing, 0)
-  expect_false(any(f$preprocess$missing_mask))
+  expect_null(f$preprocess$missing_mask)   # not stored for complete data
 })
 
 ## ---- pefa plot method ----------------------------------------------------

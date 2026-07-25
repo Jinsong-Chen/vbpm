@@ -291,3 +291,31 @@ test_that("pefa bifactor sweep counts group factors and carries K_total", {
   expect_output(print(r), "group factors [(][+] 1 general[)]")
   expect_output(print(summary(r)), "K_total")
 })
+
+test_that("the fit object stores each quantity exactly once", {
+  d <- make_dat()
+  f <- vbfa(d$Y, d$Q, v0 = .001, max_it = 500, convChk = FALSE)
+  ## the mirror lists removed in 0.7.0 stay gone
+  for (nm in c("coefficients", "design", "posterior", "settings"))
+    expect_null(f[[nm]])
+  ## complete data: no mask stored, but the count is still reported
+  expect_null(f$preprocess$missing_mask)
+  expect_equal(f$preprocess$n_missing, 0)
+  ## incomplete data: the mask is stored
+  Y <- d$Y; Y[1:5, 1] <- NA
+  fm <- vbfa(Y, d$Q, v0 = .001, max_it = 500, convChk = FALSE)
+  expect_identical(fm$preprocess$missing_mask, is.na(Y))
+  expect_equal(fm$preprocess$n_missing, 5)
+  ## no two top-level components hold identical large content
+  big <- Filter(function(z) is.matrix(z) && length(z) > 100, f)
+  if (length(big) > 1) {
+    pairs <- utils::combn(seq_along(big), 2)
+    dupes <- apply(pairs, 2, function(ij) identical(big[[ij[1]]], big[[ij[2]]]))
+    expect_false(any(dupes))
+  }
+  ## pefa keeps the selected fit under one name only
+  r <- pefa(d$Q[, 1:2, drop = FALSE], d$Y, Kmin = 2, Kmax = 3, v0 = .001,
+            max_it = 500, verbose = FALSE)
+  expect_null(r$fit)
+  expect_false(is.null(r$selected_fit))
+})

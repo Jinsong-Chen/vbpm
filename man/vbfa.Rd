@@ -118,12 +118,23 @@ converged within \code{max_it} (else \code{0}), and elapsed time.}
 \item{Q, Qe, orthogonal, ld}{The design matrices and settings the model
 was fit with (\code{Qe} is \code{NULL} when \code{ld = FALSE}); read by \code{\link[=fit_stats]{fit_stats()}}
 and \code{\link[=print.vbpm_fit]{print.vbpm_fit()}} so they never need repeating.}
+\item{bifactor, n_general, general}{Bifactor bookkeeping: whether the
+fit declared a bifactor structure, how many general columns it has,
+and the general design (\code{NULL} unless \code{bifactor = TRUE}).}
 \item{Psi, W, q_star, xi_star, tau}{Local-dependence results (\code{NULL}
 when \code{ld = FALSE}): residual precision, its inverse, residual-edge
 inclusion probabilities, edge shrinkage, and the LD proportion.}
 \item{path}{The \code{v0} schedule (and \code{xi0} under LD) with per-stage
 iteration counts.}
+\item{preprocess}{Centering and scaling used, \code{n_missing}, the response
+type, and \code{missing_mask} -- the mask is stored only when the data
+actually contain missing values, and is \code{NULL} otherwise.}
+\item{sample_cov}{The sample correlation matrix the fit statistics use.}
 }
+
+Every quantity appears exactly once: as of 0.7.0 the fit no longer
+carries \verb{$coefficients}, \verb{$design}, \verb{$posterior}, or \verb{$settings}, which
+duplicated the elements above.
 }
 \description{
 Fits a partially confirmatory factor-analytic measurement model by
@@ -171,8 +182,7 @@ round(fit$pi, 2)            # posterior inclusion probabilities
 fb <- vbfa(sim$dat, Q, bifactor = TRUE, v0 = .001)  # fixed spike: fast demo
 fb                          # prints "1 general + 3 group factors"
 fb$Phi                      # identity by construction
-## the long form vbfa(sim$dat, cbind(1L, Q), orthogonal = TRUE) is
-## bit-identical -- enforced by a regression test
+## equivalent long form: vbfa(sim$dat, cbind(1L, Q), orthogonal = TRUE)
 
 ## local dependence: simulate correlated residuals, then set ld = TRUE
 simLD <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, lac = .3, ecr = .3,
@@ -184,10 +194,8 @@ Poff <- abs(fLD$Psi); Poff[lower.tri(Poff, diag = TRUE)] <- 0
 which(Poff >= sort(Poff, decreasing = TRUE)[3], arr.ind = TRUE)
 simLD$ofd_ind
 
-## empirical illustration: NLSY 1997 (27 mixed-type items, 3 factors).
-## Missing continuous responses are handled in-loop; the polytomous items
-## are treated as continuous for this illustration. A subset keeps the
-## example quick -- the vignette fits all 3,458 respondents.
+## empirical illustration: NLSY 1997, 27 items treated as continuous.
+## A 1,000-row subset keeps the example quick; the vignette fits all 3,458.
 data(nlsy27)
 Yn <- as.matrix(nlsy27$dat)[1:1000, ]
 sum(is.na(Yn))            # incomplete cells, imputed in-loop

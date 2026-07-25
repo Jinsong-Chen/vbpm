@@ -1,14 +1,6 @@
 ## Internal: Gaussian conditional moments of the missing responses in one row.
-##
-## Deterministic analogue of the MCMC data augmentation used by LAWBL/PCFA:
-## given the residual covariance W and the factor-model mean, the missing
-## entries are replaced by their conditional expectation given the *observed*
-## entries of the same row, and the conditional covariance is returned so that
-## it can be carried into the residual sufficient statistics.
-##
-## Kept as a separate function so the delicate part of the missing-data path
-## can be tested directly against a textbook multivariate-normal conditional
-## rather than only through the behaviour of a converged fit.
+## Deterministic analogue of the MCMC data augmentation in LAWBL/PCFA. Kept
+## separate so it can be tested against the textbook MVN conditional directly.
 ##
 ##   W        J x J residual covariance (diagonal or full)
 ##   mean_row length-J factor-model mean eta_i Lam'
@@ -131,12 +123,23 @@ logC_igw <- function(xi, Lam, P) {
 #'     \item{Q, Qe, orthogonal, ld}{The design matrices and settings the model
 #'       was fit with (`Qe` is `NULL` when `ld = FALSE`); read by [fit_stats()]
 #'       and [print.vbpm_fit()] so they never need repeating.}
+#'     \item{bifactor, n_general, general}{Bifactor bookkeeping: whether the
+#'       fit declared a bifactor structure, how many general columns it has,
+#'       and the general design (`NULL` unless `bifactor = TRUE`).}
 #'     \item{Psi, W, q_star, xi_star, tau}{Local-dependence results (`NULL`
 #'       when `ld = FALSE`): residual precision, its inverse, residual-edge
 #'       inclusion probabilities, edge shrinkage, and the LD proportion.}
 #'     \item{path}{The `v0` schedule (and `xi0` under LD) with per-stage
 #'       iteration counts.}
+#'     \item{preprocess}{Centering and scaling used, `n_missing`, the response
+#'       type, and `missing_mask` -- the mask is stored only when the data
+#'       actually contain missing values, and is `NULL` otherwise.}
+#'     \item{sample_cov}{The sample correlation matrix the fit statistics use.}
 #'   }
+#'
+#'   Every quantity appears exactly once: as of 0.7.0 the fit no longer
+#'   carries `$coefficients`, `$design`, `$posterior`, or `$settings`, which
+#'   duplicated the elements above.
 #'
 #' @section Notes:
 #' The diagonal-residual estimator is **deterministic** (fixed initialization,
@@ -190,8 +193,7 @@ logC_igw <- function(xi, Lam, P) {
 #' fb <- vbfa(sim$dat, Q, bifactor = TRUE, v0 = .001)  # fixed spike: fast demo
 #' fb                          # prints "1 general + 3 group factors"
 #' fb$Phi                      # identity by construction
-#' ## the long form vbfa(sim$dat, cbind(1L, Q), orthogonal = TRUE) is
-#' ## bit-identical -- enforced by a regression test
+#' ## equivalent long form: vbfa(sim$dat, cbind(1L, Q), orthogonal = TRUE)
 #'
 #' ## local dependence: simulate correlated residuals, then set ld = TRUE
 #' simLD <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, lac = .3, ecr = .3,
@@ -203,10 +205,8 @@ logC_igw <- function(xi, Lam, P) {
 #' which(Poff >= sort(Poff, decreasing = TRUE)[3], arr.ind = TRUE)
 #' simLD$ofd_ind
 #'
-#' ## empirical illustration: NLSY 1997 (27 mixed-type items, 3 factors).
-#' ## Missing continuous responses are handled in-loop; the polytomous items
-#' ## are treated as continuous for this illustration. A subset keeps the
-#' ## example quick -- the vignette fits all 3,458 respondents.
+#' ## empirical illustration: NLSY 1997, 27 items treated as continuous.
+#' ## A 1,000-row subset keeps the example quick; the vignette fits all 3,458.
 #' data(nlsy27)
 #' Yn <- as.matrix(nlsy27$dat)[1:1000, ]
 #' sum(is.na(Yn))            # incomplete cells, imputed in-loop
@@ -751,19 +751,11 @@ vbfa <- function(Y, Q, ld = FALSE, Qe = NULL, orthogonal = FALSE,
               bifactor = bifactor,
               n_general = if (bifactor) 1L else 0L,
               general = if (bifactor) general else NULL,
-              design = list(Q = Q, Qe = if (ld) Qe else NULL),
-              coefficients = list(Lam = mu.q.Lam,
-                                  Phi = if (orthogonal) diag(1, P, P) else
-                                        cov2cor(Lam.q.PHI),
-                                  residual = if (ld) W else diag(1 / mu.q.psiInv)),
-              posterior = list(pi = q, Lam_var = sigsq.q.Lam,
-                               eta_mean = mu.q.eta, eta_cov = PHI.q.eta),
-              settings = list(orthogonal = orthogonal, ld = ld,
-                              bifactor = bifactor,
-                              v0 = v0_seq,
-                              xi0 = if (ld) xi0_seq else NULL),
+              ## `missing_mask` is stored only when something is missing: an
+              ## all-FALSE J x N matrix was the single largest component of a
+              ## complete-data fit (65% of it at N = 3000, J = 27).
               preprocess = list(center = center, scale = scale_,
-                                missing_mask = missing_mask,
+                                missing_mask = if (has_missing) missing_mask else NULL,
                                 n_missing = sum(missing_mask),
                                 response_type = "continuous"),
               sample_cov = stats::cov2cor((crossprod(Y) +

@@ -71,8 +71,15 @@
 #'     \item{iter, flag, time}{Total iterations, `1` if the final stage
 #'       converged within `max_it` (else `0`), and elapsed time.}
 #'     \item{ELBO}{`NA_real_`; see Note.}
+#'     \item{standardize}{The `standardize` setting the model was fit with.}
 #'     \item{path}{The `v0` schedule and per-stage iteration counts.}
+#'     \item{preprocess}{`n_missing`, the response type, and `missing_mask` --
+#'       stored only when the data contain missing values, `NULL` otherwise.}
 #'   }
+#'
+#'   Every quantity appears exactly once: as of 0.7.0 the fit no longer
+#'   carries `$coefficients`, `$design`, `$posterior`, or `$settings`, which
+#'   duplicated the elements above.
 #'
 #' @note The evidence lower bound is **not** currently returned. The published
 #'   algorithm converges on the weighted residual vector rather than on the
@@ -432,14 +439,9 @@ vbmimic <- function(Y, X, Q_A, Q_B, v0 = 0.001, standardize = FALSE,
               iter = itNum, flag = flag,
               time = difftime(endTime, startTime, units = "secs"),
               ELBO = NA_real_, objective = NA_real_, objective_type = "none",
-              design = list(Q_A = Q_A, Q_B = Q_B),
-              coefficients = list(A = mu.q.A, B = mu.q.B,
-                                  Phi = cov2cor(Sig)),
-              posterior = list(pi_A = pi_A, pi_B = pi_B,
-                               A_var = sigsq.q.A, B_var = sigsq.q.B,
-                               eta_mean = mu.F),
-              settings = list(standardize = standardize, v0 = v0_seq),
-              preprocess = list(missing_mask = missing_mask,
+              standardize = standardize,
+              ## stored only when something is missing; see vbfa()
+              preprocess = list(missing_mask = if (has_missing) missing_mask else NULL,
                                 n_missing = sum(missing_mask),
                                 response_type = "continuous"),
               path = list(v0 = v0_seq, n_stage = n_stage,

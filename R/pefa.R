@@ -389,7 +389,7 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
   boundary <- if (is.na(K_sel)) "none" else if (K_sel == min(Ks)) "lower" else
               if (K_sel == max(Ks)) "upper" else "interior"
   out <- list(call = call,
-       selected_K = K_sel, selection = selection, fit = sel_fit,
+       selected_K = K_sel, selection = selection,
        selected_fit = sel_fit, fits = fits,
        fit_stats = sel_stats,
        Q_selected = if (is.na(K_sel)) NULL else
