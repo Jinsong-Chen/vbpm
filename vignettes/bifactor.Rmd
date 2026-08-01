@@ -26,7 +26,7 @@ four questions in order, with every claim demonstrated on simulated data:
    effect-sized? (Section 4)
 4. Given data of unknown structure, how should one *decide* between
    correlated factors, a bifactor, and a higher-order model? (Section 6: a
-   two-step route that each of the earlier sections feeds into.)
+   two-step process that each of the earlier sections feeds into.)
 
 Section 1 first lays out the three models and the small amount of covariance
 geometry that explains everything the later sections observe.
@@ -397,7 +397,7 @@ special_effects(fit)
 ```
 
 The numbers match parts (c)-(e) exactly. Note what the function does
-*not* do: it takes no cutoff argument and renders no verdict. The `.1`
+*not* do: it takes no cutoff argument and makes no decision. The `.1`
 convention for the mean CV is suggestive, and the higher-order parameters
 and effect sizes are reported regardless -- reading them faithfully (a
 re-expression) or loosely (a lossy summary of a genuine bifactor) is the
@@ -449,57 +449,127 @@ matrix with congruence above `.99`. Anchors pin the rotation; a sweep's
 padded columns, by construction, never have them. That leaves the question
 Section 6 answers: if sweeps cannot decide the bifactor question, what can?
 
-## 6. Which structure? A two-step decision route
+## 6. Which structure? The two-step process
 
 Sections 3 and 5 established what sweeps over *bifactor* candidates cannot
-do. This section assembles what the tools *can* do into a defensible
-procedure for the practical situation: data in hand, clusters suspected,
-structure -- correlated factors, bifactor, or higher-order -- unknown.
+do. This section assembles what the tools *can* do into the two-step
+process of the accompanying manuscript, run in miniature on the practical
+situation: data in hand, clusters suspected, structure -- correlated
+factors, bifactor, or higher-order -- unknown. Everything below is one
+replication per population at `N = 1000` and is illustrative only:
+operating characteristics come from the manuscript's simulations, and this
+section postdates the analyses reported there (which were generated with
+vbpm 0.7.1; this vignette was built with version
+`r as.character(packageVersion("vbpm"))`).
 
-### Step 1: an ordinary sweep for the first-order K
+### Step 1: anchored oblique sweeps from both backbones
 
 Run the plain correlated-factor sweep of the `pefa` vignette -- no general
 column, no `orthogonal = TRUE`. This asks only: *how many cluster-level
 factors are there?* For that question an omitted factor produces honest
 misfit (its within-cluster block is not reproducible by other clusters'
-columns), so interior selections are trustworthy. Run it on both datasets
-of this vignette -- the genuine bifactor `Y` of Section 2 and a fresh
-higher-order sample at the same `N`:
+columns), so interior selections are trustworthy.
+
+One selection is not yet a result, though. The sweep's backbone -- how the
+anchor rows are treated -- is an algorithmic convention with no
+substantive content, so run the sweep from both conventions and ask
+whether they agree: BPC-type anchors (the anchor rows' off-column entries
+fixed to zero, `Q0_ob` below) and LPC-type anchors (the 1s alone, every
+other entry free). Do the same with the selection cut: the 20% ELBO-gain
+cut is the primary rule, the laxer 10% cut the sensitivity. Run all of it
+on both datasets of this vignette -- the genuine bifactor `Y` of Section 2
+and a fresh higher-order sample at the same `N`:
 
 ```{r step1}
 sim_ho2 <- sim_fa(N = 1000, K = 3, ipf = 6, lam = .8, gamma = gamma_true,
                   rseed = 11)
 Yh2 <- sim_ho2$dat
 
-Q0_ob <- matrix(-1L, J, 2)
+Q0_ob <- matrix(-1L, J, 2)                       # BPC-type backbone
 for (k in 1:2) {
   a <- which(cl == k)[1:2]
   Q0_ob[a, ] <- 0L
   Q0_ob[a, k] <- 1L
 }
-s_bif <- pefa(Q0_ob, Y,   Kmin = 2, Kmax = 6, verbose = FALSE)
-s_ho  <- pefa(Q0_ob, Yh2, Kmin = 2, Kmax = 6, verbose = FALSE)
-rbind(bifactor_data = c(K = s_bif$selected_K, boundary = s_bif$boundary),
-      HO_data       = c(K = s_ho$selected_K,  boundary = s_ho$boundary))
+Q0_lp <- matrix(-1L, J, 2)                       # LPC-type backbone
+for (k in 1:2) Q0_lp[which(cl == k)[1:2], k] <- 1L
+
+sweep_at <- function(Q0, Y) pefa(Q0, Y, Kmin = 2, Kmax = 6, verbose = FALSE)
+sweeps <- list(bif_BPC = sweep_at(Q0_ob, Y),   bif_LPC = sweep_at(Q0_lp, Y),
+               HO_BPC  = sweep_at(Q0_ob, Yh2), HO_LPC  = sweep_at(Q0_lp, Yh2))
+t(sapply(sweeps, function(s) {
+  sw <- s$sweep[order(s$sweep$K), ]
+  c(K_20 = select_K_elbow(sw$K, sw$ELBO, delta = 20),
+    K_10 = select_K_elbow(sw$K, sw$ELBO, delta = 10))
+}))
 ```
 
-Both land at `K = 3`, *interior*, and both are correct in first-order
-terms: the HO data genuinely are three correlated factors (Section 1), and
-the bifactor data have three clusters whose general factor the oblique
-model absorbs into the factor correlations (Fact 1 -- cross-cluster blocks
-cannot tell the difference). Note what step 1 does **not** claim: it says
-nothing about whether a general factor should be carved out. That is step
-2's question.
+All four sweeps land at `K = 3` -- interior to the window -- under the
+primary cut, the sensitivity cut agrees everywhere, and both selections
+are correct in first-order terms: the HO data genuinely are three
+correlated factors (Section 1), and the bifactor data have three clusters
+whose general factor the oblique model absorbs into the factor
+correlations (Fact 1 -- cross-cluster blocks cannot tell the difference).
+Note what step 1 does **not** claim: it says nothing about whether a
+general factor should be carved out. That is step 2's question.
+
+### The stability analysis: adjacent-count reproduction
+
+Backbone and cut agreement are cheap consistency checks. The direct
+evidence that a selected solution is worth delivering is *reproduction*:
+the `K` columns just selected should reappear, nearly unchanged, inside
+the `(K+1)`-factor solution the sweep has already fitted. If they do, the
+extra candidate factor is surplus sitting beside a stable structure; if
+instead the columns reorganize, the selection was a score that moved, not
+a structure that persisted. Match each column of the `K`-factor fit to its
+best counterpart in the `(K+1)`-factor fit by Tucker congruence, without
+reuse, and take the minimum:
+
+```{r stability}
+tucker <- function(a, b) abs(sum(a * b) / sqrt(sum(a^2) * sum(b^2) + 1e-12))
+reproduce_up <- function(s, k) {
+  fA <- s$fits[[as.character(k)]]
+  fB <- s$fits[[as.character(k + 1)]]
+  used <- integer(0)
+  phis <- numeric(ncol(fA$Lam))
+  for (i in seq_len(ncol(fA$Lam))) {
+    cong <- sapply(seq_len(ncol(fB$Lam)), function(j)
+      if (j %in% used) -1 else tucker(fA$Lam[, i], fB$Lam[, j]))
+    used <- c(used, which.max(cong))
+    phis[i] <- max(cong)
+  }
+  min(phis)
+}
+round(sapply(sweeps, reproduce_up, k = 3), 3)
+```
+
+All four values sit at or near `1`, far above the `.85` threshold the
+manuscript calibrates for this check (a provisional convention, like every
+cutoff in this vignette). Both datasets therefore *deliver* a stable
+three-factor structure, and the process moves on to step 2.
+
+The other branches matter as much as this one. When the two backbones
+select adjacent counts and the smaller solution reproduces inside the
+larger, the delivery is a stable core with count uncertainty, and step 2
+runs at both counts. When neither holds -- selections apart by more than
+one, or columns that fail to reproduce -- no stable structure is
+delivered, and the honest report is exactly that: non-delivery, with the
+sweep evidence shown. Imposing a structure anyway, because theory demands
+one, is a substantively specified sensitivity analysis rather than a
+delivery, and should be labeled as such.
 
 ### Step 2: anchored oblique-K versus anchored bifactor-(K+1), by BIC
 
-At the selected `K`, fit two *anchored, confirmatory-leaning* models with
+At the delivered `K`, fit two *anchored, confirmatory-leaning* models with
 the same anchors: the oblique `K`-factor model, and the orthogonal bifactor
 with the same group design plus a fully specified general factor. Compare
 their `BIC` from `fit_stats()`. This is the payoff of the `bifactor = TRUE`
 argument: the oblique-K and bifactor-K models are now literally the same
-design matrix `Q3` with a switch, rather than two hand-built designs that
-have to be kept in sync.
+design matrix with a switch, rather than two hand-built designs that have
+to be kept in sync. And as in step 1, the anchoring depth is an
+algorithmic convention, so run the comparison at both depths -- BPC-type
+(`Q3`) and LPC-type (`Q3_lp`) -- and ask whether the two `diff` signs
+agree:
 
 ```{r step2}
 Q3 <- matrix(-1L, J, 3)
@@ -508,29 +578,40 @@ for (k in 1:3) {
   Q3[a, ] <- 0L
   Q3[a, k] <- 1L
 }
+Q3_lp <- matrix(-1L, J, 3)
+for (k in 1:3) Q3_lp[which(cl == k)[1:2], k] <- 1L
 
-step2 <- function(Y) {
-  b3 <- fit_stats(vbfa(Y, Q3))["BIC"]
-  b4 <- fit_stats(vbfa(Y, Q3, bifactor = TRUE))["BIC"]
+step2 <- function(Y, Q) {
+  b3 <- fit_stats(vbfa(Y, Q))["BIC"]
+  b4 <- fit_stats(vbfa(Y, Q, bifactor = TRUE))["BIC"]
   c(oblique_K = unname(b3), bifactor_K1 = unname(b4), diff = unname(b4 - b3))
 }
-round(rbind(bifactor_data = step2(Y), HO_data = step2(Yh2)), 1)
+round(rbind(bifactor_BPC = step2(Y, Q3),   bifactor_LPC = step2(Y, Q3_lp),
+            HO_BPC       = step2(Yh2, Q3), HO_LPC       = step2(Yh2, Q3_lp)), 1)
 ```
 
-The comparison resolves both datasets correctly at `N = 1000`: on the
-genuine bifactor data the bifactor wins (`diff` about `-59`), and on the
-higher-order data the oblique model wins (`diff` about `+103`) -- which is
-the *right* verdict there, since by the SL equivalence the bifactor
-parameterization of an HO model is redundant, and BIC correctly refuses to
-pay 18 extra loadings for it.
+The comparison resolves both datasets correctly at `N = 1000`, with the
+depths agreeing in sign. On the genuine bifactor data the bifactor wins at
+both depths (`diff` about `-59` and `-9`; the LPC margin is the smaller
+one because the freer depth lets the oblique model absorb more of the
+general variance). On the higher-order data the oblique model wins at both
+depths (`diff` about `+103` and `+114`) -- correctly so, since by the SL
+equivalence the bifactor parameterization of an HO model is redundant, and
+BIC refuses to pay 18 extra loadings for it. When the depths *disagree* in
+sign, the comparison has not resolved anything: withhold the structural
+conclusion and look for the reason (the absorbed-dependence subsection
+below shows the usual one).
 
-Use **BIC, not the ELBO, as the arbiter in this comparison.** The two
-designs place spike-and-slab prior mass on different numbers of entries, so
-their ELBOs differ by prior bookkeeping as well as by fit; in simulations
-the ELBO kept preferring the oblique model in regimes where BIC had already
-(correctly) flipped to the bifactor. The ELBO is the right currency
-*within* a sweep of same-shaped designs; BIC is the right currency between
-these two differently-shaped ones.
+Use **BIC, not the ELBO, as the operational criterion in this
+comparison**; the ELBO serves as a sensitivity check. The two designs
+place spike-and-slab prior mass on different numbers of entries, so their
+ELBOs differ by prior bookkeeping as well as by fit; in the manuscript's
+simulations the ELBO kept preferring the oblique model in regimes where
+BIC had already (correctly) flipped to the bifactor. Here the two agree in
+direction on both datasets, which is worth one sentence in a report and no
+more. The ELBO is the right currency *within* a sweep of same-shaped
+designs; BIC is the right currency between these two differently-shaped
+ones.
 
 ### Step 3: resolve the winner into a final structure
 
@@ -551,8 +632,8 @@ bifactor: correctly so, since their generating loadings were drawn with no
 proportionality constraint.
 
 **If the oblique model won**, the general factor question is settled
-(no separable general factor) -- but a higher-order *layer* may still be
-available for free. Under an HO population, $\Phi$ has the rank-one
+(no separable general factor) -- but a second-order description may still
+be available for free. Under an HO population, $\Phi$ has the rank-one
 structure $\gamma\gamma'$ off the diagonal, so the second-order loadings
 can be read out of the fitted factor correlations by the classical triad
 (Spearman) relations, e.g. $\hat\gamma_1 =
@@ -578,22 +659,117 @@ exactly three, the triads are that model's exact solution. Coherent triads
 HO reading; incoherent ones say $\Phi$ is just a correlation matrix, and
 the structure is plain correlated factors.)
 
-### The route, and its limits
+### The hazard step 2 cannot see: absorbed local dependence
 
-In summary:
+The manuscript's sharpest warning deserves its own demonstration. Take the
+higher-order population -- where the oblique model just won by a hundred
+BIC points -- and contaminate it with a single residual correlation of
+`.25` between two non-anchor items of the first cluster, the kind of extra
+dependence a pair of same-stem items produces:
 
-1. **Ordinary oblique sweep** (`pefa()` without a general column) for the
-   first-order `K`. Trust interior selections; treat boundaries as
+```{r doublet-simulate}
+bg <- .8 * gamma_true[cl]
+bs <- .8 * sqrt(1 - gamma_true^2)[cl]
+L_sl <- cbind(bg, matrix(0, J, K))
+for (k in 1:K) L_sl[cl == k, k + 1] <- bs[cl == k]
+S0 <- tcrossprod(L_sl) + diag(1 - rowSums(L_sl^2))  # HO population, SL form
+Sd <- S0
+Sd[3, 4] <- Sd[3, 4] + .25
+Sd[4, 3] <- Sd[4, 3] + .25                          # one residual pair
+set.seed(12)
+Yd <- scale(matrix(rnorm(1000 * J), 1000, J) %*% chol(Sd))
+```
+
+Step 1 looks almost clean -- both backbones still select `K = 3` under the
+primary cut, and the three factors still reproduce -- but the sensitivity
+cut now points one count higher on both backbones:
+
+```{r doublet-step1}
+sd_b <- sweep_at(Q0_ob, Yd)
+sd_l <- sweep_at(Q0_lp, Yd)
+t(sapply(list(BPC = sd_b, LPC = sd_l), function(s) {
+  sw <- s$sweep[order(s$sweep$K), ]
+  c(K_20 = select_K_elbow(sw$K, sw$ELBO, delta = 20),
+    K_10 = select_K_elbow(sw$K, sw$ELBO, delta = 10))
+}))
+round(c(BPC = reproduce_up(sd_b, 3), LPC = reproduce_up(sd_l, 3)), 3)
+```
+
+And step 2, run mechanically at `K = 3`, is now decisively wrong at *both*
+depths -- the bifactor is the only model on the menu that can reach the
+extra within-cluster covariance, so BIC buys it:
+
+```{r doublet-step2}
+round(rbind(BPC = step2(Yd, Q3), LPC = step2(Yd, Q3_lp)), 1)
+```
+
+A bifactor win of hundreds of BIC points, on data whose general structure
+is exactly the higher-order model the oblique fit represents. The
+manuscript's adversarial population shows this error *grows* with sample
+size; more data do not fix it, because the bifactor genuinely fits better
+-- it is just not the right explanation.
+
+The workflow's protection is the cut disagreement above: a count that is
+stable under the primary cut but moves under the sensitivity cut says a
+thin extra dimension is hovering at the edge, and the place to look is the
+`(K+1)`-factor solution already in hand:
+
+```{r doublet-inspect}
+round(sd_b$fits[["4"]]$Lam[cl == 1, ], 2)   # cluster-1 rows at K = 4
+```
+
+The four-factor solution splits the first cluster: the residual pair
+(items 3 and 4) keeps the cluster's column nearly to itself with loadings
+around `.95`, while the cluster's other four items move onto the new
+column. Two items dominating a factor is a doublet signature, not a
+substantive dimension. Model the pair explicitly -- one extra anchored
+factor for items 3 and 4 -- and rerun the comparison:
+
+```{r doublet-model}
+Q4 <- cbind(Q3, 0L)
+Q4[3:4, 4] <- 1L
+round(step2(Yd, Q4), 1)
+```
+
+With the pair modeled, the oblique model wins again (`diff` about `+60`):
+the entire bifactor preference was the absorbed residual pair. The moral
+is the manuscript's: a step-2 bifactor win is credible only after local
+dependence has been examined, and a win that arrives together with a
+sensitivity-cut disagreement should be read as this pattern until
+inspection says otherwise.
+
+### The process in six steps, and its limits
+
+The route this vignette has just walked, in the order the manuscript
+prescribes:
+
+1. **Sweep**: anchored oblique sweeps from both backbones (`pefa()`
+   without a general column); ELBO gain at the 20% cut primary, the 10%
+   cut as sensitivity. Trust interior selections; treat boundaries as
    instructions to extend the window.
-2. **Anchored oblique-K vs anchored bifactor-(K+1)**, decided by `BIC`.
-3. **Within the winner:** bifactor -> SL mean-CV check (< .1: collapse to
-   HO; otherwise keep the bifactor). Oblique -> triad check of $\hat\Phi$
-   (coherent: an HO layer is available; otherwise correlated factors).
+2. **Check structure**: adjacent-count reproduction on the sweep's own
+   retained fits (matched congruence of the selected solution inside its
+   neighbor).
+3. **Deliver**: a stable structure, a stable core with count uncertainty,
+   or no stable structure (non-delivery) -- reported as such, with step 2
+   running at both counts when the count is uncertain and not at all
+   after non-delivery.
+4. **Compare**: at every delivered count, anchored oblique-`K` versus
+   anchored bifactor-`(K+1)` by `BIC`, at both depths.
+5. **Diagnose**: withhold the conclusion if the comparison reverses across
+   depth or count; treat the ELBO as a sensitivity; inspect the adjacent
+   solution for doublet signatures before accepting a bifactor win.
+6. **Interpret**: within the winner, the SL mean-CV check (under `.1`:
+   collapse to HO; otherwise keep the bifactor) or the triad check of
+   $\hat\Phi$ (coherent: a second-order description is available;
+   otherwise correlated factors).
 
 Every population in this vignette routes correctly: the heterogeneous
-bifactor of Section 2 goes sweep -> `K = 3` -> bifactor wins -> CV `.39`
--> **bifactor**; the higher-order data go sweep -> `K = 3` -> oblique wins
--> coherent triads (`.76/.72/.62`) -> **higher-order**.
+bifactor of Section 2 goes sweep -> `K = 3` -> delivered -> bifactor wins
+at both depths -> CV `.39` -> **bifactor**; the higher-order data go sweep
+-> `K = 3` -> delivered -> oblique wins at both depths -> coherent triads
+(`.76/.72/.62`) -> **higher-order**; and the contaminated variant is
+caught at the diagnosis step rather than swallowed at the comparison step.
 
 The honest limits, from a 3-populations x 3-sample-sizes x 3-seeds
 simulation with this design (18 items, 3 clusters):
@@ -628,8 +804,11 @@ generous `N`; at a few hundred observations the same population can land
 above the line on noise alone, and an occasional item whose posterior
 settles on the wrong group factor will inflate the pooled number further.
 So read the mean CV together with the per-cluster (or per-item) ratios
-rather than as a verdict on its own. The same softness bounds step 2 of
-Section 6, as its table shows. And the diagnostics run both ways -- a large
+rather than as a decision on its own. The same softness bounds step 2 of
+Section 6, as its table shows, and the gain cuts, the `.85` reproduction
+threshold, and the `.1` CV line are all working conventions of the same
+kind: the accompanying manuscript calibrates them, but none is a
+distributional guarantee. And the diagnostics run both ways -- a large
 mean CV, when it reflects genuinely non-constant ratios rather than noise
 or an isolated item, is informative in its own right: it means the bifactor
 solution is richer than any higher-order representation of it, and
