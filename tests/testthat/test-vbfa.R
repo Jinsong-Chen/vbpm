@@ -180,20 +180,29 @@ test_that("pefa selects a factor number within the window", {
   expect_s3_class(r, "pefa")
   expect_s3_class(r, "vbpm_sweep")
   expect_identical(r$window$K, 2:4)
-  expect_true(all(c("ELBO_gain", "ELBO_gain_pct", "BIC_gain", "BIC_gain_pct") %in%
-                  names(r$sweep)))
+  ## gains are edge quantities: they live in $transitions, not $sweep (0.8.0)
+  expect_false(any(grepl("_gain", names(r$sweep))))
+  expect_true(all(c("ELBO_gain", "BIC_gain", "phi_min", "ari",
+                    "stability_status") %in% names(r$transitions)))
+  expect_identical(nrow(r$transitions), nrow(r$sweep) - 1L)
   expect_s3_class(selected_fit(r), "vbpm_fit")
 
   s <- summary(r)
   expect_s3_class(s, "summary.pefa")
-  expect_named(s$selection, c("objective", "objective_gain", "elbo", "elbo_gain",
-                              "bic", "bic_gain"))
-  expect_identical(unname(s$selection["objective_gain"]), r$selected_K)
-  expect_identical(s$delta, 10)
-  expect_identical(s$comparison, r$sweep)
-  expect_true(s$boundary %in% c("lower", "interior", "upper", "none"))
+  ## $selection is a long-form rule table (0.8.0)
+  expect_true(all(c("criterion", "form", "cut", "eligibility_scope",
+                    "gain_max", "threshold", "selected_K", "window_boundary",
+                    "support_boundary") %in% names(s$selection)))
+  prim <- with(s$selection, criterion == "objective" & form == "gain" &
+                 cut == "primary" & eligibility_scope == "converged+fit")
+  expect_identical(s$selection$selected_K[prim], r$selected_K)
+  expect_identical(s$cuts, c(primary = 10))
+  expect_identical(s$delta, 10)                      # deprecated alias
+  expect_identical(s$sweep, r$sweep)
+  expect_null(s$selected_fit)                        # summary carries no fits
+  expect_true(s$window_boundary %in% c("lower", "interior", "upper", "none"))
   expect_output(print(r), "PEFA sweep")
-  expect_output(print(s), "ELBO gain.*delta = 10%")
+  expect_output(print(s), "primary cut = 10%")
 })
 
 test_that("fits carry the vbpm_fit class; print and coef dispatch", {

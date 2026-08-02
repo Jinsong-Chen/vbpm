@@ -40,10 +40,17 @@ window); \code{"fit"} draws absolute misfit (RMSEA/SRMR) and incremental fit
 the selected \code{K} with a dotted vertical line.}
 }
 \value{
-\code{summary.pefa()} returns an object of class \code{summary.pefa} with
-\code{selection}, \code{comparison}, window and tuning metadata, convergence and
-boundary information, and the selected fit. Print methods return their
-input invisibly; \code{plot.pefa()} returns \code{x} invisibly.
+\code{summary.pefa()} returns an object of class \code{summary.pefa} carrying
+the sweep's three tables under their own names (\code{sweep}, \code{transitions},
+\code{selection}) plus window and tuning metadata, convergence counts, and both
+boundary readouts. It deliberately carries \strong{no fit payload}: use
+\code{\link[=selected_fit]{selected_fit()}} on the \code{pefa} object for the fitted model, so summaries
+stay small and printable. Print methods return their input invisibly;
+\code{plot.pefa()} returns \code{x} invisibly.
+
+Displayed gain percentages are computed on demand, normalized by the
+\code{converged+fit} scope's \code{gain_max}, and are \code{NA} for an edge that scope
+cannot use; no percentage column is stored.
 }
 \description{
 A \code{\link[=pefa]{pefa()}} result is a sweep over a candidate factor-number window, not a

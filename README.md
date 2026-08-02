@@ -46,8 +46,13 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
   loadings per group factor), and testlet/special effect sizes
   (Zhang & Chen, 2024, Eq. 16).
 - **`pefa()`** / **`select_K_elbow()`** — sweep the number of factors and
-  select it with a scale-free gain rule. `pefa()` returns a sweep object with
-  `summary()`, `plot()`, and `selected_fit()`.
+  select it with a scale-free gain rule. The result carries three tables,
+  one per index: `$sweep` (per candidate), `$transitions` (per adjacent pair —
+  the marginal gains plus adjacent-count **stability** diagnostics, showing how
+  much of the `K`-factor solution survives inside the `K+1`-factor one), and
+  `$selection` (per rule, so a primary cut and any sensitivity cuts are
+  evaluated in one call via `cuts`). With `summary()`, `plot()`,
+  `selected_fit()`, and `transition_detail()`.
 - **`sim_fa()`** and **`sim_lvm()`** — two complementary data generators.
   `sim_fa()` is driven by the loading *pattern* (items per factor, alternating
   cross-loadings, minor factors) and can generate **higher-order/testlet**

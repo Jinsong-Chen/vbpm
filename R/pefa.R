@@ -97,7 +97,20 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #'   `K0 = ncol(Q0)` specified factors.
 #' @param Y The `N x J` data matrix.
 #' @param Kmin,Kmax Inclusive factor-number window; `Kmin >= K0`.
-#' @param delta,sustain Passed to [select_K_elbow()].
+#' @param delta **Deprecated**; use `cuts`. A scalar maps to
+#'   `cuts = c(primary = delta)`. Supplying both is an error.
+#' @param sustain Consecutive sub-threshold steps required to call the elbow.
+#' @param cuts Named numeric vector of gain thresholds, as percentages of the
+#'   largest usable marginal gain. Exactly one entry must be named `primary`
+#'   (it drives the returned `selected_K`); any further named entries are
+#'   evaluated as sensitivity rules and appear in `$selection`. Default
+#'   `c(primary = 10)`. The manuscript workflow uses
+#'   `cuts = c(primary = 20, sensitivity = 10)`; that 20% figure is calibrated
+#'   within its own populations and is therefore *not* the package default.
+#' @param keep_fits Which candidate fits to retain in `$fits`: `"all"`
+#'   (default), `"selected"`, or `"none"`. `selected_fit` is returned in every
+#'   case; the candidate slots exist for *inspection*, which summary columns
+#'   cannot replace.
 #' @param fit_cut Logical; if `TRUE`, gate selection on absolute fit passing
 #'   `cutoffs`. Default `FALSE`.
 #' @param cutoffs Named absolute-fit cutoffs used when `fit_cut = TRUE`.
@@ -114,19 +127,39 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #' @param general Design of the general column when `bifactor = TRUE`;
 #'   passed to [vbfa()] (scalar or length-`J` vector of `1`/`0`/`-1`,
 #'   default `1`).
-#' @param save_path Optional CSV checkpoint path. A sidecar
-#'   `<save_path>.manifest` records the data, design and every setting that
-#'   affects comparability; resuming refuses to proceed if any of them differ,
-#'   rather than pooling incomparable candidates.
 #' @param verbose Logical; print per-model progress.
 #' @param ... Further arguments passed to [vbfa()] (e.g. `v0`, `Qe`,
 #'   `ld_control`, `tolVal`).
 #'
-#' @return An object of class `c("pefa", "vbpm_sweep")`. It contains the
-#'   candidate `window`, individual `fits`, full `sweep` comparison table,
-#'   `selection` results, and the fitted model and fit statistics at
-#'   `selected_K`. Use [summary.pefa()] for the aggregate results and
-#'   [selected_fit()] to extract the selected fitted model.
+#' @return An object of class `c("pefa", "vbpm_sweep")`. Everything a sweep
+#'   produces is indexed by one of three things, and each has its own table:
+#'   \describe{
+#'     \item{`$sweep`}{One row per candidate: `ELBO`, `Objective`, `AIC`,
+#'       `BIC`, the fit indices, `t`, `iter`, `flag`, `secs`, `converged`,
+#'       `pass_fit`, `eligible`. Properties of a single fitted model.}
+#'     \item{`$transitions`}{One row per **adjacent pair** (`W - 1` rows):
+#'       the marginal gains (`Objective_gain`, `ELBO_gain`, `BIC_gain`,
+#'       oriented so larger is better) together with the adjacent-count
+#'       stability indexes `phi_min`, `phi_mean`, `n_phi90`, `ari`, `rmsd`,
+#'       `surplus_max`, the four assignment-coverage counts, and
+#'       `stability_status`. Gains live here, not in `$sweep`: they are
+#'       properties of a step, not of a candidate.}
+#'     \item{`$selection`}{One row per rule -- criterion x form x cut x
+#'       eligibility scope -- with the normalizer `gain_max`, the absolute
+#'       `threshold`, `selected_K`, and both boundary readouts.}
+#'   }
+#'   Plus `selected_K`, `selected_fit`, `fit_stats`, `Q_selected`, `$fits`
+#'   (per `keep_fits`), `$cuts`, `window_boundary`, `support_boundary`, and
+#'   the normalized `orthogonal`/`bifactor`/`ld` settings. `$boundary` and
+#'   `$delta` remain as deprecated aliases for the 0.8.x line.
+#'
+#'   No percentage-of-largest-gain column is stored: the normalizer depends on
+#'   the eligibility scope, so percentages are computed for display from
+#'   `$transitions` and the matching `$selection` row.
+#'
+#'   Use [summary.pefa()] for the aggregate view, [selected_fit()] for the
+#'   selected model, and [transition_detail()] for the per-column material
+#'   behind one transition row.
 #'
 #' @section Orthogonal (bifactor) sweeps are weakly identified:
 #' With `bifactor = TRUE` (or, equivalently, `orthogonal = TRUE` and a
@@ -197,12 +230,15 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #'
 #' @seealso [vbfa()], [select_K_elbow()]
 #' @export
-pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
+pefa <- function(Q0, Y, Kmin, Kmax, delta = NULL, sustain = 2, fit_cut = FALSE,
                     cutoffs = c(RMSEA = .06, SRMR = .10, CFI = .90, TLI = .90),
                     max_it = 10000, tau = 0.50,
                     orthogonal = FALSE, bifactor = FALSE, general = 1,
-                    save_path = NULL, verbose = TRUE, ...) {
+                    verbose = TRUE, ..., cuts = c(primary = 10),
+                    keep_fits = c("all", "selected", "none")) {
   call <- match.call()
+  cuts <- .pefa_cuts(cuts, delta, !missing(cuts), !missing(delta))
+  keep_fits <- match.arg(keep_fits)
   Y  <- as.matrix(Y); Q0 <- as.matrix(Q0)
   J  <- ncol(Y); K0 <- ncol(Q0)
   if (nrow(Q0) != J) stop("nrow(Q0) must equal ncol(Y).", call. = FALSE)
@@ -238,57 +274,12 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
   Ks  <- Kmin:Kmax
   pad <- function(K) if (K == K0) Q0 else cbind(Q0, matrix(-1L, J, K - K0))
 
-  ## ---- checkpoint provenance -------------------------------------------
-  ## Resuming a sweep by matching K alone would silently mix rows produced
-  ## from different data, designs or hyperparameters. A sidecar manifest
-  ## records everything that affects comparability across candidates; a
-  ## mismatch refuses the resume rather than pooling incomparable fits.
-  manifest_path <- if (!is.null(save_path)) paste0(save_path, ".manifest") else NULL
-  fingerprint <- if (is.null(save_path)) NULL else list(
-    n = nrow(Y), J = J, K0 = K0, window = c(Kmin, Kmax),
-    ## cheap but position-sensitive summaries of the data and the design
-    Y_sig  = c(sum(Y), sum(Y^2), sum(Y * seq_len(nrow(Y)))),
-    Q0_sig = paste(Q0, collapse = ""),
-    orthogonal = orthogonal, tau = tau, max_it = max_it,
-    bifactor = bifactor,
-    general = if (bifactor) paste(rep_len(general, J), collapse = "") else NULL,
-    delta = delta, sustain = sustain,
-    fit_cut = isTRUE(fit_cut), cutoffs = cutoffs,
-    dots = vapply(list(...), function(z) paste(format(z), collapse = ","),
-                  character(1)),
-    dot_names = names(list(...)))
-
-  done <- NULL
-  if (!is.null(save_path) && file.exists(save_path)) {
-    if (!file.exists(manifest_path))
-      stop("Checkpoint '", save_path, "' has no manifest, so its provenance ",
-           "cannot be verified. Delete it or choose a new save_path.",
-           call. = FALSE)
-    old <- readRDS(manifest_path)
-    if (!identical(old, fingerprint)) {
-      differing <- names(fingerprint)[
-        !vapply(names(fingerprint),
-                function(nm) identical(old[[nm]], fingerprint[[nm]]),
-                logical(1))]
-      stop("Checkpoint '", save_path, "' was produced under different ",
-           "settings (", paste(differing, collapse = ", "), "). Resuming ",
-           "would mix incomparable candidates. Delete it or choose a new ",
-           "save_path.", call. = FALSE)
-    }
-    done <- read.csv(save_path)
-  }
-  if (!is.null(save_path) && !file.exists(manifest_path))
-    saveRDS(fingerprint, manifest_path)
   fits  <- setNames(vector("list", length(Ks)), as.character(Ks))
   rows  <- vector("list", length(Ks))
 
   for (i in seq_along(Ks)) {
     K <- Ks[i]
-    if (!is.null(done) && K %in% done$K) {
-      rows[[i]] <- done[done$K == K, , drop = FALSE]
-      if (verbose) cat(sprintf("K=%2d  (from checkpoint)\n", K)); next
-    }
-    t0  <- Sys.time()
+    t0  <- proc.time()[["elapsed"]]
     fit <- if (bifactor)
       vbfa(Y, pad(K), max_it = max_it, convChk = FALSE,
            bifactor = TRUE, general = general, ...)
@@ -305,33 +296,17 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
       AIC = fs["AIC"], BIC = fs["BIC"],
       RMSEA = fs["RMSEA"], SRMR = fs["SRMR"], CFI = fs["CFI"], TLI = fs["TLI"],
       t = fs["t"], iter = fit$iter, flag = fit$flag,
-      secs = as.numeric(difftime(Sys.time(), t0, units = "secs")), row.names = NULL)
-    if (!is.null(save_path))
-      write.table(rows[[i]], save_path, sep = ",", row.names = FALSE,
-                  col.names = !file.exists(save_path), append = file.exists(save_path))
+      secs = max(0, proc.time()[["elapsed"]] - t0), row.names = NULL)
     if (verbose) cat(sprintf("K=%2d  ELBO=%.1f  BIC=%.0f  CFI=%.3f  conv=%d  %.0fs\n",
                              K, rows[[i]]$ELBO, rows[[i]]$BIC, rows[[i]]$CFI,
                              as.integer(fit$flag == 1), rows[[i]]$secs))
   }
   sweep <- do.call(rbind, rows); sweep <- sweep[order(sweep$K), ]
 
-  ## Oriented marginal gains: larger is better for both curves. BIC_gain is
-  ## BIC(K - 1) - BIC(K), so a positive value is an improvement.
   types <- unique(sweep$objective_type)
   if (length(types) != 1L)
     stop("PEFA candidates have mixed objective types: ",
          paste(types, collapse = ", "), call. = FALSE)
-  sweep$Objective_gain <- c(NA_real_, diff(sweep$Objective))
-  sweep$ELBO_gain <- if (identical(types, "elbo")) sweep$Objective_gain else NA_real_
-  sweep$BIC_gain  <- c(NA_real_, -diff(sweep$BIC))
-  pct_gain <- function(g) {
-    den <- suppressWarnings(max(g, na.rm = TRUE))
-    if (!is.finite(den) || den <= 0) rep(NA_real_, length(g)) else 100 * g / den
-  }
-  sweep$Objective_gain_pct <- pct_gain(sweep$Objective_gain)
-  sweep$ELBO_gain_pct <- if (identical(types, "elbo"))
-    sweep$Objective_gain_pct else NA_real_
-  sweep$BIC_gain_pct  <- pct_gain(sweep$BIC_gain)
 
   ## ---- eligibility: converged within max_it AND passes absolute fit -------
   sweep$converged <- sweep$flag == 1L
@@ -342,64 +317,58 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
       !is.na(TLI)   & TLI   >= cutoffs[["TLI"]])
   sweep$eligible  <- sweep$converged & sweep$pass_fit
 
-  elig <- sweep[sweep$eligible,  , drop = FALSE]
-  conv <- sweep[sweep$converged, , drop = FALSE]
-  pick <- function(d, score) if (nrow(d) == 0) NA_integer_ else select_K_elbow(d$K, score, delta, sustain)
+  ## ---- edge table: gains plus adjacent-count stability --------------------
+  ## Loading-based stability is meaningful only for oblique sweeps; under
+  ## orthogonal/bifactor rotation the padded columns are indeterminate.
+  transitions <- .build_transitions(sweep, fits, unsupported = orthogonal)
 
-  selection <- c(
-    score_gain        = pick(elig, elig$Objective),                  # primary
-    score_raw         = if (nrow(elig)) elig$K[which.max(elig$Objective)] else NA_integer_,
-    elbo_gain         = if (identical(types, "elbo")) pick(elig, elig$ELBO) else NA_integer_,
-    elbo_raw          = if (nrow(elig) && identical(types, "elbo"))
-                          elig$K[which.max(elig$ELBO)] else NA_integer_,
-    bic_gain          = pick(elig, -elig$BIC),                       # reference
-    bic_raw           = if (nrow(elig)) elig$K[which.min(elig$BIC)]  else NA_integer_,
-    elbo_gain_allconv = if (identical(types, "elbo")) pick(conv, conv$ELBO) else NA_integer_)
-  K_sel <- unname(selection["score_gain"])
+  ## ---- rule table ---------------------------------------------------------
+  selection <- .pefa_selection(sweep, transitions, cuts, sustain, types)
+  prim  <- .pefa_primary_row(selection)
+  K_sel <- selection$selected_K[prim]
 
-  ## ---- attach model + fit for the SELECTED K (refit if from checkpoint) ---
   sel_fit <- sel_stats <- NULL
   if (!is.na(K_sel)) {
     sel_fit <- fits[[as.character(K_sel)]]
-    if (is.null(sel_fit)) sel_fit <- if (bifactor)
-        vbfa(Y, pad(K_sel), max_it = max_it, convChk = FALSE,
-             bifactor = TRUE, general = general, ...)
-      else
-        vbfa(Y, pad(K_sel), max_it = max_it, convChk = FALSE,
-             orthogonal = orthogonal, ...)
     sel_stats <- fit_stats(sel_fit, Y, sel_fit$Q, tau = tau, orthogonal = orthogonal)
+  }
+  ## keep_fits governs the candidate slots only; selected_fit is always returned
+  if (keep_fits != "all") {
+    keep <- if (keep_fits == "selected" && !is.na(K_sel)) as.character(K_sel) else character(0)
+    for (nm in setdiff(names(fits), keep)) fits[[nm]] <- list(NULL)[[1]]
   }
 
   if (verbose) {
     n_fail <- sum(!sweep$converged); n_unfit <- sum(sweep$converged & !sweep$pass_fit)
     gate <- if (isTRUE(fit_cut)) "ON" else "OFF"
-    cat(sprintf("\n--- selection (delta = %g%%; convergence gate ON, absolute-fit gate %s) ---\n",
-                delta, gate))
+    cat(sprintf("\n--- selection (primary cut = %g%%; convergence gate ON, absolute-fit gate %s) ---\n",
+                cuts[["primary"]], gate))
     cat(sprintf("  excluded: %d non-converged, %d converged-but-failing-fit; %d eligible\n",
-                n_fail, n_unfit, nrow(elig)))
+                n_fail, n_unfit, sum(sweep$eligible)))
     if (is.na(K_sel)) cat("  NO eligible model -- selection is NA (relax fit_cut or extend/converge).\n")
-    else cat(sprintf("  %s gain -> K = %d   (selected; model returned)\n",
-                     types, K_sel))
-    if (identical(types, "elbo"))
-      cat(sprintf("  ELBO raw   -> K = %s\n", selection["elbo_raw"]))
-    cat(sprintf("  BIC  gain  -> K = %s\n",  selection["bic_gain"]))
-    cat(sprintf("  BIC  raw   -> K = %s\n",  selection["bic_raw"]))
-    cat(sprintf("  ELBO gain (all converged, no fit gate) -> K = %s\n", selection["elbo_gain_allconv"]))
+    else cat(sprintf("  %s gain -> K = %d   (selected; model returned)\n", types, K_sel))
+    un <- attr(selection, "unavailable")
+    if (length(un))
+      cat("  unavailable rules: ", paste(un, collapse = ", "), "\n", sep = "")
   }
-  boundary <- if (is.na(K_sel)) "none" else if (K_sel == min(Ks)) "lower" else
-              if (K_sel == max(Ks)) "upper" else "interior"
-  out <- list(call = call,
+  out <- list(call = call, object_schema_version = 2L,
        selected_K = K_sel, selection = selection,
        selected_fit = sel_fit, fits = fits,
        fit_stats = sel_stats,
        Q_selected = if (is.na(K_sel)) NULL else
                     if (bifactor) sel_fit$Q else pad(K_sel),
-       sweep = sweep,
+       sweep = sweep, transitions = transitions,
        window = list(K = Ks, Kmin = min(Ks), Kmax = max(Ks), K0 = K0),
-       K0 = K0, delta = delta, sustain = sustain,
-       bifactor = bifactor, n_general = if (bifactor) 1L else 0L,
-       boundary = boundary, objective_type = types,
+       K0 = K0, cuts = cuts, sustain = sustain,
+       orthogonal = orthogonal, bifactor = bifactor, ld = isTRUE(list(...)$ld),
+       n_general = if (bifactor) 1L else 0L, keep_fits = keep_fits,
+       window_boundary  = selection$window_boundary[prim],
+       support_boundary = selection$support_boundary[prim],
+       objective_type = types,
        fit_cut = isTRUE(fit_cut), cutoffs = cutoffs)
+  ## deprecated 0.8.x aliases; methods read $cuts and $window_boundary
+  out$delta    <- unname(cuts[["primary"]])
+  out$boundary <- out$window_boundary
   class(out) <- c("pefa", "vbpm_sweep")
   out
 }
@@ -428,10 +397,17 @@ pefa <- function(Q0, Y, Kmin, Kmax, delta = 10, sustain = 2, fit_cut = FALSE,
 #'   the selected `K` with a dotted vertical line.
 #' @param digits Number of decimals for the fit indices in the printed
 #'   comparison table (gain percentages always print with one decimal).
-#' @return `summary.pefa()` returns an object of class `summary.pefa` with
-#'   `selection`, `comparison`, window and tuning metadata, convergence and
-#'   boundary information, and the selected fit. Print methods return their
-#'   input invisibly; `plot.pefa()` returns `x` invisibly.
+#' @return `summary.pefa()` returns an object of class `summary.pefa` carrying
+#'   the sweep's three tables under their own names (`sweep`, `transitions`,
+#'   `selection`) plus window and tuning metadata, convergence counts, and both
+#'   boundary readouts. It deliberately carries **no fit payload**: use
+#'   [selected_fit()] on the `pefa` object for the fitted model, so summaries
+#'   stay small and printable. Print methods return their input invisibly;
+#'   `plot.pefa()` returns `x` invisibly.
+#'
+#'   Displayed gain percentages are computed on demand, normalized by the
+#'   `converged+fit` scope's `gain_max`, and are `NA` for an edge that scope
+#'   cannot use; no percentage column is stored.
 #' @name pefa-methods
 NULL
 
@@ -448,29 +424,52 @@ selected_fit.pefa <- function(object, ...) object$selected_fit
 print.pefa <- function(x, ...) {
   nconv <- sum(x$sweep$converged)
   klab  <- if (isTRUE(x$bifactor)) " group factors (+ 1 general)" else ""
-  cat(sprintf("PEFA sweep: K = %d:%d%s (%d of %d converged)\n",
+  cat(sprintf("PEFA sweep: K = %d:%d%s (%d of %d converged)
+",
               x$window$Kmin, x$window$Kmax, klab, nconv, nrow(x$sweep)))
-  cat(sprintf("  %s gain (delta = %g%%) -> K = %s\n",
-              toupper(x$objective_type), x$delta,
+  cat(sprintf("  %s gain (primary cut = %g%%) -> K = %s
+",
+              toupper(x$objective_type), x$cuts[["primary"]],
               if (is.na(x$selected_K)) "NA" else x$selected_K))
-  cat("  objective:", x$objective_type, "\n")
-  orth <- isTRUE(x$fits[[1]]$orthogonal)
-  if (x$boundary %in% c("lower", "upper")) {
-    if (orth && x$boundary == "lower") {
-      ## For orthogonal (bifactor) sweeps the generic advice is misleading:
-      ## the stall is typically absorption of an omitted group factor by the
-      ## unspecified entries, not evidence about K.
-      cat("  boundary selection (orthogonal sweep): WEAK EVIDENCE about K --\n",
-          "  an omitted group factor is absorbed by unspecified entries of the\n",
-          "  remaining columns (covariance-equivalent candidates). Encode known\n",
-          "  zeros as 0, not -1; see ?pefa and vignette('bifactor').\n", sep = "")
+  cat("  objective:", x$objective_type, "
+")
+  .pefa_boundary_advice(x$window_boundary, x$support_boundary,
+                        isTRUE(x$orthogonal), x$sweep, x$window)
+  cat("Use summary() for all selections and the per-K comparison.
+")
+  invisible(x)
+}
+
+## Shared boundary advice. The requested window and the usable support are
+## different facts: extending helps only the first.
+.pefa_boundary_advice <- function(wb, sb, orth, sweep, window) {
+  if (identical(wb, "lower") || identical(wb, "upper")) {
+    if (orth && identical(wb, "lower")) {
+      cat("  boundary selection (orthogonal sweep): WEAK EVIDENCE about K --
+",
+          "  an omitted group factor is absorbed by unspecified entries of the
+",
+          "  remaining columns (covariance-equivalent candidates). Encode known
+",
+          "  zeros as 0, not -1; see ?pefa and vignette('bifactor').
+", sep = "")
     } else {
-      direction <- if (x$boundary == "lower") "downward" else "upward"
-      cat(sprintf("  boundary selection: extend the window %s\n", direction))
+      direction <- if (identical(wb, "lower")) "downward" else "upward"
+      cat(sprintf("  window boundary: extend the window %s
+", direction))
     }
   }
-  cat("Use summary() for all selections and the per-K comparison.\n")
-  invisible(x)
+  if (sb %in% c("lower", "upper", "single") && !identical(wb, sb)) {
+    excl <- sweep$K[!sweep$eligible]
+    cat(sprintf("  support boundary (%s): the selection sits at the edge of the
+", sb),
+        sprintf("  usable candidates%s. Address convergence or the absolute-fit
+",
+                if (length(excl)) paste0(" (excluded K: ", paste(excl, collapse = ", "), ")") else ""),
+        "  gate rather than extending the window.
+", sep = "")
+  }
+  invisible(NULL)
 }
 
 #' @rdname pefa-methods
@@ -478,70 +477,106 @@ print.pefa <- function(x, ...) {
 summary.pefa <- function(object, ...) {
   z <- list(
     call = object$call,
+    object_schema_version = object$object_schema_version,
+    orthogonal = isTRUE(object$orthogonal),
     bifactor = isTRUE(object$bifactor),
+    ld = isTRUE(object$ld),
     window = object$window,
-    delta = object$delta,
+    cuts = object$cuts,
     sustain = object$sustain,
-    selection = c(
-      objective = unname(object$selection["score_raw"]),
-      objective_gain = unname(object$selection["score_gain"]),
-      elbo = unname(object$selection["elbo_raw"]),
-      elbo_gain = unname(object$selection["elbo_gain"]),
-      bic = unname(object$selection["bic_raw"]),
-      bic_gain = unname(object$selection["bic_gain"])
-    ),
+    sweep = object$sweep,
+    transitions = object$transitions,
+    selection = object$selection,
     selected_K = object$selected_K,
-    selected_rule = "objective_gain",
-    boundary = object$boundary,
+    selected_rule = "objective gain at the primary cut (converged+fit)",
+    window_boundary = object$window_boundary,
+    support_boundary = object$support_boundary,
     objective_type = object$objective_type,
-    comparison = object$sweep,
     convergence = c(converged = sum(object$sweep$converged),
-                    total = nrow(object$sweep)),
-    selected_fit = object$selected_fit
-  )
+                    total = nrow(object$sweep)))
+  z$delta <- object$delta          # deprecated alias
+  z$boundary <- object$window_boundary
   class(z) <- "summary.pefa"
   z
+}
+
+## Percentage display rule, shared by print and plot: normalize by the
+## converged+fit gain_max for that criterion, and show NA where that
+## denominator is absent, non-positive, or did not apply to the edge.
+.pefa_gain_pct <- function(x, criterion) {
+  tr <- x$transitions
+  sel <- x$selection
+  i <- which(sel$criterion == criterion & sel$form == "gain" &
+             sel$eligibility_scope == "converged+fit")[1L]
+  gmax <- if (length(i) && !is.na(i)) sel$gain_max[i] else NA_real_
+  g <- tr[[paste0(if (criterion == "bic") "BIC" else
+                  if (criterion == "elbo") "ELBO" else "Objective", "_gain")]]
+  if (!length(g) || !is.finite(gmax) || gmax <= 0) return(rep(NA_real_, length(g)))
+  ok <- x$sweep$eligible[match(tr$K_from, x$sweep$K)] &
+        x$sweep$eligible[match(tr$K_to,   x$sweep$K)] & is.finite(g)
+  ifelse(ok, 100 * g / gmax, NA_real_)
 }
 
 #' @rdname pefa-methods
 #' @export
 print.summary.pefa <- function(x, digits = 3, ...) {
   klab <- if (isTRUE(x$bifactor)) " group factors (+ 1 general)" else ""
-  cat(sprintf("PEFA sweep summary: K = %d:%d%s; delta = %g%%; sustain = %d\n",
-              x$window$Kmin, x$window$Kmax, klab, x$delta, x$sustain))
-  cat(sprintf("  %-10s -> K = %s\n", toupper(x$objective_type),
-              x$selection["objective"]))
-  cat(sprintf("  %-10s -> K = %s  (delta = %g%%; primary)\n",
-              paste0(toupper(x$objective_type), " gain"),
-              x$selection["objective_gain"], x$delta))
-  cat(sprintf("  BIC        -> K = %s\n", x$selection["bic"]))
-  cat(sprintf("  BIC gain   -> K = %s  (delta = %g%%)\n",
-              x$selection["bic_gain"], x$delta))
-  cat(sprintf("  converged: %d of %d; boundary: %s; objective: %s\n",
+  cat(sprintf("PEFA sweep summary: K = %d:%d%s; primary cut = %g%%; sustain = %d
+",
+              x$window$Kmin, x$window$Kmax, klab, x$cuts[["primary"]], x$sustain))
+  sel <- x$selection
+  show <- sel[sel$eligibility_scope == "converged+fit", , drop = FALSE]
+  for (i in seq_len(nrow(show))) {
+    lab <- if (show$form[i] == "raw") sprintf("%s raw", toupper(show$criterion[i]))
+           else sprintf("%s gain [%s = %g%%]", toupper(show$criterion[i]),
+                        show$cut[i], show$cut_value[i])
+    cat(sprintf("  %-28s -> K = %s
+", lab,
+                if (is.na(show$selected_K[i])) "NA" else show$selected_K[i]))
+  }
+  cat(sprintf("  converged: %d of %d; window boundary: %s; support boundary: %s
+",
               x$convergence["converged"], x$convergence["total"],
-              x$boundary, x$objective_type))
-  if (isTRUE(x$selected_fit$orthogonal) && identical(x$boundary, "lower"))
-    cat("  (orthogonal sweep at the lower boundary: weak evidence about K --\n",
-        "   see ?pefa, section on orthogonal sweeps, and vignette('bifactor'))\n",
+              x$window_boundary, x$support_boundary))
+  if (isTRUE(x$orthogonal) && identical(x$window_boundary, "lower"))
+    cat("  (orthogonal sweep at the lower boundary: weak evidence about K --
+",
+        "   see ?pefa, section on orthogonal sweeps, and vignette('bifactor'))
+",
         sep = "")
-  ## One table with the raw criteria, the scale-free gain percentages (each
-  ## marginal gain as % of the largest gain in the window; NA at Kmin), and
-  ## the fit indices, so the selection evidence is read in one place.
-  cat("\nComparison (gains in % of the largest marginal gain):\n")
-  d   <- x$comparison
-  lab <- toupper(x$objective_type)
+
+  cat("
+Candidates:
+")
+  d <- x$sweep; lab <- toupper(x$objective_type)
   tab <- data.frame(K = d$K)
   if (isTRUE(x$bifactor) && "K_total" %in% names(d)) tab$K_total <- d$K_total
-  tab[[lab]]                      <- round(d$Objective, 1)
-  tab[[paste0(lab, "_gain%")]]    <- round(d$Objective_gain_pct, 1)
-  tab$BIC                         <- round(d$BIC, 1)
-  tab$`BIC_gain%`                 <- round(d$BIC_gain_pct, 1)
+  tab[[lab]] <- round(d$Objective, 1)
+  tab$BIC <- round(d$BIC, 1)
   for (nm in c("RMSEA", "SRMR", "CFI", "TLI"))
     if (nm %in% names(d)) tab[[nm]] <- round(d[[nm]], digits)
   tab$converged <- d$converged
   tab$` ` <- ifelse(!is.na(x$selected_K) & d$K == x$selected_K, "<- selected", "")
   print(tab, row.names = FALSE)
-  cat("(Raw gains and timing are kept in $comparison / pefa$sweep.)\n")
+
+  tr <- x$transitions
+  if (nrow(tr)) {
+    cat("
+Transitions (gain % of the largest usable gain, converged+fit scope):
+")
+    tt <- data.frame(edge = paste(tr$K_from, "->", tr$K_to))
+    tt[[paste0(lab, "_gain")]] <- round(tr$Objective_gain, 1)
+    tt[[paste0(lab, "_gain%")]] <- round(.pefa_gain_pct(x, "objective"), 1)
+    tt$`BIC_gain%` <- round(.pefa_gain_pct(x, "bic"), 1)
+    tt$phi_min <- round(tr$phi_min, 3)
+    tt$ari <- round(tr$ari, 3)
+    tt$surplus_max <- round(tr$surplus_max, 3)
+    tt$status <- tr$stability_status
+    print(tt, row.names = FALSE)
+  }
+  cat("(Raw gains and all stability columns are in $transitions;",
+      "every rule is in $selection.)
+")
   invisible(x)
 }
 
@@ -586,25 +621,30 @@ plot.pefa <- function(x, type = c("objective", "gain", "fit"), ...) {
            pch = c(16, 17, if (!is.na(Ksel)) NA),
            ncol = 2, bty = "n", cex = 0.9)
   } else if (type == "gain") {
-    ## Marginal gains as % of the largest gain; undefined at Kmin, so the
-    ## curves start one step into the window while the axis shows all of it.
-    ylim <- pad(c(d$Objective_gain_pct, d$BIC_gain_pct, x$delta, 0))
-    plot(K, d$Objective_gain_pct, type = "b", pch = 16, lty = 1, col = col1,
+    ## Edge quantities: plotted at K_to so each point sits on the candidate the
+    ## step arrives at. Percentages use the converged+fit normalizer (see
+    ## ?pefa-methods); unusable edges are gaps, not zeros.
+    tr <- x$transitions
+    og <- .pefa_gain_pct(x, "objective"); bg <- .pefa_gain_pct(x, "bic")
+    cutv <- x$cuts
+    ylim <- pad(c(og, bg, unname(cutv), 0))
+    plot(tr$K_to, og, type = "b", pch = 16, lty = 1, col = col1,
          ylim = ylim, xlim = range(K), xaxt = "n",
          xlab = "Number of factors (K)",
-         ylab = "Marginal gain (% of largest gain)",
-         main = sprintf("PEFA gain sweep (delta = %g%%)", x$delta), ...)
+         ylab = "Marginal gain (% of largest usable gain)",
+         main = "PEFA gain sweep", ...)
     axis(1, at = K)
-    lines(K, d$BIC_gain_pct, type = "b", pch = 17, lty = 2, col = col2)
+    lines(tr$K_to, bg, type = "b", pch = 17, lty = 2, col = col2)
     abline(h = 0, col = "grey85")
-    abline(h = x$delta, lty = 3)
+    for (i in seq_along(cutv)) abline(h = cutv[[i]], lty = 3)
     mark_sel()
     legend("top", c(paste(lab, "gain"), "BIC gain",
-                    sprintf("delta = %g%%", x$delta),
+                    paste0(names(cutv), " = ", unname(cutv), "%"),
                     if (!is.na(Ksel)) sprintf("selected K = %d", Ksel)),
-           col = c(col1, col2, "black", if (!is.na(Ksel)) "grey40"),
-           lty = c(1, 2, 3, if (!is.na(Ksel)) 3),
-           pch = c(16, 17, NA, if (!is.na(Ksel)) NA),
+           col = c(col1, col2, rep("black", length(cutv)),
+                   if (!is.na(Ksel)) "grey40"),
+           lty = c(1, 2, rep(3, length(cutv)), if (!is.na(Ksel)) 3),
+           pch = c(16, 17, rep(NA, length(cutv)), if (!is.na(Ksel)) NA),
            ncol = 2, bty = "n", cex = 0.9)
   } else {
     ## Absolute misfit (RMSEA/SRMR, near 0) and incremental fit (CFI/TLI,
@@ -635,4 +675,52 @@ plot.pefa <- function(x, type = c("objective", "gain", "fit"), ...) {
     mtext("PEFA fit-index sweep", outer = TRUE, font = 2)
   }
   invisible(x)
+}
+
+#' Per-column detail behind one transition
+#'
+#' Returns the ragged material summarized by one row of a sweep's
+#' `$transitions` table: the per-column congruences, which larger-solution
+#' column each smaller-solution column was matched to, the sign multipliers,
+#' and the unmatched (surplus) column with its full loading vector.
+#'
+#' The accessor never bypasses the gates of [pefa()]: a transition inside an
+#' orthogonal/bifactor sweep, or one with a non-converged endpoint, returns
+#' `NULL` with the reason, because those loadings are not interpretable even
+#' when the fits are retained. It also returns `NULL` when `keep_fits`
+#' discarded either endpoint.
+#'
+#' @param object A [pefa()] result.
+#' @param K_from The lower factor number of the transition (`K_from -> K_from + 1`).
+#' @param ... Unused.
+#'
+#' @return A list with `K_from`, `K_to`, `phi` (per matched column),
+#'   `matched` (larger-solution column indices), `sign`, `surplus` (index) and
+#'   `surplus_loadings`, plus the tolerances used; or `NULL` when detail is
+#'   unavailable.
+#' @seealso [pefa()]
+#' @export
+transition_detail <- function(object, K_from, ...) UseMethod("transition_detail")
+
+#' @rdname transition_detail
+#' @export
+transition_detail.pefa <- function(object, K_from, ...) {
+  tr <- object$transitions
+  i  <- which(tr$K_from == K_from)
+  if (!length(i))
+    stop("K_from = ", K_from, " is not a transition in this sweep (K_from in ",
+         paste(tr$K_from, collapse = ", "), ").", call. = FALSE)
+  if (!identical(tr$stability_status[i], "ok") &&
+      grepl("unsupported|not converged|not retained", tr$stability_status[i])) {
+    message("No transition detail: ", tr$stability_status[i], ".")
+    return(invisible(NULL))
+  }
+  det <- attr(tr, "detail")[[i]]
+  if (is.null(det)) { message("No transition detail: fit not retained."); return(invisible(NULL)) }
+  B <- object$fits[[as.character(tr$K_to[i])]]$Lam
+  list(K_from = tr$K_from[i], K_to = tr$K_to[i],
+       phi = det$phi, matched = det$idx, sign = det$sign,
+       surplus = det$surplus,
+       surplus_loadings = if (length(det$surplus)) B[, det$surplus] else NULL,
+       tolerances = .pefa_tol)
 }

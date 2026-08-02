@@ -35,13 +35,14 @@ with `vbfa()`'s default warm-started path, `v0 = c(.01, .005, .002, .001)`,
 which is the estimator's recommended mode, so the sweep needed no tuning at
 all.
 
-The summary's comparison table lines up the evidence that the gain rule acts
-on next to the fit indices that a reader would sanity-check it against. ELBO
+The summary prints two tables: one row per **candidate** (the fit indices a
+reader sanity-checks the rule against) and one row per **transition** (the
+gains the rule actually acts on). ELBO
 climbs sharply from K = 2 to K = 3 to K = 4, then *drops* at K = 5 and K = 6 --
 adding factors beyond the true number no longer improves the objective, it
-makes the fit slightly worse. The `ELBO_gain%` column expresses each marginal
-step as a percentage of the largest gain seen anywhere in the window (here the
-K = 2 -> 3 step, fixed at 100): K = 3 -> 4 keeps 83.7% of that gain, while
+makes the fit slightly worse. The `ELBO_gain%` column of the transition table
+expresses each step as a percentage of the largest usable gain in the window
+(here the K = 2 -> 3 step, fixed at 100): K = 3 -> 4 keeps 83.7% of that gain, while
 K = 4 -> 5 and K = 5 -> 6 are negative. BIC gain tells the same story (87.9%,
 then -2.0%, then 0.0%). RMSEA falls from .118 to .082 to .014 and then flattens
 at .012; CFI rises from .629 to .823 to .995 and then flattens at .996. Every
@@ -49,12 +50,12 @@ criterion -- objective, BIC, and the fit indices -- agrees that the structure
 is exhausted at K = 4 and that K = 5 and K = 6 add nothing but two more free
 factors chasing noise.
 
-The summary reports raw objective, objective-gain, raw BIC, and BIC-gain
-selections (plus raw ELBO/ELBO-gain when the objective is the ELBO). The
-primary rule is always `objective_gain`; a boundary result is a prompt to
+`$selection` holds one row per rule -- each criterion, raw and gain, at every
+named cut and eligibility scope. The primary rule is the objective gain at the
+cut named `primary`; a boundary result is a prompt to
 extend the candidate window in that direction. The rest of this vignette
 unpacks that rule, shows it on plots and on two deliberately awkward
-simulations, and demonstrates checkpointing a long sweep.
+simulations, and shows how to save a sweep and widen its window.
 
 ## The gain rule
 
@@ -63,7 +64,7 @@ any criterion curve, not only a `pefa` sweep. The idea: walk the window from
 `Kmin` to `Kmax` and look at the *marginal* gain of each added factor (the
 step-to-step change in the criterion, with the criterion oriented so that
 larger is better). A factor is worth keeping while its marginal gain is at
-least `delta` percent of the largest gain seen anywhere in the window;
+least `cuts[["primary"]]` percent of the largest usable gain in the window;
 selection stops at the first *sustained* run of `sustain` consecutive
 sub-threshold steps (or, if the run never sustains, at `Kmax`). Because the
 threshold is a fraction of the window's own largest gain, the rule is
@@ -83,8 +84,12 @@ largest gain is 300 (K = 3 -> 4), so with the default `delta = 10` the
 threshold is 30; both remaining steps (5 and 3) fall under it, `sustain = 2`
 is satisfied immediately, and the rule stops at K = 4.
 
-The same function reads directly off a sweep's own comparison table --
-`select_K_elbow()` is exactly what `pefa()` calls internally on `Objective`:
+The same function reads directly off a sweep's own candidate table. Note the
+caveat, though: `select_K_elbow()` sees only the curve it is handed, so it
+treats consecutive entries as adjacent steps and knows nothing about which
+candidates converged. `pefa()`'s own selections additionally drop ineligible
+candidates and refuse to bridge the resulting gaps, so read `$selection` rather
+than recomputing when the two could differ:
 
 ```{r elbow-sweep}
 select_K_elbow(p$sweep$K, p$sweep$Objective)
@@ -103,11 +108,10 @@ flatten both curves. A dotted vertical line marks the selected K.
 plot(p, type = "objective")
 ```
 
-`type = "gain"` plots the marginal gains as a percentage of the largest gain
-in the window, together with the `delta` threshold line and the selected-K
-line. Gains are undefined at `Kmin` (there is no step into the first
-candidate), so both curves start one step into the window even though the
-x-axis spans the whole thing.
+`type = "gain"` plots the transition gains as a percentage of the largest
+usable gain, with a dotted line for every named cut and one for the selected
+K. Gains belong to steps, not candidates, so each point sits at the `K` its
+step arrives at and the curves start one step into the window.
 
 ```{r plot-gain, fig.width=7, fig.height=4.5}
 plot(p, type = "gain")
@@ -132,10 +136,10 @@ window to K = 2:4:
 ```{r boundary-narrow}
 p_narrow <- pefa(Q0, Y, Kmin = 2, Kmax = 4, verbose = FALSE)
 p_narrow$selected_K
-summary(p_narrow)$boundary
+summary(p_narrow)$window_boundary
 ```
 
-`summary()$boundary` is `"upper"`: within 2:4 both marginal gains stay above
+`summary()$window_boundary` is `"upper"`: within 2:4 both marginal gains stay above
 the `delta` threshold, so the rule never finds a sustained sub-threshold run
 and simply stops at the top of the window it was given -- exactly what a
 window that stops too early looks like, even though K = 4 happens to be the
@@ -143,7 +147,7 @@ right answer here.
 
 The lead sweep `p` already shows what widening the window resolves: run on
 the same data with `Kmax = 6` instead of 4, the selection lands in the
-interior at K = 4 (`summary(p)$boundary` is `"interior"`), because two more
+interior at K = 4 (`summary(p)$window_boundary` is `"interior"`), because two more
 candidates on either side confirm nothing better is being left out. The rule
 for using `boundary`: a `"lower"` or `"upper"` result is never a settled
 answer about dimensionality by itself, only an instruction to widen the
@@ -176,8 +180,8 @@ for (k in 1:2) {
 pm <- pefa(Q0m, Ym, Kmin = 2, Kmax = 6, v0 = 0.001, max_it = 500,
            verbose = FALSE)
 pm$selected_K
-pm$sweep[, c("K", "Objective", "Objective_gain_pct", "BIC",
-             "RMSEA", "SRMR", "CFI", "TLI")]
+pm$sweep[, c("K", "Objective", "BIC", "RMSEA", "SRMR", "CFI", "TLI")]
+pm$transitions[, c("K_from", "K_to", "Objective_gain", "phi_min", "ari")]
 ```
 
 The gain rule stops at K = 3 -- the three substantive factors -- even though
@@ -192,56 +196,39 @@ structure. This is the gain rule's core selling point -- it is built to tell
 substantive dimensions from minor ones, not just to find *some* local
 improvement.
 
-## Checkpointing a sweep: the provenance manifest
+## Saving a sweep, and widening the window
 
-Each candidate in a window is a full `vbfa()` fit, so a wide sweep can be
-slow enough to want resuming across sessions. `save_path` writes a CSV
-checkpoint plus a sidecar `<save_path>.manifest`:
+`pefa()` performs one in-memory sweep and returns one complete object; it
+writes nothing and cannot resume an interrupted call. Saving a result is
+ordinary R workflow:
 
-```{r checkpoint-run}
-cp <- tempfile(fileext = ".csv")
-p1 <- pefa(Q0, Y, Kmin = 2, Kmax = 4, v0 = 0.001, max_it = 500,
-           save_path = cp, verbose = FALSE)
-file.exists(cp)
-file.exists(paste0(cp, ".manifest"))
+```{r save-sweep}
+f <- tempfile(fileext = ".rds")
+saveRDS(p_narrow, f)
 ```
 
-Calling `pefa()` again with the *same* data, design, window, and settings
-finds the checkpoint and reuses every row instead of refitting:
+The more useful question is what to do when the sweep says *extend*. There is
+no incremental widening: you re-run with the wider window. That sounds
+wasteful and is not, because `vbfa()` is deterministic and the padded design
+for a given `K` does not depend on `Kmax` -- so every candidate the two
+windows share comes back **identical**, not merely similar:
 
-```{r checkpoint-resume}
-p2 <- pefa(Q0, Y, Kmin = 2, Kmax = 4, v0 = 0.001, max_it = 500,
-           save_path = cp, verbose = TRUE)
-identical(p1$selected_K, p2$selected_K)
-all.equal(summary(p1)$comparison$Objective, summary(p2)$comparison$Objective)
+```{r widen}
+identical(readRDS(f)$fits[["3"]]$Lam, p$fits[["3"]]$Lam)
 ```
 
-The `(from checkpoint)` lines above show every K being served from the CSV;
-`vbfa()` is deterministic, so the reused rows agree with a fresh fit to
-floating-point precision.
+Only the new candidates cost anything. Two things do change, and both are
+window-relative rather than model-relative: the gain percentages are
+normalized by the largest usable gain *in the window*, so a wider window can
+rescale them; and the boundary readout can move, which is the whole point of
+extending (here `p_narrow` was `"upper"` and `p` is `"interior"`).
 
-Now change one setting that affects comparability -- say `v0` -- and try to
-resume from the same checkpoint:
+One hard limit: `Kmin` can never go below `K0`, the number of columns in the
+backbone. Those factors are specified, so there is no candidate without them.
 
-```{r checkpoint-refuse}
-bad <- try(
-  pefa(Q0, Y, Kmin = 2, Kmax = 4, v0 = 0.01, max_it = 500,
-       save_path = cp, verbose = FALSE),
-  silent = TRUE
-)
-cat(conditionMessage(attr(bad, "condition")))
+```{r cleanup-save, include=FALSE}
+unlink(f)
 ```
-
-```{r checkpoint-cleanup, include=FALSE}
-unlink(c(cp, paste0(cp, ".manifest")))
-```
-
-The manifest records the data, design, window, and every tuning setting that
-affects comparability (including anything passed through `...`, such as
-`v0`), and names exactly what differs. Resuming by matching `K` alone would
-silently pool candidates fit under different regularization -- rows that look
-comparable in a table but are not -- so the checkpoint refuses instead.
-Delete the checkpoint (or pick a new `save_path`) to start over deliberately.
 
 ## Objective-type discipline
 

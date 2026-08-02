@@ -9,7 +9,7 @@ pefa(
   Y,
   Kmin,
   Kmax,
-  delta = 10,
+  delta = NULL,
   sustain = 2,
   fit_cut = FALSE,
   cutoffs = c(RMSEA = 0.06, SRMR = 0.1, CFI = 0.9, TLI = 0.9),
@@ -18,9 +18,10 @@ pefa(
   orthogonal = FALSE,
   bifactor = FALSE,
   general = 1,
-  save_path = NULL,
   verbose = TRUE,
-  ...
+  ...,
+  cuts = c(primary = 10),
+  keep_fits = c("all", "selected", "none")
 )
 }
 \arguments{
@@ -31,7 +32,10 @@ pefa(
 
 \item{Kmin, Kmax}{Inclusive factor-number window; \code{Kmin >= K0}.}
 
-\item{delta, sustain}{Passed to \code{\link[=select_K_elbow]{select_K_elbow()}}.}
+\item{delta}{\strong{Deprecated}; use \code{cuts}. A scalar maps to
+\code{cuts = c(primary = delta)}. Supplying both is an error.}
+
+\item{sustain}{Consecutive sub-threshold steps required to call the elbow.}
 
 \item{fit_cut}{Logical; if \code{TRUE}, gate selection on absolute fit passing
 \code{cutoffs}. Default \code{FALSE}.}
@@ -55,22 +59,54 @@ applies with full force.}
 passed to \code{\link[=vbfa]{vbfa()}} (scalar or length-\code{J} vector of \code{1}/\code{0}/\code{-1},
 default \code{1}).}
 
-\item{save_path}{Optional CSV checkpoint path. A sidecar
-\verb{<save_path>.manifest} records the data, design and every setting that
-affects comparability; resuming refuses to proceed if any of them differ,
-rather than pooling incomparable candidates.}
-
 \item{verbose}{Logical; print per-model progress.}
 
 \item{...}{Further arguments passed to \code{\link[=vbfa]{vbfa()}} (e.g. \code{v0}, \code{Qe},
 \code{ld_control}, \code{tolVal}).}
+
+\item{cuts}{Named numeric vector of gain thresholds, as percentages of the
+largest usable marginal gain. Exactly one entry must be named \code{primary}
+(it drives the returned \code{selected_K}); any further named entries are
+evaluated as sensitivity rules and appear in \verb{$selection}. Default
+\code{c(primary = 10)}. The manuscript workflow uses
+\code{cuts = c(primary = 20, sensitivity = 10)}; that 20\% figure is calibrated
+within its own populations and is therefore \emph{not} the package default.}
+
+\item{keep_fits}{Which candidate fits to retain in \verb{$fits}: \code{"all"}
+(default), \code{"selected"}, or \code{"none"}. \code{selected_fit} is returned in every
+case; the candidate slots exist for \emph{inspection}, which summary columns
+cannot replace.}
 }
 \value{
-An object of class \code{c("pefa", "vbpm_sweep")}. It contains the
-candidate \code{window}, individual \code{fits}, full \code{sweep} comparison table,
-\code{selection} results, and the fitted model and fit statistics at
-\code{selected_K}. Use \code{\link[=summary.pefa]{summary.pefa()}} for the aggregate results and
-\code{\link[=selected_fit]{selected_fit()}} to extract the selected fitted model.
+An object of class \code{c("pefa", "vbpm_sweep")}. Everything a sweep
+produces is indexed by one of three things, and each has its own table:
+\describe{
+\item{\verb{$sweep}}{One row per candidate: \code{ELBO}, \code{Objective}, \code{AIC},
+\code{BIC}, the fit indices, \code{t}, \code{iter}, \code{flag}, \code{secs}, \code{converged},
+\code{pass_fit}, \code{eligible}. Properties of a single fitted model.}
+\item{\verb{$transitions}}{One row per \strong{adjacent pair} (\code{W - 1} rows):
+the marginal gains (\code{Objective_gain}, \code{ELBO_gain}, \code{BIC_gain},
+oriented so larger is better) together with the adjacent-count
+stability indexes \code{phi_min}, \code{phi_mean}, \code{n_phi90}, \code{ari}, \code{rmsd},
+\code{surplus_max}, the four assignment-coverage counts, and
+\code{stability_status}. Gains live here, not in \verb{$sweep}: they are
+properties of a step, not of a candidate.}
+\item{\verb{$selection}}{One row per rule -- criterion x form x cut x
+eligibility scope -- with the normalizer \code{gain_max}, the absolute
+\code{threshold}, \code{selected_K}, and both boundary readouts.}
+}
+Plus \code{selected_K}, \code{selected_fit}, \code{fit_stats}, \code{Q_selected}, \verb{$fits}
+(per \code{keep_fits}), \verb{$cuts}, \code{window_boundary}, \code{support_boundary}, and
+the normalized \code{orthogonal}/\code{bifactor}/\code{ld} settings. \verb{$boundary} and
+\verb{$delta} remain as deprecated aliases for the 0.8.x line.
+
+No percentage-of-largest-gain column is stored: the normalizer depends on
+the eligibility scope, so percentages are computed for display from
+\verb{$transitions} and the matching \verb{$selection} row.
+
+Use \code{\link[=summary.pefa]{summary.pefa()}} for the aggregate view, \code{\link[=selected_fit]{selected_fit()}} for the
+selected model, and \code{\link[=transition_detail]{transition_detail()}} for the per-column material
+behind one transition row.
 }
 \description{
 Fits \code{\link[=vbfa]{vbfa()}} over a window of factor numbers, holding a fixed partially

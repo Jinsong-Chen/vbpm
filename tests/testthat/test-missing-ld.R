@@ -1,7 +1,7 @@
 ## Verification for the three features added after 0.1.0: in-loop missing-data
 ## handling in vbfa(), the local-dependence objective, and LD-aware fit
 ## statistics. These close verification items 2, 3 and 6 of
-## dev/vbpm_extension_design.qmd, which were previously only covered
+## the 0.4.0 extension work, which were previously only covered
 ## behaviourally.
 
 make_dat <- function(N = 300, K = 3, seed = 1) {
@@ -294,7 +294,7 @@ test_that("plot.pefa draws its three panels without error", {
 test_that("the VECM objective is monotone within a single stage", {
   ## Empirical half of verification item 5b. The analytical half -- a
   ## term-by-term check against Eq. (Qpsi) of the V4 manuscript -- is recorded
-  ## in dev/vbpm_extension_design.qmd section 8.1. A single stage is forced by
+  ## by the 0.4.0 LD audit. A single stage is forced by
   ## a scalar v0 AND a single xi0, since n_stage is the max of the two lengths.
   ## Across a stage boundary a decrease would be legitimate (v0 changes there).
   d <- ld_dat(N = 350, seed = 5)
@@ -324,39 +324,9 @@ test_that("objective_terms decompose the objective exactly", {
                f$ELBO_conditional)
 })
 
-## ---- audit follow-ups: checkpoint provenance and input validation --------
-
-test_that("pefa refuses a checkpoint written under different settings", {
-  d <- make_dat(N = 200)
-  Q0 <- d$Q[, 1:2, drop = FALSE]
-  cp <- tempfile(fileext = ".csv")
-  on.exit(unlink(c(cp, paste0(cp, ".manifest"))), add = TRUE)
-
-  r1 <- pefa(Q0, d$Y, Kmin = 2, Kmax = 3, verbose = FALSE, v0 = .001,
-             max_it = 200, save_path = cp)
-  expect_true(file.exists(paste0(cp, ".manifest")))
-
-  ## same settings: resume is allowed
-  expect_no_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, verbose = FALSE,
-                       v0 = .001, max_it = 200, save_path = cp))
-
-  ## different data behind the same path must be refused, not pooled
-  d2 <- make_dat(N = 200, seed = 99)
-  expect_error(pefa(Q0, d2$Y, Kmin = 2, Kmax = 3, verbose = FALSE,
-                    v0 = .001, max_it = 200, save_path = cp),
-               "different settings")
-  ## as must a changed hyperparameter
-  expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, verbose = FALSE,
-                    v0 = .01, max_it = 200, save_path = cp),
-               "different settings")
-  ## a checkpoint with no manifest cannot be verified
-  cp2 <- tempfile(fileext = ".csv")
-  on.exit(unlink(cp2), add = TRUE)
-  write.csv(r1$sweep, cp2, row.names = FALSE)
-  expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, verbose = FALSE,
-                    v0 = .001, max_it = 200, save_path = cp2),
-               "no manifest")
-})
+## ---- audit follow-up: input validation ----------------------------------
+## (the checkpoint-provenance tests were removed with the checkpoint feature
+## in 0.8.0; pefa() performs one in-memory sweep and never resumes.)
 
 test_that("select_K_elbow validates its inputs", {
   ok <- c(-100, -80, -75, -74)

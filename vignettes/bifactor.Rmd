@@ -177,7 +177,7 @@ for (k in 1:2) {
 
 r <- pefa(Q0, Y, Kmin = 2, Kmax = 5, bifactor = TRUE, v0 = .001,
           verbose = FALSE)
-summary(r)$comparison[, c("K", "K_total", "ELBO", "BIC", "RMSEA", "CFI")]
+summary(r)$sweep[, c("K", "K_total", "ELBO", "BIC", "RMSEA", "CFI")]
 r
 ```
 
@@ -494,14 +494,20 @@ for (k in 1:2) {
 Q0_lp <- matrix(-1L, J, 2)                       # LPC-type backbone
 for (k in 1:2) Q0_lp[which(cl == k)[1:2], k] <- 1L
 
-sweep_at <- function(Q0, Y) pefa(Q0, Y, Kmin = 2, Kmax = 6, verbose = FALSE)
+## both cuts in one call; pefa() applies its own eligibility and gap rules,
+## which a direct select_K_elbow() call on the sweep table would bypass
+sweep_at <- function(Q0, Y)
+  pefa(Q0, Y, Kmin = 2, Kmax = 6, verbose = FALSE,
+       cuts = c(primary = 20, sensitivity = 10))
+cut_picks <- function(s) {
+  sel <- s$selection
+  keep <- sel$criterion == "elbo" & sel$form == "gain" &
+          sel$eligibility_scope == "converged+fit"
+  stats::setNames(sel$selected_K[keep], paste0("K_", sel$cut_value[keep]))
+}
 sweeps <- list(bif_BPC = sweep_at(Q0_ob, Y),   bif_LPC = sweep_at(Q0_lp, Y),
                HO_BPC  = sweep_at(Q0_ob, Yh2), HO_LPC  = sweep_at(Q0_lp, Yh2))
-t(sapply(sweeps, function(s) {
-  sw <- s$sweep[order(s$sweep$K), ]
-  c(K_20 = select_K_elbow(sw$K, sw$ELBO, delta = 20),
-    K_10 = select_K_elbow(sw$K, sw$ELBO, delta = 10))
-}))
+t(sapply(sweeps, cut_picks))
 ```
 
 All four sweeps land at `K = 3` -- interior to the window -- under the
@@ -687,11 +693,7 @@ cut now points one count higher on both backbones:
 ```{r doublet-step1}
 sd_b <- sweep_at(Q0_ob, Yd)
 sd_l <- sweep_at(Q0_lp, Yd)
-t(sapply(list(BPC = sd_b, LPC = sd_l), function(s) {
-  sw <- s$sweep[order(s$sweep$K), ]
-  c(K_20 = select_K_elbow(sw$K, sw$ELBO, delta = 20),
-    K_10 = select_K_elbow(sw$K, sw$ELBO, delta = 10))
-}))
+t(sapply(list(BPC = sd_b, LPC = sd_l), cut_picks))
 round(c(BPC = reproduce_up(sd_b, 3), LPC = reproduce_up(sd_l, 3)), 3)
 ```
 

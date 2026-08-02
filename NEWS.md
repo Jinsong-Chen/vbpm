@@ -1,3 +1,72 @@
+# vbpm 0.8.0
+
+`pefa()` is reorganized around what each quantity is indexed by, and gains
+adjacent-count stability diagnostics. **This release changes results as well
+as structure** -- see the two breaking notes below.
+
+* **Three tables instead of one.** Everything a sweep produces is indexed by
+  a candidate, a transition between adjacent candidates, or a selection rule:
+  - `$sweep` keeps one row per candidate (ELBO, Objective, AIC, BIC, fit
+    indices, convergence, timing) and **loses all six gain columns**;
+  - **`$transitions`** is new -- one row per adjacent pair, holding the gains
+    (which are properties of a *step*, not of a candidate) together with the
+    stability indexes below;
+  - **`$selection`** becomes a long-form table with one row per criterion x
+    form x cut x eligibility scope, recording the normalizer `gain_max`, the
+    absolute `threshold`, `selected_K`, and both boundary readouts.
+  No percentage-of-largest-gain column is stored anywhere: the normalizer
+  depends on the eligibility scope, so percentages are computed for display.
+* **Adjacent-count stability.** Each transition reports how much of the
+  `K`-factor solution survives inside the `K+1`-factor solution the sweep
+  already fitted: `phi_min` (the binding index), `phi_mean`, `n_phi90`, `ari`,
+  `rmsd`, `surplus_max`, per-endpoint assignment-coverage counts, and
+  `stability_status`. Columns are matched by **bottleneck (max-min) Tucker
+  congruence**, which -- unlike the greedy stored-order matching used in
+  hand-rolled versions -- is permutation invariant and actually maximizes the
+  binding statistic. `transition_detail()` returns the per-column material
+  behind one row.
+* **The package computes, it does not render verdicts.** No `stable` column,
+  no comparison against any threshold. The manuscript's `.85` operating point
+  is documented as provisional and specific to its own workflow.
+* **Stability is gated where loadings are not interpretable.** Under
+  `orthogonal`/`bifactor` sweeps the padded columns are rotationally
+  indeterminate, and a non-converged endpoint is not a solution; in both cases
+  the loading-based columns are `NA` with the reason in `stability_status`.
+  Gains remain valid in every mode.
+* **New `cuts` argument** replaces the overloaded scalar `delta`: a named
+  vector of gain thresholds with exactly one `primary` entry, so a primary
+  rule and any number of sensitivity rules are evaluated in one call. The
+  default stays `c(primary = 10)`; `delta` continues to work as a deprecated
+  alias, and supplying both is an error.
+* **New `keep_fits`** (`"all"`, `"selected"`, `"none"`) for callers who want
+  the tables without the fit payload. `selected_fit` is always returned.
+  `summary.pefa()` now carries the three tables and **no** fit payload.
+* **Breaking, structural:** code reading `ELBO_gain`, `BIC_gain`, or any
+  `*_gain_pct` column from `$sweep` must read `$transitions` instead;
+  `summary()$comparison` is now `summary()$sweep`; `$selection` is a data
+  frame rather than a named vector. `$boundary` and `$delta` survive as
+  deprecated aliases of `$window_boundary` and `$cuts[["primary"]]`.
+* **Breaking, in results:** selection no longer bridges a gap. When an
+  interior candidate is ineligible (non-converged, or failing the absolute-fit
+  gate), the old code differenced *across* it and reported a two-factor jump
+  as a one-factor marginal gain. Now an unusable edge is skipped and resets the
+  sustained-run counter, so `selected_K` can differ from 0.7.1 on any sweep
+  with an interior gap. Sweeps without a gap are unaffected.
+* **Removed: the `save_path` checkpoint/resume subsystem.** `pefa()` performs
+  one in-memory sweep and returns one complete object; it writes nothing and
+  cannot resume an interrupted call. Saving a result is ordinary
+  `saveRDS()` workflow. The manifest that made resuming trustworthy is gone
+  with it and is not replaced, because a single in-memory sweep cannot pool
+  candidates fit under different settings in the first place.
+* Fixed: `print.pefa()` inferred the fitting mode from `$fits[[1]]`, so its
+  orthogonal weak-identification caution silently vanished whenever the first
+  candidate's fit was absent. Both print methods now read explicit top-level
+  mode settings. Reported also in `?pefa`.
+* `pefa` vignette: the checkpoint walkthrough is replaced by a section on
+  saving a sweep and widening its window, which shows that re-running a wider
+  window *reproduces* the shared candidates bit-for-bit rather than wasting
+  them, and that `Kmin` cannot go below `K0`.
+
 # vbpm 0.7.1
 
 * Documentation currency pass. The README's "Known limitations" header was
