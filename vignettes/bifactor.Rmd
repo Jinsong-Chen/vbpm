@@ -453,11 +453,12 @@ Section 6 answers: if sweeps cannot decide the bifactor question, what can?
 
 Sections 3 and 5 established what sweeps over *bifactor* candidates cannot
 do. This section assembles what the tools *can* do into the two-step
-process of the accompanying manuscript, run in miniature on the practical
-situation: data in hand, clusters suspected, structure -- correlated
-factors, bifactor, or higher-order -- unknown. Everything below is one
-replication per population at `N = 1000` and is illustrative only:
-operating characteristics come from the manuscript's simulations, and this
+process of Chen and Jin (2026b; the "accompanying manuscript" throughout
+this section), run in miniature on the practical situation: data in hand,
+clusters suspected, structure -- correlated factors, bifactor, or
+higher-order -- unknown. Everything below is one replication per
+population at `N = 1000` and is illustrative only: operating
+characteristics come from the manuscript's simulations, and this
 section postdates the analyses reported there (which were generated with
 vbpm 0.7.1; this vignette was built with version
 `r as.character(packageVersion("vbpm"))`).
@@ -465,7 +466,9 @@ vbpm 0.7.1; this vignette was built with version
 ### Step 1: anchored oblique sweeps from both backbones
 
 Run the plain correlated-factor sweep of the `pefa` vignette -- no general
-column, no `orthogonal = TRUE`. This asks only: *how many cluster-level
+column, no `orthogonal = TRUE` (the sweep, its gain cuts, and the
+reproduction statistic below are those of Chen and Jin, 2026a). This asks
+only: *how many cluster-level
 factors are there?* For that question an omitted factor produces honest
 misfit (its within-cluster block is not reproducible by other clusters'
 columns), so interior selections are trustworthy.
@@ -587,9 +590,9 @@ for (k in 1:3) {
 Q3_lp <- matrix(-1L, J, 3)
 for (k in 1:3) Q3_lp[which(cl == k)[1:2], k] <- 1L
 
-step2 <- function(Y, Q) {
-  b3 <- fit_stats(vbfa(Y, Q))["BIC"]
-  b4 <- fit_stats(vbfa(Y, Q, bifactor = TRUE))["BIC"]
+step2 <- function(Y, Q, ...) {                 # `...` reaches BOTH arms alike
+  b3 <- fit_stats(vbfa(Y, Q, ...))["BIC"]
+  b4 <- fit_stats(vbfa(Y, Q, bifactor = TRUE, ...))["BIC"]
   c(oblique_K = unname(b3), bifactor_K1 = unname(b4), diff = unname(b4 - b3))
 }
 round(rbind(bifactor_BPC = step2(Y, Q3),   bifactor_LPC = step2(Y, Q3_lp),
@@ -600,7 +603,14 @@ The comparison resolves both datasets correctly at `N = 1000`, with the
 depths agreeing in sign. On the genuine bifactor data the bifactor wins at
 both depths (`diff` about `-59` and `-9`; the LPC margin is the smaller
 one because the freer depth lets the oblique model absorb more of the
-general variance). On the higher-order data the oblique model wins at both
+general variance). Read that `-9` against the small-margin warning that
+closes this section: a margin of single-digit BIC points is thin, and
+the LPC arm *by itself* would license nothing better than a provisional
+call. What carries the conclusion here is the agreement of the two depths
+in sign together with the substantial BPC margin -- and, in Step 3 below,
+a mean CV far from the HO boundary. Had the depths disagreed, or had both
+margins been this thin, the honest report would be that the comparison did
+not resolve. On the higher-order data the oblique model wins at both
 depths (`diff` about `+103` and `+114`) -- correctly so, since by the SL
 equivalence the bifactor parameterization of an HO model is redundant, and
 BIC refuses to pay 18 extra loadings for it. When the depths *disagree* in
@@ -711,10 +721,23 @@ manuscript's adversarial population shows this error *grows* with sample
 size; more data do not fix it, because the bifactor genuinely fits better
 -- it is just not the right explanation.
 
-The workflow's protection is the cut disagreement above: a count that is
-stable under the primary cut but moves under the sensitivity cut says a
-thin extra dimension is hovering at the edge, and the place to look is the
-`(K+1)`-factor solution already in hand:
+This example *happens* to leave a trace at the count level -- the
+sensitivity cut moved while the primary cut did not -- and that trace is
+worth following. But do not generalize it into a safeguard. Cut
+disagreement is not a local-dependence detector: it fires for any thin
+extra dimension, of which absorbed dependence is only one kind, and it
+stays silent whenever the extra covariance is too small to bend a gain
+curve. The manuscript's adversarial populations are precisely the harder
+case, in which the absorbed dependence sits at the *selected* count and
+every count-level indicator -- both cuts, the reproduction statistic, the
+convergence flags -- reads clean while step 2 still hands the win to the
+bifactor. Nothing in Step 1 is designed to catch that; what catches it is
+looking, which is why residual inspection belongs in the workflow
+unconditionally rather than as a response to a warning.
+
+Wherever the suspicion comes from, the cheapest place to look is the
+`(K+1)`-factor solution the sweep already retained -- no refitting
+required:
 
 ```{r doublet-inspect}
 round(sd_b$fits[["4"]]$Lam[cl == 1, ], 2)   # cluster-1 rows at K = 4
@@ -724,25 +747,43 @@ The four-factor solution splits the first cluster: the residual pair
 (items 3 and 4) keeps the cluster's column nearly to itself with loadings
 around `.95`, while the cluster's other four items move onto the new
 column. Two items dominating a factor is a doublet signature, not a
-substantive dimension. Model the pair explicitly -- one extra anchored
-factor for items 3 and 4 -- and rerun the comparison:
+substantive dimension.
+
+The repair is to model the pair as what it is -- a residual edge -- and
+rerun *the same* comparison. Two requirements make this informative rather
+than decorative. It has to be a residual, not a factor: an extra two-item
+factor is a different model, and it is a *differently* different model in
+each arm, because the oblique arm would estimate that factor's
+correlations with the others while `bifactor = TRUE` forces the new column
+orthogonal. And it has to be applied identically to both competitors,
+which is what passing the same arguments through `step2()` guarantees:
 
 ```{r doublet-model}
-Q4 <- cbind(Q3, 0L)
-Q4[3:4, 4] <- 1L
-round(step2(Yd, Q4), 1)
+Qe <- matrix(0L, J, J)
+Qe[3, 4] <- Qe[4, 3] <- 1L                 # exactly one free residual edge
+round(rbind(BPC = step2(Yd, Q3,    ld = TRUE, Qe = Qe, tolVal = 1e-3),
+            LPC = step2(Yd, Q3_lp, ld = TRUE, Qe = Qe, tolVal = 1e-3)), 1)
 ```
 
-With the pair modeled, the oblique model wins again (`diff` about `+60`):
-the entire bifactor preference was the absorbed residual pair. The moral
-is the manuscript's: a step-2 bifactor win is credible only after local
-dependence has been examined, and a win that arrives together with a
-sensitivity-cut disagreement should be read as this pattern until
-inspection says otherwise.
+With the pair modeled, the oblique model wins at both depths (`diff` about
+`+82` and `+80`) -- a swing of several hundred BIC points from the
+contaminated comparison, landing near the margins the *uncontaminated*
+higher-order data produced in Step 2 (`+103` and `+114`). The entire
+bifactor preference was the absorbed residual pair. (The loosened
+`tolVal` is bookkeeping: the LD branch's tail converges slowly on these
+data, and at the default tolerance the BIC values are the same to a tenth
+of a point but the fits report unmet convergence.)
+
+Read this as a sensitivity analysis, not a test. It answers one narrowly
+posed question -- does the bifactor preference survive when this specific
+dependence is modeled in both arms? -- and a `Qe` aimed at the wrong pair
+answers nothing. The moral is the manuscript's, and it is unconditional: a
+step-2 bifactor win is credible only after local dependence has been
+looked for, whether or not anything at the count level asked you to look.
 
 ### The process in six steps, and its limits
 
-The route this vignette has just walked, in the order the manuscript
+The process this vignette has just walked, in the order the manuscript
 prescribes:
 
 1. **Sweep**: anchored oblique sweeps from both backbones (`pefa()`
@@ -759,19 +800,25 @@ prescribes:
 4. **Compare**: at every delivered count, anchored oblique-`K` versus
    anchored bifactor-`(K+1)` by `BIC`, at both depths.
 5. **Diagnose**: withhold the conclusion if the comparison reverses across
-   depth or count; treat the ELBO as a sensitivity; inspect the adjacent
-   solution for doublet signatures before accepting a bifactor win.
+   depth or count, or if both margins are thin; treat the ELBO as a
+   sensitivity. Before accepting *any* bifactor win, look for local
+   dependence -- inspect the adjacent solution for doublet signatures and
+   refit both competitors with the suspect residual edges freed
+   (`ld = TRUE`, same `Qe` in both arms). A clean count-level picture is
+   not evidence that there is nothing to find.
 6. **Interpret**: within the winner, the SL mean-CV check (under `.1`:
    collapse to HO; otherwise keep the bifactor) or the triad check of
    $\hat\Phi$ (coherent: a second-order description is available;
    otherwise correlated factors).
 
-Every population in this vignette routes correctly: the heterogeneous
-bifactor of Section 2 goes sweep -> `K = 3` -> delivered -> bifactor wins
-at both depths -> CV `.39` -> **bifactor**; the higher-order data go sweep
--> `K = 3` -> delivered -> oblique wins at both depths -> coherent triads
-(`.76/.72/.62`) -> **higher-order**; and the contaminated variant is
-caught at the diagnosis step rather than swallowed at the comparison step.
+Every population in this vignette ends at the right structure: the
+heterogeneous bifactor of Section 2 goes sweep -> `K = 3` -> delivered ->
+bifactor wins at both depths -> CV `.39` -> **bifactor**; the higher-order
+data go sweep -> `K = 3` -> delivered -> oblique wins at both depths ->
+coherent triads (`.76/.72/.62`) -> **higher-order**; and the contaminated
+variant is caught at the diagnosis step rather than swallowed at the
+comparison step -- because step 5 was actually carried out, not because
+step 2 protested.
 
 The honest limits, from a 3-populations x 3-sample-sizes x 3-seeds
 simulation with this design (18 items, 3 clusters):
@@ -789,7 +836,7 @@ sample. Two mitigations: a *small* `|diff|` in step 2 is itself the warning
 sign (the decisive wins above come with margins that grow with `N`, the
 redundant HO comparison stays flat at roughly the parameter penalty); and
 in that regime the parsimonious miss is cheap, because the two descriptions
-of the data are nearly interchangeable by construction. What the route
+of the data are nearly interchangeable by construction. What the process
 never does is what Sections 3 and 5 warned against: asking a bifactor
 *sweep* to make any of these calls.
 
@@ -810,9 +857,13 @@ rather than as a decision on its own. The same softness bounds step 2 of
 Section 6, as its table shows, and the gain cuts, the `.85` reproduction
 threshold, and the `.1` CV line are all working conventions of the same
 kind: the accompanying manuscript calibrates them, but none is a
-distributional guarantee. And the diagnostics run both ways -- a large
-mean CV, when it reflects genuinely non-constant ratios rather than noise
-or an isolated item, is informative in its own right: it means the bifactor
+distributional guarantee. The local-dependence check of Section 6 is
+softer still -- an exploratory sensitivity whose reach is limited to the
+residual edges you thought to free, with no accompanying claim that a
+bifactor win surviving it is therefore dependence-free. And the
+diagnostics run both ways -- a large mean CV, when it reflects genuinely
+non-constant ratios rather than noise or an isolated item, is informative
+in its own right: it means the bifactor
 solution is richer than any higher-order representation of it, and
 collapsing it to a single second-order factor per cluster would discard
 real structure.
@@ -834,3 +885,13 @@ real structure.
 * Jin, Y., & Chen, J. (2025). Regularized variational approximation for
   partially confirmatory factor analysis. *Structural Equation Modeling*,
   32(3), 437-449. \doi{10.1080/10705511.2024.2432612}
+* Chen, J., & Jin, Y. (2026a). Recovering latent structures after
+  variational Bayesian variable selection: Fit assessment and
+  factor-number selection in partially exploratory factor analysis.
+  *arXiv preprint* arXiv:2607.07159. -- the sweep, gain-cut, and
+  reproduction machinery of Step 1.
+* Chen, J., & Jin, Y. (2026b). *When factor count is uncertain: Stable
+  structure before the bifactor decision.* Manuscript in preparation. --
+  the two-step process of Section 6, its simulation-based operating
+  characteristics, the `.85` reproduction convention, and the
+  absorbed-dependence hazard it warns about.

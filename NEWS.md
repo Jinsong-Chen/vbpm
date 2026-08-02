@@ -66,6 +66,19 @@ as structure** -- see the two breaking notes below.
   saving a sweep and widening its window, which shows that re-running a wider
   window *reproduces* the shared candidates bit-for-bit rather than wasting
   them, and that `Kmin` cannot go below `K0`.
+* `bifactor` vignette, Section 6: three corrections to the two-step process.
+  Cut disagreement is no longer described as the workflow's protection
+  against absorbed local dependence -- it is not a dependence detector, and
+  the hard case leaves every count-level indicator clean; residual inspection
+  is now an unconditional step, labelled as the exploratory sensitivity it is.
+  The doublet repair no longer adds a two-item factor, which perturbs the two
+  competitors *differently* (the oblique arm estimates the new column's
+  correlations while `bifactor = TRUE` forces it orthogonal); it now frees the
+  same residual edge in both arms with `ld = TRUE` and a shared `Qe`, which
+  reverses the contaminated verdict at both anchoring depths. The thin `-9`
+  LPC margin is read against the vignette's own small-margin warning, and the
+  accompanying manuscript is now cited by name rather than as "the
+  accompanying manuscript."
 
 # vbpm 0.7.1
 
