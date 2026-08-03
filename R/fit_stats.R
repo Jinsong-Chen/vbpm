@@ -187,7 +187,9 @@ fit_stats.vbfa <- function(object, Y = NULL, Q = object$Q, tau = 0.50, gamma = 0
     SRMR <- sqrt(2 * sum((R0 - Rh)[lower.tri(R0, diag = TRUE)]^2) /
                  (J * (J + 1)))
     denom <- max(T_H - df_H, T_0 - df_0, 0)
-    CFI <- if (denom > 0) 1 - max(T_H - df_H, 0) / denom else NA_real_
+    ## When both model and baseline discrepancies vanish, the relative-fit
+    ## denominator is zero and the selected model is conventionally perfect.
+    CFI <- if (denom > 0) 1 - max(T_H - df_H, 0) / denom else 1
     TLI <- if (df_H > 0) (T_0 / df_0 - T_H / df_H) / (T_0 / df_0 - 1) else NA_real_
 
     ## ---- relative fit: information criteria ---------------------------

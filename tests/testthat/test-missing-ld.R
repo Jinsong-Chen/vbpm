@@ -276,7 +276,7 @@ test_that("complete data is unchanged by the vbmimic missing-data path", {
 
 ## ---- pefa plot method ----------------------------------------------------
 
-test_that("plot.pefa draws its three panels without error", {
+test_that("plot.pefa draws its three compact displays without error", {
   skip_if_not_installed("grDevices")
   d <- make_dat(N = 250)
   r <- pefa(d$Q[, 1:2, drop = FALSE], d$Y, Kmin = 2, Kmax = 3,
@@ -285,8 +285,11 @@ test_that("plot.pefa draws its three panels without error", {
   grDevices::png(tmp, width = 600, height = 400)
   on.exit({ grDevices::dev.off(); unlink(tmp) }, add = TRUE)
   expect_silent(plot(r, type = "objective"))
-  expect_silent(plot(r, type = "gain"))
+  expect_silent(plot(r, type = "gain", criterion = "elbo"))
+  expect_silent(plot(r, type = "gain", criterion = "bic"))
   expect_silent(plot(r, type = "fit"))
+  expect_error(plot(r, type = "gain", criterion = "aic"), "arg")
+  expect_error(plot(r, type = "stability"), "arg")
 })
 
 ## ---- item 5b: the terminal VECM objective ------------------------------
@@ -334,6 +337,7 @@ test_that("select_K_elbow validates its inputs", {
   expect_error(select_K_elbow(c(2, 2, 3, 4), ok), "duplicates")
   expect_error(select_K_elbow(c(2, 3, 4, NA), ok), "finite")
   expect_error(select_K_elbow(c(2.5, 3, 4, 5), ok), "whole numbers")
+  expect_error(select_K_elbow(c(2, 3, 5, 6), ok), "consecutive")
   expect_error(select_K_elbow(2:5, c(ok[1:3], NA)), "finite")
   expect_error(select_K_elbow(2:5, ok, delta = -1), "0, 100")
   expect_error(select_K_elbow(2:5, ok, delta = 101), "0, 100")
@@ -352,6 +356,18 @@ test_that("pefa validates its window", {
                "whole number")
   expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, tau = 1.5, verbose = FALSE),
                "tau")
+  expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, ld = TRUE,
+                    verbose = FALSE), "mode controls")
+  expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, orthogonal = TRUE,
+                    verbose = FALSE), "mode controls")
+  expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, Qe = diag(ncol(d$Y)),
+                    verbose = FALSE), "mode controls")
+
+  args <- list(Q0 = Q0, Y = d$Y, Kmin = 2, Kmax = 2,
+               cuts = c(primary = 10), sustain = 2, bifactor = FALSE,
+               general = 1, max_it = 50, tau = .5, verbose = FALSE)
+  args[[length(args) + 1L]] <- .001
+  expect_error(do.call(pefa, args), "Every argument in \\.\\.\\. must be named")
 })
 
 test_that("anchored items' residual variances are not inflated under LD", {

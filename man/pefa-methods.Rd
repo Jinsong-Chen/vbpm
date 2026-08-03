@@ -20,45 +20,37 @@ selected_fit(object, ...)
 
 \method{print}{summary.pefa}(x, digits = 3, ...)
 
-\method{plot}{pefa}(x, type = c("objective", "gain", "fit"), ...)
+\method{plot}{pefa}(
+  x,
+  type = c("objective", "gain", "fit"),
+  criterion = c("elbo", "bic"),
+  ...
+)
 }
 \arguments{
 \item{object, x}{A result returned by \code{\link[=pefa]{pefa()}}.}
 
 \item{...}{Further arguments. For \code{plot()}, graphical arguments passed to
-base plotting functions.}
+the first base plot in the selected display.}
 
-\item{digits}{Number of decimals for the fit indices in the printed
-comparison table (gain percentages always print with one decimal).}
+\item{digits}{Number of decimals used when printing fit and stability
+summaries.}
 
-\item{type}{Plot type. \code{"objective"} draws the objective (left axis) and
-BIC (right axis) on their own scales; \code{"gain"} draws the marginal gains
-as a percentage of the largest gain, with the \code{delta} threshold
-(gains are undefined at \code{Kmin}, so those curves start one step into the
-window); \code{"fit"} draws absolute misfit (RMSEA/SRMR) and incremental fit
-(CFI/TLI) in separate panels with conventional cutoffs. All types mark
-the selected \code{K} with a dotted vertical line.}
+\item{type}{Plot type: criterion trajectories (\code{"objective"}), one gain
+trajectory (\code{"gain"}), or descriptive absolute-fit trajectories
+(\code{"fit"}).}
+
+\item{criterion}{Criterion used when \code{type = "gain"}: \code{"elbo"} (default)
+or \code{"bic"}.}
 }
 \value{
-\code{summary.pefa()} returns an object of class \code{summary.pefa} carrying
-the sweep's three tables under their own names (\code{sweep}, \code{transitions},
-\code{selection}) plus window and tuning metadata, convergence counts, and both
-boundary readouts. It deliberately carries \strong{no fit payload}: use
-\code{\link[=selected_fit]{selected_fit()}} on the \code{pefa} object for the fitted model, so summaries
-stay small and printable. Print methods return their input invisibly;
-\code{plot.pefa()} returns \code{x} invisibly.
-
-Displayed gain percentages are computed on demand, normalized by the
-\code{converged+fit} scope's \code{gain_max}, and are \code{NA} for an edge that scope
-cannot use; no percentage column is stored.
+\code{selected_fit()} returns the selected \code{\link[=vbfa]{vbfa()}} fit, or \code{NULL} when
+selection is unavailable. \code{summary()} returns a compact \code{summary.pefa}
+object without fit payloads. Print and plot methods return their input
+invisibly.
 }
 \description{
-A \code{\link[=pefa]{pefa()}} result is a sweep over a candidate factor-number window, not a
-separate fitted probability model. \code{summary()} aggregates the candidate
-fits and reports the raw objective, objective-gain, raw BIC, and BIC-gain
-selections. The objective is the ELBO for diagonal VBFA sweeps and the
-terminal VECM objective for LD sweeps; ELBO-specific columns are reported
-only when every candidate has \code{objective_type = "elbo"}.
-\code{\link[=selected_fit]{selected_fit()}} extracts the actual fitted \code{\link[=vbfa]{vbfa()}} object selected by the
-primary objective-gain rule.
+\code{selected_fit()} indexes the always-retained candidate fits using the
+primary ELBO gain selection. \code{summary()} and the print methods read the
+sweep, transition, and selection tables directly.
 }

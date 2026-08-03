@@ -12,244 +12,162 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(vbpm)
 ```
 
-`pefa()` evaluates a factor-number *window*. The returned `pefa` object is also
-a `vbpm_sweep`: it contains the candidate `vbpm_fit` objects and their
-comparison table, but is not itself a fitted probability model. "Path" is
-reserved for within-fit continuation sequences such as `v0` or `xi0`.
+`pefa()` fits a bracketed window of partially exploratory factor models. Its
+paper-defined use is an ordinary oblique factor sweep with diagonal residuals.
+The result is a sweep, not another fitted probability model: candidate fits
+live in `$fits`, and candidate-, transition-, and rule-level quantities live in
+three separate tables.
+
+## A compact sweep
+
+Start with a small confirmatory backbone, then leave enough room above the
+plausible count for the sustained-drop rule to observe what happens after the
+elbow.
 
 ```{r sweep}
-sim <- sim_fa(N = 500, K = 4, ipf = 5, cpf = 0, lam = .7, phi = .3, rseed = 123)
+sim <- sim_fa(N = 500, K = 4, ipf = 5, cpf = 0, lam = .7, phi = .3,
+              rseed = 123)
 Y <- sim$dat
-Q0 <- matrix(-1L, ncol(Y), 2)      # K0 = 2 backbone
+
+Q0 <- matrix(-1L, ncol(Y), 2)
 Q0[1:2, ] <- 0L; Q0[1:2, 1] <- 1L
 Q0[6:7, ] <- 0L; Q0[6:7, 2] <- 1L
-p <- pefa(Q0, Y, Kmin = 2, Kmax = 6, verbose = FALSE)
-summary(p)
+
+p <- pefa(
+  Q0, Y, Kmin = 2, Kmax = 6,
+  cuts = c(primary = 10, sensitivity = 20),
+  verbose = FALSE
+)
+```
+
+The object has three tables with different indexing units:
+
+```{r three-tables}
+p$sweep
+p$transitions
+p$selection
+```
+
+- `$sweep` has one row per candidate. ELBO, AIC, BIC, and the absolute fit
+  indices describe that fitted model.
+- `$transitions` has one row per adjacent step. It stores raw ELBO and
+  larger-is-better BIC gains, plus small adjacent-count stability summaries.
+- `$selection` has one row per rule. Each gain rule records the named cut, its
+  normalization denominator (`gain_max`), and the resulting absolute
+  `threshold`.
+
+The primary top-level result is the ELBO gain selection at the cut named
+`primary`. Every candidate fit is retained, and the accessor retrieves that
+fit without storing another copy:
+
+```{r selected-fit}
+p$selected_K
 selected_fit(p)
 ```
 
-The data were simulated with a true K = 4, and the sweep recovers it: all five
-candidates converge, and the gain rule stops at K = 4 in the interior of the
-2:6 window. No `v0` or `max_it` was passed to `pefa()` here -- the call runs
-with `vbfa()`'s default warm-started path, `v0 = c(.01, .005, .002, .001)`,
-which is the estimator's recommended mode, so the sweep needed no tuning at
-all.
+## Raw and gain selections
 
-The summary prints two tables: one row per **candidate** (the fit indices a
-reader sanity-checks the rule against) and one row per **transition** (the
-gains the rule actually acts on). ELBO
-climbs sharply from K = 2 to K = 3 to K = 4, then *drops* at K = 5 and K = 6 --
-adding factors beyond the true number no longer improves the objective, it
-makes the fit slightly worse. The `ELBO_gain%` column of the transition table
-expresses each step as a percentage of the largest usable gain in the window
-(here the K = 2 -> 3 step, fixed at 100): K = 3 -> 4 keeps 83.7% of that gain, while
-K = 4 -> 5 and K = 5 -> 6 are negative. BIC gain tells the same story (87.9%,
-then -2.0%, then 0.0%). RMSEA falls from .118 to .082 to .014 and then flattens
-at .012; CFI rises from .629 to .823 to .995 and then flattens at .996. Every
-criterion -- objective, BIC, and the fit indices -- agrees that the structure
-is exhausted at K = 4 and that K = 5 and K = 6 add nothing but two more free
-factors chasing noise.
+For a larger-is-better criterion $c(K)$, the adjacent gain is
+$g(K)=c(K)-c(K-1)$. The gain rule finds the first candidate followed by a
+complete run of `sustain` gains strictly below
 
-`$selection` holds one row per rule -- each criterion, raw and gain, at every
-named cut and eligibility scope. The primary rule is the objective gain at the
-cut named `primary`; a boundary result is a prompt to
-extend the candidate window in that direction. The rest of this vignette
-unpacks that rule, shows it on plots and on two deliberately awkward
-simulations, and shows how to save a sweep and widen its window.
+$$\frac{\delta}{100}\max_K g(K).$$
 
-## The gain rule
-
-`pefa()` selects K with `select_K_elbow()`, exported so it can be applied to
-any criterion curve, not only a `pefa` sweep. The idea: walk the window from
-`Kmin` to `Kmax` and look at the *marginal* gain of each added factor (the
-step-to-step change in the criterion, with the criterion oriented so that
-larger is better). A factor is worth keeping while its marginal gain is at
-least `cuts[["primary"]]` percent of the largest usable gain in the window;
-selection stops at the first *sustained* run of `sustain` consecutive
-sub-threshold steps (or, if the run never sustains, at `Kmax`). Because the
-threshold is a fraction of the window's own largest gain, the rule is
-scale-free: it does not care about sample size, item count, or the units of
-the criterion.
-
-A toy curve makes the mechanics concrete. Suppose ELBO keeps climbing sharply
-through K = 4, then only creeps:
+With the default `sustain = 2`, two following sub-threshold gains must be
+available. The look-ahead is not shortened at the right edge; a window without
+enough post-elbow headroom therefore ends at its upper boundary.
 
 ```{r elbow-toy}
 elbo <- c(-5400, -5100, -4900, -4895, -4892)
-select_K_elbow(2:6, elbo)
+select_K_elbow(2:6, elbo, delta = 10, sustain = 2)
 ```
 
-The gains are `r diff(elbo)`: two large jumps, then two small ones. The
-largest gain is 300 (K = 3 -> 4), so with the default `delta = 10` the
-threshold is 30; both remaining steps (5 and 3) fall under it, `sustain = 2`
-is satisfied immediately, and the rule stops at K = 4.
+Here the gains are 300, 200, 5, and 3: after the two large steps, the complete
+run of two small gains selects `K = 4`. `pefa()` applies
+the same scanner to ELBO and to `-BIC`; AIC remains available in `$sweep` as a
+descriptive fit statistic but has no automated selection rule.
 
-The same function reads directly off a sweep's own candidate table. Note the
-caveat, though: `select_K_elbow()` sees only the curve it is handed, so it
-treats consecutive entries as adjacent steps and knows nothing about which
-candidates converged. `pefa()`'s own selections additionally drop ineligible
-candidates and refuse to bridge the resulting gaps, so read `$selection` rather
-than recomputing when the two could differ:
+Raw optima and gain choices answer different questions and are kept together
+for comparison. Multiple named cuts provide a compact sensitivity analysis:
 
-```{r elbow-sweep}
-select_K_elbow(p$sweep$K, p$sweep$Objective)
+```{r selection-rules}
+subset(p$selection, criterion %in% c("elbo", "bic"))
 ```
 
-## Visualizing the sweep
+The normalization is relative to one fixed criterion path. Consequently the
+gain decision is unchanged by a positive affine transformation of that same
+path. This does not make results invariant to changing the data, items,
+preprocessing, priors, `tau`, optimization settings, or candidate window.
 
-`plot.pefa()` has three panel types, selected with `type`.
+## Reading fit and plots
 
-`type = "objective"` puts the oriented objective (ELBO here; higher is
-better) on the left axis and `BIC` (lower is better) on its own right axis --
-the two live on different scales, so forcing them onto one shared axis would
-flatten both curves. A dotted vertical line marks the selected K.
+RMSEA, SRMR, CFI, and TLI are descriptive trajectories. They help assess
+whether the selected model is adequate and whether fit has levelled off, but
+`pefa()` does not turn conventional fit-index cutoffs into eligibility gates.
 
-```{r plot-objective, fig.width=7, fig.height=4.5}
+```{r plots, fig.width=7, fig.height=4.5}
 plot(p, type = "objective")
-```
-
-`type = "gain"` plots the transition gains as a percentage of the largest
-usable gain, with a dotted line for every named cut and one for the selected
-K. Gains belong to steps, not candidates, so each point sits at the `K` its
-step arrives at and the curves start one step into the window.
-
-```{r plot-gain, fig.width=7, fig.height=4.5}
 plot(p, type = "gain")
-```
-
-`type = "fit"` draws two panels side by side: absolute misfit (RMSEA and
-SRMR, with the conventional .06/.08 cutoffs shown as dotted lines) and
-incremental fit (CFI and TLI, with the conventional .95 cutoff). Both panels
-mark the selected K.
-
-```{r plot-fit, fig.width=9, fig.height=4.5}
 plot(p, type = "fit")
 ```
 
-## Boundary selections: a prompt to extend, not an answer
+The gain plot defaults to ELBO; use `criterion = "bic"` to display BIC gains.
+Gains belong to transitions, so their points are located at the factor count
+reached by each step. The fit plot deliberately shows trajectories without
+fixed cutoff lines.
 
-If the window is too narrow, the gain rule can only pick the largest K it was
-offered -- that is a boundary selection, not evidence that K is correct. Reuse
-the same `Y` from the lead sweep (true K = 4), but this time restrict the
-window to K = 2:4:
+## Boundary results require a new bracket
 
-```{r boundary-narrow}
+A boundary is a statement about the requested window, not proof that its edge
+is the right dimension. For example, a window ending at the simulated count
+does not contain the two following steps needed by the default rule:
+
+```{r boundary}
 p_narrow <- pefa(Q0, Y, Kmin = 2, Kmax = 4, verbose = FALSE)
-p_narrow$selected_K
-summary(p_narrow)$window_boundary
+subset(
+  p_narrow$selection,
+  criterion == "elbo" & form == "gain" & cut_name == "primary"
+)
 ```
 
-`summary()$window_boundary` is `"upper"`: within 2:4 both marginal gains stay above
-the `delta` threshold, so the rule never finds a sustained sub-threshold run
-and simply stops at the top of the window it was given -- exactly what a
-window that stops too early looks like, even though K = 4 happens to be the
-right answer here.
+An `upper` result asks for a complete rerun with a larger `Kmax`; a `lower`
+result asks for a smaller `Kmin` when the backbone permits it. Because the
+backbone has `ncol(Q0)` specified columns, `Kmin` cannot be smaller than that
+count. Rerun the complete requested window after changing either boundary.
 
-The lead sweep `p` already shows what widening the window resolves: run on
-the same data with `Kmax = 6` instead of 4, the selection lands in the
-interior at K = 4 (`summary(p)$window_boundary` is `"interior"`), because two more
-candidates on either side confirm nothing better is being left out. The rule
-for using `boundary`: a `"lower"` or `"upper"` result is never a settled
-answer about dimensionality by itself, only an instruction to widen the
-window in that direction and re-run until the selection lands in the interior
-(or a principled reason exists to stop, e.g. `Kmin`/`Kmax` are already at a
-substantive limit).
+Every selection also requires a complete, converged, finite criterion path.
+An unsuccessful interior candidate invalidates that criterion's selection;
+the rule does not bridge the gap or continue on a later fragment.
 
-## Minor factors: reading dust as dust
+## Adjacent-count stability is descriptive
 
-A harder case is data that truly *does* have extra structure, but structure so
-weak it barely deserves the name "factor". `sim_fa(..., minor = c("weak",
-"moderate"))` plants two orthogonal minor factors that load weakly (or
-moderately) on every item, following the minor-factor definitions of
-Auerswald and Moshagen (2019) -- these are not noise, they are real
-population parameters, just tiny ones. The auxiliary sweeps below fix
-`v0 = 0.001` (skipping the warm-started default's earlier stages) so the
-vignette builds quickly; the lead sweep above is the one run in `vbfa()`'s
-recommended default mode.
+For consecutive converged oblique fits, `$transitions` also asks how well the
+smaller loading solution reappears in the larger one:
 
-```{r minor-sim}
-simM <- sim_fa(N = 400, K = 3, ipf = 6, lam = .7, lac = .3,
-               minor = c("weak", "moderate"), rseed = 11)
-Ym <- simM$dat
-Jm <- ncol(Ym)
-Q0m <- matrix(-1L, Jm, 2)
-for (k in 1:2) {
-  a <- which(rep(1:3, each = 6) == k)[1:2]
-  Q0m[a, ] <- 0L; Q0m[a, k] <- 1L
-}
-pm <- pefa(Q0m, Ym, Kmin = 2, Kmax = 6, v0 = 0.001, max_it = 500,
-           verbose = FALSE)
-pm$selected_K
-pm$sweep[, c("K", "Objective", "BIC", "RMSEA", "SRMR", "CFI", "TLI")]
-pm$transitions[, c("K_from", "K_to", "Objective_gain", "phi_min", "ari")]
+```{r adjacent-stability}
+p$transitions[, c(
+  "K_from", "K_to", "phi_min", "phi_mean", "ari", "rmsd", "max_loading"
+)]
 ```
 
-The gain rule stops at K = 3 -- the three substantive factors -- even though
-the population has two more, very real, orthogonal minor factors on top.
-Look at `SRMR`: it keeps falling all the way to K = 6, because two more
-free factors always let the model absorb a little more residual covariance,
-however trivial. A criterion read on its raw scale (lowest SRMR, or highest
-CFI/TLI) would keep climbing the window and never stop cleanly. The
-scale-free gain threshold does not: past K = 3 the marginal improvement is a
-small fraction of the K = 2 -> 3 jump, so it reads as dust rather than
-structure. This is the gain rule's core selling point -- it is built to tell
-substantive dimensions from minor ones, not just to find *some* local
-improvement.
+`phi_min` and `phi_mean` summarize absolute Tucker congruence after a simple
+best-unused-column alignment; `ari` compares dominant-factor item assignments;
+`rmsd` is computed after sign alignment; and `max_loading` describes the one
+unmatched column in the larger solution. There is no built-in stability cutoff.
+These summaries are a package extension, not part of Chen and Jin's gain rule.
+The paper's separate robustness analysis instead compares solutions obtained
+from alternative backbones.
 
-## Saving a sweep, and widening the window
+When backbone choice is uncertain, repeat the complete sweep from another
+substantively defensible backbone and compare the selected counts and loading
+patterns. Candidate comparisons are meaningful only when the data and all
+other estimation settings are held fixed.
 
-`pefa()` performs one in-memory sweep and returns one complete object; it
-writes nothing and cannot resume an interrupted call. Saving a result is
-ordinary R workflow:
-
-```{r save-sweep}
-f <- tempfile(fileext = ".rds")
-saveRDS(p_narrow, f)
-```
-
-The more useful question is what to do when the sweep says *extend*. There is
-no incremental widening: you re-run with the wider window. That sounds
-wasteful and is not, because `vbfa()` is deterministic and the padded design
-for a given `K` does not depend on `Kmax` -- so every candidate the two
-windows share comes back **identical**, not merely similar:
-
-```{r widen}
-identical(readRDS(f)$fits[["3"]]$Lam, p$fits[["3"]]$Lam)
-```
-
-Only the new candidates cost anything. Two things do change, and both are
-window-relative rather than model-relative: the gain percentages are
-normalized by the largest usable gain *in the window*, so a wider window can
-rescale them; and the boundary readout can move, which is the whole point of
-extending (here `p_narrow` was `"upper"` and `p` is `"interior"`).
-
-One hard limit: `Kmin` can never go below `K0`, the number of columns in the
-backbone. Those factors are specified, so there is no candidate without them.
-
-```{r cleanup-save, include=FALSE}
-unlink(f)
-```
-
-## Objective-type discipline
-
-`pefa()` does not assume the objective is always the ELBO. For ordinary
-(diagonal) `vbfa` sweeps it is the ELBO; for LD-aware sweeps (`ld = TRUE`) it
-is the terminal VECM objective instead, and the ELBO-specific
-columns and selections (`elbo`, `elbo_gain`) are `NA` because the residual
-precision there is point-updated rather than given a full variational
-distribution. `objective_gain` remains the primary rule in both cases, just
-computed on whichever objective the candidates actually share. What `pefa()`
-will not do is mix the two silently: every candidate in a window is fit with
-the same `ld` setting, but if a sweep is ever assembled from candidates whose
-`objective_type` differs, `pefa()` refuses with an explicit error rather than
-comparing ELBO to a VECM objective as though they were the same scale.
+`pefa()` does not sweep local-dependence models. Fit a prespecified residual
+structure directly with `vbfa(..., ld = TRUE)` when that model is required.
 
 ## References
 
 * Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
   Bayesian variable selection: Fit assessment and factor-number selection in
   partially exploratory factor analysis. *arXiv preprint* arXiv:2607.07159.
-* Auerswald, M., & Moshagen, M. (2019). How to determine the number of
-  factors to retain in exploratory factor analysis: A comparison of
-  extraction methods under realistic conditions. *Psychological Methods*,
-  24(4), 468-491.

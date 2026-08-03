@@ -1,129 +1,128 @@
-## Selection rules for pefa() sweeps (0.8.0).
-##
-## Skip-gap policy: a gain edge is usable only when both endpoints are eligible
-## in the scope being evaluated and its raw gain is finite. Non-adjacent gains
-## are never constructed, so an ineligible interior candidate breaks the chain
-## instead of being bridged: differencing across a gap would report a
-## two-factor jump as a one-factor marginal gain.
+## Selection rules for PEFA sweeps.
 
-## Normalize the `cuts`/`delta` pair into a named numeric vector.
-.pefa_cuts <- function(cuts, delta, cuts_given, delta_given) {
-  if (cuts_given && delta_given)
-    stop("Supply either `cuts` or the deprecated `delta`, not both.",
-         call. = FALSE)
-  if (delta_given && !is.null(delta)) cuts <- c(primary = delta)
-  if (!is.numeric(cuts) || anyNA(cuts) || any(!is.finite(cuts)))
-    stop("cuts must be a finite numeric vector.", call. = FALSE)
+## Validate and normalize named sensitivity cuts.
+.pefa_cuts <- function(cuts) {
+  if (!is.numeric(cuts) || !length(cuts) || anyNA(cuts) ||
+      any(!is.finite(cuts)))
+    stop("cuts must be a non-empty finite numeric vector.", call. = FALSE)
   if (any(cuts < 0 | cuts > 100))
     stop("cuts must lie in [0, 100].", call. = FALSE)
+
   nm <- names(cuts)
-  if (is.null(nm) || any(!nzchar(nm)) || anyDuplicated(nm))
+  if (is.null(nm) || anyNA(nm))
     stop("cuts must have unique, non-empty names.", call. = FALSE)
+  nm <- trimws(nm)
+  if (any(!nzchar(nm)) || anyDuplicated(nm))
+    stop("cuts must have unique, non-empty trimmed names.", call. = FALSE)
   if (sum(nm == "primary") != 1L)
     stop("cuts must contain exactly one entry named 'primary'.", call. = FALSE)
+  names(cuts) <- nm
   cuts
 }
 
-## One rule: scan usable adjacent edges, resetting the sustained-run counter
-## wherever the chain is broken.
-.scan_gain <- function(Kf, gain, usable, thr, sustain) {
-  n <- length(gain)
-  run <- 0L; start <- NA_integer_
-  for (i in seq_len(n)) {
-    if (!usable[i]) { run <- 0L; start <- NA_integer_; next }
-    if (gain[i] < thr) {
-      if (run == 0L) start <- Kf[i]
-      run <- run + 1L
-      if (run >= sustain) return(start)
-    } else { run <- 0L; start <- NA_integer_ }
-  }
-  NA_integer_
+.pefa_sustain <- function(sustain) {
+  if (length(sustain) != 1L || !is.numeric(sustain) || !is.finite(sustain) ||
+      sustain < 1 || sustain != round(sustain))
+    stop("sustain must be a single positive whole number.", call. = FALSE)
+  as.integer(sustain)
 }
 
-## Evaluate every criterion x form x cut x scope combination.
-.pefa_selection <- function(sweep, transitions, cuts, sustain, types) {
-  scopes <- list(`converged+fit` = sweep$eligible, converged = sweep$converged)
-  crits  <- list(objective = "Objective", elbo = "ELBO", bic = "BIC")
-  rows <- list()
-  unavailable <- character(0)
+## Shared implementation of the paper's sustained-drop rule. The caller
+## supplies a complete finite path and larger-is-better adjacent gains.
+.scan_gain <- function(K, gain, cut, sustain) {
+  if (length(gain) != max(0L, length(K) - 1L) || any(!is.finite(gain)))
+    stop("gain must be a complete finite adjacent path.", call. = FALSE)
+  if (length(K) == 1L)
+    return(list(selected_K = as.integer(K), gain_max = NA_real_,
+                threshold = NA_real_))
 
-  for (sc in names(scopes)) {
-    ok <- scopes[[sc]]
-    for (cr in names(crits)) {
-      node_col <- crits[[cr]]
-      node_val <- sweep[[node_col]]
-      ## orient so larger is better at the node level
-      node_score <- if (cr == "bic") -node_val else node_val
-      fin <- ok & is.finite(node_score)
-      gain_col <- paste0(node_col, "_gain")
-      gain <- transitions[[gain_col]]
-      usable <- logical(nrow(transitions))
-      if (nrow(transitions))
-        usable <- is.finite(gain) &
-          fin[match(transitions$K_from, sweep$K)] &
-          fin[match(transitions$K_to,   sweep$K)]
-      gmax <- if (any(usable)) max(gain[usable]) else NA_real_
+  gmax <- max(gain)
+  threshold <- unname(cut) / 100 * gmax
+  if (!any(gain > 0))
+    return(list(selected_K = as.integer(K[1L]), gain_max = gmax,
+                threshold = threshold))
 
-      ## ---- raw row -----------------------------------------------------
-      raw_K <- if (any(fin)) sweep$K[fin][which.max(node_score[fin])] else NA_integer_
-      rows[[length(rows) + 1L]] <- data.frame(
-        criterion = cr, form = "raw", cut = NA_character_,
-        cut_value = NA_real_, eligibility_scope = sc,
-        gain_max = NA_real_, threshold = NA_real_,
-        selected_K = as.integer(raw_K), stringsAsFactors = FALSE)
-      if (!any(fin)) unavailable <- c(unavailable, sprintf("%s/raw/%s", cr, sc))
-
-      ## ---- gain rows, one per named cut --------------------------------
-      for (cn in names(cuts)) {
-        sel <- NA_integer_; thr <- NA_real_
-        if (!any(fin)) {
-          unavailable <- c(unavailable, sprintf("%s/gain[%s]/%s", cr, cn, sc))
-        } else if (!any(usable)) {
-          sel <- max(sweep$K[fin])                       # no usable edge
-        } else if (!is.finite(gmax) || gmax <= 0) {
-          sel <- min(sweep$K[fin])                       # nothing worth adding
-        } else {
-          thr <- (cuts[[cn]] / 100) * gmax
-          sel <- .scan_gain(transitions$K_from, gain, usable, thr, sustain)
-          if (is.na(sel)) sel <- max(sweep$K[fin])       # never sustained
-        }
-        rows[[length(rows) + 1L]] <- data.frame(
-          criterion = cr, form = "gain", cut = cn,
-          cut_value = unname(cuts[[cn]]), eligibility_scope = sc,
-          gain_max = if (any(usable)) gmax else NA_real_,
-          threshold = thr, selected_K = as.integer(sel),
-          stringsAsFactors = FALSE)
+  selected <- as.integer(K[length(K)])
+  last_start <- length(gain) - sustain + 1L
+  if (last_start >= 1L) {
+    for (i in seq_len(last_start)) {
+      ## Strict inequality and full look-ahead are both part of the rule.
+      if (all(gain[i:(i + sustain - 1L)] < threshold)) {
+        selected <- as.integer(K[i])
+        break
       }
     }
   }
-  out <- do.call(rbind, rows)
-
-  ## boundary readouts: against the requested window, and against the nodes
-  ## actually usable for that row
-  Kmin <- min(sweep$K); Kmax <- max(sweep$K)
-  wb <- function(k) if (is.na(k)) "none" else if (k == Kmin) "lower" else
-                    if (k == Kmax) "upper" else "interior"
-  out$window_boundary <- vapply(out$selected_K, wb, character(1))
-  out$support_boundary <- vapply(seq_len(nrow(out)), function(i) {
-    k <- out$selected_K[i]
-    if (is.na(k)) return("none")
-    ok <- if (out$eligibility_scope[i] == "converged") sweep$converged else sweep$eligible
-    cr <- out$criterion[i]
-    v  <- sweep[[crits[[cr]]]]
-    sup <- sweep$K[ok & is.finite(v)]
-    if (!length(sup)) "none"
-    else if (length(sup) == 1L) "single"
-    else if (k == min(sup)) "lower"
-    else if (k == max(sup)) "upper"
-    else "interior"
-  }, character(1))
-  attr(out, "unavailable") <- unique(unavailable)
-  out
+  list(selected_K = selected, gain_max = gmax, threshold = threshold)
 }
 
-## The one row that drives the top-level result.
-.pefa_primary_row <- function(selection) {
-  which(selection$criterion == "objective" & selection$form == "gain" &
-        selection$cut == "primary" &
-        selection$eligibility_scope == "converged+fit")[1L]
+.pefa_boundary <- function(k, K) {
+  if (length(k) != 1L || is.na(k)) return("none")
+  if (length(K) == 1L) return("single")
+  if (k == K[1L]) return("lower")
+  if (k == K[length(K)]) return("upper")
+  "interior"
+}
+
+## Evaluate ELBO and BIC raw/gain rules on one complete candidate path.
+.pefa_selection <- function(sweep, transitions, cuts, sustain) {
+  K <- sweep$K
+  specs <- list(
+    elbo = list(node = "ELBO", gain = "ELBO_gain", raw = which.max),
+    bic  = list(node = "BIC",  gain = "BIC_gain",  raw = which.min)
+  )
+  rows <- list()
+  unavailable <- character(0)
+
+  for (criterion in names(specs)) {
+    spec <- specs[[criterion]]
+    node <- sweep[[spec$node]]
+    gain <- transitions[[spec$gain]]
+    complete <- isTRUE(all(sweep$converged & is.finite(node))) &&
+      length(gain) == max(0L, length(K) - 1L) &&
+      !any(!is.finite(gain))
+
+    raw_K <- if (complete) as.integer(K[spec$raw(node)]) else NA_integer_
+    rows[[length(rows) + 1L]] <- data.frame(
+      criterion = criterion,
+      form = "raw",
+      cut_name = NA_character_,
+      cut = NA_real_,
+      gain_max = NA_real_,
+      threshold = NA_real_,
+      selected_K = raw_K,
+      boundary = .pefa_boundary(raw_K, K),
+      stringsAsFactors = FALSE
+    )
+
+    if (!complete)
+      unavailable <- c(unavailable, toupper(criterion))
+
+    for (cut_name in names(cuts)) {
+      ans <- if (complete) {
+        .scan_gain(K, gain, cuts[[cut_name]], sustain)
+      } else {
+        list(selected_K = NA_integer_, gain_max = NA_real_,
+             threshold = NA_real_)
+      }
+      rows[[length(rows) + 1L]] <- data.frame(
+        criterion = criterion,
+        form = "gain",
+        cut_name = cut_name,
+        cut = unname(cuts[[cut_name]]),
+        gain_max = ans$gain_max,
+        threshold = ans$threshold,
+        selected_K = ans$selected_K,
+        boundary = .pefa_boundary(ans$selected_K, K),
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+
+  if (length(unavailable))
+    warning("PEFA ", paste(unique(unavailable), collapse = " and "),
+            " selection is unavailable because its candidate path contains ",
+            "a failed or non-finite fit; repair or rerun the full sweep.",
+            call. = FALSE)
+  do.call(rbind, rows)
 }

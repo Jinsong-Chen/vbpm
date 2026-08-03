@@ -1,7 +1,7 @@
 Package: vbpm
 Type: Package
 Title: Variational Bayes Psychometric Models
-Version: 0.8.0
+Version: 0.8.1
 Authors@R: c(
     person("Jinsong", "Chen", email = "jinsong.chen@live.com",
            role = c("aut", "cre"),
@@ -22,9 +22,10 @@ Description: Variational Bayes estimation for a family of psychometric
     multiple-causes models, placing spike-and-slab priors on both the
     measurement and the structural part (Jin and Chen, 2025
     <doi:10.1080/00273171.2025.2483253>). Companion tools compute SEM-like
-    fit statistics and select the number of factors via a scale-free gain
-    rule (Chen and Jin, 2026 <doi:10.48550/arXiv.2607.07159>), and simulate
-    data from either model family.
+    fit statistics and select the number of factors with a relative gain
+    rule on a fixed criterion path (Chen and Jin, 2026
+    <doi:10.48550/arXiv.2607.07159>), and simulate data from either model
+    family.
 License: GPL-3
 Encoding: UTF-8
 LazyData: true

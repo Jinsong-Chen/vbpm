@@ -7,891 +7,215 @@ vignette: >
   %\VignetteEncoding{UTF-8}
 ---
 
-```{r setup, include = FALSE}
+```{r setup, include=FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(vbpm)
 ```
 
-This vignette is a small tutorial paper on estimating structures that attach
-an "extra" factor to a set of group factors: the orthogonal **bifactor**
-model, the **higher-order** (HO) model, and the **testlet** model. It answers
-four questions in order, with every claim demonstrated on simulated data:
+This vignette introduces the structures, fits an anchored bifactor model,
+summarizes higher-order and testlet effects, and ends with a two-step
+application. Factor-number selection and the bifactor comparison answer
+different questions and are kept separate.
 
-1. How is an orthogonal bifactor fit with `vbfa()`, and how well does it
-   recover a true bifactor structure? (Section 2)
-2. Can a `pefa()` sweep determine the number of *group* factors in a
-   bifactor design? (Sections 3 and 5: **no** -- and the reason is an
-   identification property worth understanding, not a tuning problem.)
-3. How are higher-order and testlet structures simulated, fit, checked, and
-   effect-sized? (Section 4)
-4. Given data of unknown structure, how should one *decide* between
-   correlated factors, a bifactor, and a higher-order model? (Section 6: a
-   two-step process that each of the earlier sections feeds into.)
+## 1. Three related structures
 
-Section 1 first lays out the three models and the small amount of covariance
-geometry that explains everything the later sections observe.
+Suppose `J` items fall into `K` clusters.
 
-## 1. Three structures, and where the information lives
+**Correlated factors.** Each item loads on its cluster factor, and the cluster
+factors correlate through $\Phi$.
 
-Throughout, `J` items fall into `K` clusters (item `j`'s cluster is `k(j)`),
-and all models are for continuous responses with uncorrelated residuals.
+**Orthogonal bifactor.** Every item loads on a general factor and on one group
+factor; the general and group factors are mutually orthogonal.
 
-**Correlated factors (oblique).** Each item loads on its cluster factor only
-(loading $a_j$); the factors correlate through $\Phi$. The model-implied
-covariance between items in *different* clusters $k$ and $l$ is
-$\phi_{kl}\, a_i a_j$; between items in the *same* cluster it is $a_i a_j$.
+**Higher-order (HO).** Items load on first-order factors, which in turn load on
+a second-order factor. The HO model has an equivalent Schmid--Leiman (SL)
+bifactor representation. For item $j$ in cluster $k$,
 
-**Orthogonal bifactor.** Every item loads on one general factor ($b^{gen}_j$)
-and on its cluster's group factor ($b^{grp}_j$); all factors are mutually
-orthogonal. Cross-cluster covariance is $b^{gen}_i b^{gen}_j$; within-cluster
-covariance is $b^{gen}_i b^{gen}_j + b^{grp}_i b^{grp}_j$.
+$$b^{gen}_j = \lambda_j\gamma_k, \qquad
+  b^{grp}_j = \lambda_j\sqrt{1-\gamma_k^2}.$$
 
-**Higher-order (HO).** Items load on first-order factors ($\lambda_j$), which
-load on a single second-order factor ($\gamma_k$, one per first-order
-factor). The HO model is mathematically equivalent to an orthogonal bifactor
-whose loadings obey the Schmid-Leiman (SL) proportionality constraint
-(Schmid & Leiman, 1957; Yung, Thissen, & McLeod, 1999): for every item $j$
-in cluster $k$,
+Thus $|b^{grp}_j|/|b^{gen}_j|$ is constant within each cluster when the SL
+constraint holds. A bifactor model with visibly non-constant within-cluster
+ratios is richer than that HO representation. Testlet or method factors use
+the same general-plus-special-factor loading geometry; the group-factor effect
+size below can therefore be read as a testlet effect when that interpretation
+fits the design.
 
-$$b^{gen}_j = \lambda_j \gamma_k \qquad\qquad b^{grp}_j = \lambda_j \sqrt{1 - \gamma_k^2}.$$
+Cross-cluster covariance alone cannot distinguish a general factor from
+correlated group factors: both produce rank-one cross-cluster blocks. The
+distinguishing information is within clusters, so fitted comparisons remain
+sensitive to anchors, residual structure, and how strongly the general and
+group loading patterns differ.
 
-So within each cluster the ratio $b^{grp}_j / b^{gen}_j =
-\sqrt{1-\gamma_k^2}/\gamma_k$ is **constant** across items -- that constancy
-is the testable signature of an HO model hiding inside a bifactor fit. The
-**testlet model is mathematically equivalent to the higher-order model**:
-the same SL-constrained bifactor, read with testlet or method-effect labels
-in place of first-order-factor labels (Zhang & Chen, 2024).
+## 2. Fit an anchored bifactor directly
 
-Two geometric facts about these covariance structures drive all the
-empirical behaviour below.
+`vbfa(Y, Q, bifactor = TRUE)` treats the columns of `Q` as group factors and
+adds a fully specified general column internally. Consequently `K` denotes
+the number of group factors, while the fitted loading matrix has `K + 1`
+columns. The factor correlation matrix is fixed at the identity.
 
-**Fact 1: cross-cluster blocks carry no information about a general
-factor.** Both the oblique model ($\phi_{kl}\, a_i a_j$) and the bifactor
-($b^{gen}_i b^{gen}_j$) imply *rank-one* cross-cluster blocks. Between-cluster
-covariance therefore cannot distinguish "one general factor" from
-"correlated group factors" -- ever, at any sample size.
-
-**Fact 2: the general factor is identified only by within-cluster rank.**
-The oblique model implies rank-*one* within-cluster common covariance
-($a_i a_j$); the bifactor implies rank-*two*
-($b^{gen}_i b^{gen}_j + b^{grp}_i b^{grp}_j$). A general factor is
-empirically distinguishable from factor correlations exactly to the extent
-that the within-cluster blocks are genuinely rank-two -- which requires the
-general and group loadings to vary *independently* across the items of a
-cluster. Two corners are degenerate: under exact SL proportionality the
-rank-two block collapses to effective rank one (the HO model *equals* an
-oblique model with $\Phi = \gamma\gamma'$ off the diagonal, so the bifactor
-parameterization is redundant); and when loadings are near-homogeneous
-within clusters, the two rank-one directions nearly coincide, so the models
-are close to empirically equivalent at realistic sample sizes. Section 6
-shows both corners in data.
-
-## 2. Fitting an orthogonal bifactor
-
-`vbfa(Y, Q, bifactor = TRUE)` fits an orthogonal bifactor model directly:
-`Q` specifies the *group* design only (one column per group factor, so `K`
-here counts group factors, comparable to an oblique-K model), and a general
-column (every item loads) is added internally, ahead of the group columns.
-`bifactor = TRUE` fixes the factor correlation matrix at the identity, and
-overrides `orthogonal = FALSE`. It is bit-for-bit equivalent to the longer
-form `vbfa(Y, cbind(1L, Q), orthogonal = TRUE)` -- building the general
-column by hand and setting `orthogonal = TRUE` -- but `fit$Q` from the
-`bifactor = TRUE` call already carries that augmented design (general column
-first), so there is no need to build or store it separately.
-
-The population below is a *genuine* bifactor in the sense of Fact 2: the
-general and group loadings are drawn independently and span a wide range, so
-the general-to-group ratio varies haphazardly within clusters and no
-higher-order representation exists (contrast Section 4, where the loadings
-are built to satisfy exactly the constant-ratio constraint).
+The following population is a genuine bifactor: general and group loadings
+vary independently within each cluster rather than satisfying SL
+proportionality.
 
 ```{r bifactor-simulate}
-K <- 3; ipf <- 6; J <- K * ipf
-cl <- rep(1:K, each = ipf)
+K <- 3
+ipf <- 6
+J <- K * ipf
+cl <- rep(seq_len(K), each = ipf)
+
 set.seed(7)
 mla <- matrix(0, J, K + 1)
-mla[, 1] <- round(runif(J, .35, .75), 2)                 # general
-for (k in 1:K) mla[cl == k, k + 1] <- round(runif(ipf, .35, .70), 2)  # group
-while (max(rowSums(mla^2)) > .9) mla <- round(mla * .97, 3)  # sane communalities
-sim <- sim_fa(N = 1000, mla = mla, phi = 0, rseed = 1)   # phi = 0 -> orthogonal
-Y <- sim$dat
+mla[, 1] <- round(runif(J, .35, .75), 2)
+for (k in seq_len(K)) {
+  mla[cl == k, k + 1] <- round(runif(ipf, .35, .70), 2)
+}
+while (max(rowSums(mla^2)) > .9) mla <- round(mla * .97, 3)
+
+sim_bi <- sim_fa(N = 1000, mla = mla, phi = 0, rseed = 1)
+Y <- sim_bi$dat
 ```
 
-The fit is partially confirmatory: the general column is fully specified
-(every item loads), two items per group factor are anchored, and the
-remaining group entries are left to the data.
+Anchor two items per group. For those rows, the own-group entry is one and
+the other group entries are fixed at zero; the remaining entries stay
+partially exploratory.
 
 ```{r bifactor-fit}
 Q <- matrix(-1L, J, K)
-for (k in 1:K) {
-  a <- which(cl == k)[1:2]
-  Q[a, ] <- 0L
-  Q[a, k] <- 1L
-}
-fb <- vbfa(Y, Q, bifactor = TRUE)
-fb$Phi                 # identity by construction, not estimated
-round(fit_stats(fb), 3)
-```
-
-`fit_stats()` reads `orthogonal` (and `ld`) from the fit object itself, so a
-bifactor fit needs no extra argument at the `fit_stats()` call -- and
-supplying a contradictory one is an error, not a silent miscount.
-
-A check that the fit tracks the truth, on the hard part -- the
-general/group split:
-
-```{r bifactor-verify}
-c(cor = cor(fb$Lam[, 1], sim$MLA[, 1]),
-  MAE_general = mean(abs(fb$Lam[, 1] - sim$MLA[, 1])))
-```
-
-With heterogeneous loadings the split is well identified and the anchored
-fit recovers it: the general loadings correlate near `.98` with the truth,
-with a mean absolute error under `.05`. This anchored refit -- not any sweep
--- is the estimation workhorse that everything later relies on.
-
-## 3. Why a sweep cannot count group factors
-
-The gain-rule sweep from `pefa()` accepts a bifactor backbone: anchor two
-items per group factor and let `pefa()` pad the rest of the window with
-exploratory group columns, adding the general column internally throughout.
-
-With `bifactor = TRUE`, `pefa()`'s `Kmin` and `Kmax` count **group** factors
-only; the general column is added internally and is not part of the window.
-The backbone below anchors 2 of the 3 group factors (2 columns), so
-`Kmin = 2` means "2 anchored group factors, general factor implicit," and
-`pefa()` pads the window up with exploratory group columns. The sweep's
-output gains a `K_total` column (`= K + 1`, the group count plus the
-general factor); the `K` reported and selected is the group-factor count,
-and `K_total` is what should be compared to a total column count from a
-hand-built design.
-
-```{r pefa-sweep}
-## backbone: 2 anchored group columns (general column added internally)
-Q0 <- matrix(-1L, J, 2)
-for (k in 1:2) {
-  a <- which(cl == k)[1:2]
-  Q0[a, ] <- 0L
-  Q0[a, k] <- 1L
+for (k in seq_len(K)) {
+  anchor <- which(cl == k)[1:2]
+  Q[anchor, ] <- 0L
+  Q[anchor, k] <- 1L
 }
 
-r <- pefa(Q0, Y, Kmin = 2, Kmax = 5, bifactor = TRUE, v0 = .001,
-          verbose = FALSE)
-summary(r)$sweep[, c("K", "K_total", "ELBO", "BIC", "RMSEA", "CFI")]
-r
+fit_bi <- vbfa(Y, Q, bifactor = TRUE)
+fit_bi$Phi
+round(fit_stats(fit_bi), 3)
 ```
 
-The true design has 3 group factors plus the general factor, i.e.
-`K_total = 4` -- and the sweep does **not** find it: the primary
-(objective-gain) rule settles at `K = 2` group factors (`K_total = 3`), the
-*lower* edge of the window, while the fit indices sit near their ceilings at
-every `K` and the BIC differences are trivial relative to their scale. This
-outcome is worth
-understanding rather than tuning away, because it follows directly from the
-geometry of Section 1. By Fact 1, the omitted group factor's cross-cluster
-signature does not exist; by Fact 2, its within-cluster rank-two block is
-the only evidence -- and the unspecified (`-1`) entries of the columns that
-*remain* supply enough free directions to reproduce it almost exactly. Look
-at what the `K = 2` candidate did with the third cluster's items:
+`fit_bi$Q` contains the augmented design with the general column first. The
+short form above is equivalent to constructing that all-one column manually
+and fitting an orthogonal model, but it keeps the group-factor count explicit.
+A quick recovery check can focus on the general/group split:
 
-```{r pefa-absorb}
-f3 <- r$fits[[1]]
-round(f3$Lam[cl == 3, ], 2)   # columns: general, group 1, group 2
+```{r bifactor-check}
+c(
+  congruence_general = abs(sum(fit_bi$Lam[, 1] * sim_bi$MLA[, 1])) /
+    sqrt(sum(fit_bi$Lam[, 1]^2) * sum(sim_bi$MLA[, 1]^2)),
+  MAE_general = mean(abs(abs(fit_bi$Lam[, 1]) - abs(sim_bi$MLA[, 1])))
+)
 ```
 
-Their group variance has been folded into inflated general-factor loadings
-(compare `mla[cl == 3, 1]`), leaving almost nothing for a third group factor
-to explain -- which is why the objective *falls* at every larger `K` (more
-spike-and-slab bookkeeping, no new fit) and why the covariance indices
-cannot tell the candidates apart. Under a different regularization or
-anchoring pattern the same surplus reappears in a different disguise (split
-across the two anchored group columns, say), but some absorbed,
-covariance-equivalent representation is always available.
+## 3. Higher-order and testlet summaries
 
-The blunt conclusion first: **an ordinary bifactor sweep -- general column
-plus anchored group columns, everything else `-1` -- should not be used to
-determine the number of group factors.** Its selection is not merely noisy
-but systematically misleading: the absorbed candidate wins regardless of the
-true `K`, and (Section 5) the truth-sized candidate inside the sweep is
-itself rotationally scrambled, so its loadings cannot be inspected to detect
-the problem. `print(r)` therefore flags an orthogonal sweep that lands on
-the lower boundary as *weak evidence about K* rather than issuing the
-generic advice to extend the window.
+`sim_fa(..., gamma = )` generates the SL representation of an HO model. Fit
+it as an anchored bifactor, then use `special_effects()` to summarize the
+within-group ratios, the implied HO parameters, and group/testlet effect
+sizes.
 
-Two practical rules follow. First, a `boundary = "lower"` stall in a
-bifactor sweep means "no *separable* extra group factor was found," never
-"the backbone is the true structure." Second, the absorption route runs
-through entries that are free but should not be: if an item is *known* not
-to measure a group factor, encode that as a fixed `0` rather than an
-exploratory `-1` -- that restores an interior selection for the factor
-*count* (though still not interpretable loadings; see Section 5). And when
-the real question is "how many factors are in these data at all," Section 6
-shows the sweep that *does* answer it: the ordinary correlated-factor sweep,
-with no general column.
-
-(`v0 = .001` -- a single fixed spike rather than the default warm-started
-path -- keeps a `Kmin:Kmax` sweep fast. The absorption behaviour above is
-not an artifact of that choice; the default path lands in the same place.)
-
-## 4. Higher-order and testlet structures
-
-### (a) Simulate a true higher-order model directly
-
-`sim_fa()`'s `gamma` argument generates directly from the SL equivalence of
-Section 1: supply the second-order loadings and `sim_fa()` builds the SL
-bifactor matrix internally and simulates from it, with the factor
-correlation matrix `PHI` fixed at the identity.
-
-```{r ho-simulate}
+```{r higher-order}
 gamma_true <- c(.80, .70, .60)
-sim_ho <- sim_fa(N = 3000, K = 3, ipf = 6, lam = .8, gamma = gamma_true, rseed = 11)
-Yh <- sim_ho$dat
-round(sim_ho$MLA, 2)    # the SL bifactor matrix sim_fa built internally
+sim_ho <- sim_fa(
+  N = 3000, K = K, ipf = ipf, lam = .8,
+  gamma = gamma_true, rseed = 11
+)
+fit_ho <- vbfa(sim_ho$dat, Q, bifactor = TRUE)
+
+effects <- special_effects(fit_ho)
+effects$mean_cv
+effects$groups[, c("group", "mean_ratio", "cv", "gamma", "D")]
 ```
 
-The sample is deliberately large. The quantity subsection (c) inspects is a
-*ratio* of two fitted loadings, and -- by Fact 2 -- the general-versus-group
-split behind that ratio is the softest part of an orthogonal bifactor
-solution, so its sampling noise is large relative to the loadings
-themselves. `N = 3000` keeps that noise small enough for the constant-ratio
-signature to show through cleanly.
+For group $k$, `cv` describes how constant the fitted
+$|b^{grp}_j|/|b^{gen}_j|$ ratios are, `gamma` is the corresponding approximate
+second-order loading, and `D` is the average squared loading on the selected
+group or testlet factor (Zhang & Chen, 2024, Eq. 16). `$items` contains the
+item-level ratios and implied first-order loadings.
 
-### (b) Fit a partially confirmatory orthogonal bifactor
+These summaries are descriptive. Small CVs support an approximate SL/HO
+re-expression, but `special_effects()` does not perform a hypothesis test or
+choose a structure. When ratios are not close to constant, `gamma` and the
+implied first-order loadings are intentionally only summaries of the richer
+bifactor fit; `D` remains a direct special-factor effect-size summary.
 
-The general column is fully specified; two items per group factor are
-anchored, and the rest of the group loadings -- including the off-cluster
-entries -- are left to the data.
+## 4. A two-step application
 
-```{r ho-fit}
-Qg <- matrix(-1L, J, K)
-for (k in 1:K) {
-  a <- which(cl == k)[1:2]
-  Qg[a, ] <- 0L
-  Qg[a, k] <- 1L
-}
+When the first-order count and the presence of a separable general factor are
+both uncertain, use two steps. The first is the PEFA workflow of Chen and Jin
+(2026a); the second is the research comparison developed in Chen and Jin
+(2026b), not part of the PEFA gain rule itself.
 
-fit <- vbfa(Yh, Qg, bifactor = TRUE)
-fit
-```
+### Step 1: select the first-order count with ordinary PEFA
 
-### (c) Check the SL constraint on the fitted loadings
-
-A few lines of plain R -- deliberately not a package function, since this is
-a descriptive diagnostic, not a fitted model. Per cluster, compute each
-item's ratio of its own group loading to the general loading,
-$r_j = |b^{grp}_j| / |b^{gen}_j|$, then that ratio's mean and coefficient of
-variation ($CV = sd/mean$) within the cluster. A small CV means the ratios
-are nearly constant across items in that cluster -- the SL-admissible
-signature of a higher-order model hiding inside the bifactor fit. Averaging
-the cluster CVs across all items (item-weighted, so the code generalizes to
-unequal cluster sizes) gives one overall number, and the rule applied here
-is:
-
-**mean CV < .1 means the fitted bifactor is approximately a higher-order
-model.**
-
-```{r ho-sl-check}
-b_gen <- fit$Lam[, 1]
-cl_tab <- t(sapply(1:K, function(k) {
-  idx <- which(cl == k)
-  r <- abs(fit$Lam[idx, k + 1]) / abs(b_gen[idx])
-  c(n = length(idx), mean = mean(r), sd = sd(r), cv = sd(r) / mean(r))
-}))
-rownames(cl_tab) <- paste0("cluster", 1:K)
-round(cl_tab, 3)
-
-mean_cv <- sum(cl_tab[, "n"] * cl_tab[, "cv"]) / sum(cl_tab[, "n"])
-mean_cv
-```
-
-The mean CV comes out at about `.084` -- under the `.1` line, so the fitted
-bifactor reads as approximately a higher-order model, exactly as it should:
-the data were generated under one. The selection side of the fit is equally
-clean here: every unanchored item's own-cluster loading is selected active
-(posterior inclusion probability 1) and no off-cluster loading is. Note that
-the pooled number passes while cluster 1 alone (CV about `.13`) sits
-slightly above the line -- with only six items per cluster the per-cluster
-CV is a noisy statistic, which is why the rule is stated on the
-item-weighted mean. The per-cluster values are still worth a glance: a
-*single* cluster far above the line with the others near zero would tell a
-different story (one non-HO-like cluster) than the same mean produced
-evenly.
-
-### (d) Transform back to higher-order parameters
-
-Given the SL relations, $\gamma_k$ and $\lambda_j$ can be recovered from
-each cluster's mean ratio $\bar r_k$: $\hat\gamma_k = 1/\sqrt{1 + \bar
-r_k^2}$ and $\hat\lambda_j = |b^{gen}_j| / \hat\gamma_{k(j)}$.
-
-```{r ho-transform}
-gamma_hat <- 1 / sqrt(1 + cl_tab[, "mean"]^2)
-names(gamma_hat) <- paste0("cluster", 1:K)
-rbind(true = gamma_true, hat = round(gamma_hat, 3))
-
-lambda_true <- sim_ho$MLA1[cbind(seq_len(J), cl)]   # true first-order loading of each item
-lambda_hat <- numeric(J)
-for (k in 1:K) {
-  idx <- which(cl == k)
-  lambda_hat[idx] <- abs(b_gen[idx]) / gamma_hat[k]
-}
-c(worst = max(abs(lambda_hat - lambda_true)),   # first-order loading errors
-  mean  = mean(abs(lambda_hat - lambda_true)))
-```
-
-The second-order loadings come back at about `.81`, `.69`, and `.59`
-against the true `.80`, `.70`, `.60` -- each within about `.013` of the
-truth. The first-order loadings (`.8` throughout, since `lam = .8` is
-constant here) are recovered with a worst-case error of about `.06` and a
-mean error near `.02`. When the SL constraint genuinely holds and the CV
-check passes, the transform-back step is this accurate: the mean ratio per
-cluster is all the information the second-order structure needs.
-
-### (e) Group-factor effect size (Zhang & Chen, 2024, Eq. 16)
-
-Whether the model is read as a bifactor, an HO model, or a testlet model,
-the group/testlet factor's effect size quantifies how strongly its items
-load on it. Following Eq. 16 of Zhang and Chen (2024, p. 11), the effect
-size of special (group/testlet) factor $k$ is the **average squared
-loading** on that factor,
-
-$$D_k = \frac{\sum (\text{squared specified loadings}) + \sum (\text{squared active unspecified loadings})}{\text{number of loadings included}},$$
-
-where an unspecified loading counts as active only if it passes a cutoff.
-The package is a spike-and-slab framework rather than a Lasso one, so the
-natural cutoff here is the posterior inclusion probability: an unspecified
-entry (`Q == -1`) counts as active when `fit$pi > tau` with `tau = .5`;
-specified entries (`Q == 1`) always count.
-
-```{r ho-D}
-tau <- .5
-Dk <- sapply(1:K, function(k) {
-  col <- k + 1
-  included <- (fit$Q[, col] == 1) | (fit$Q[, col] == -1 & fit$pi[, col] > tau)
-  sum(fit$Lam[included, col]^2) / sum(included)
-})
-names(Dk) <- paste0("cluster", 1:K)
-round(Dk, 3)
-```
-
-The effect sizes come out at about `.22`, `.34`, and `.42`, against
-population values of $(\lambda\sqrt{1-\gamma_k^2})^2 = .23, .33, .41$ -- an
-essentially exact, and correctly ordered, recovery. The ordering is the
-substantive reading: the *weaker* a cluster's second-order loading, the
-*larger* its group/testlet effect, because whatever the general factor does
-not explain of an item's common variance is exactly what its group factor
-carries. Cluster 3 (true $\gamma = .60$) therefore shows the largest special
-effect and cluster 1 (true $\gamma = .80$) the smallest.
-
-### (f) All of the above in one call: `special_effects()`
-
-Parts (c)-(e) were written out in plain R because the mathematics deserves
-to be seen once. In practice, `special_effects()` computes all three
-summaries from the fit directly -- per-group ratio CVs and the
-item-weighted mean CV, the higher-order parameters $\hat\gamma_k$ (with
-$\hat\lambda_j$ in `$items`), and the Eq.-16 effect sizes -- inferring
-group membership from the design and the posterior inclusion
-probabilities, and flagging any items it had to set aside:
-
-```{r ho-special-effects}
-special_effects(fit)
-```
-
-The numbers match parts (c)-(e) exactly. Note what the function does
-*not* do: it takes no cutoff argument and makes no decision. The `.1`
-convention for the mean CV is suggestive, and the higher-order parameters
-and effect sizes are reported regardless -- reading them faithfully (a
-re-expression) or loosely (a lossy summary of a genuine bifactor) is the
-analyst's call, informed by the CVs.
-
-## 5. Can a sweep recover the higher-order structure? No
-
-Section 3 showed the absorption problem on genuine bifactor data; the same
-question is sharper here, where the population is *exactly* a higher-order
-model: hand the ordinary bifactor backbone (two anchored group factors, all
-else `-1`) to `pefa()` on `Yh` and ask whether it finds the true 3 group
-factors (`K_total = 4`).
-
-```{r ho-sweep}
-Q0h <- matrix(-1L, J, 2)
-for (k in 1:2) {
-  a <- which(cl == k)[1:2]
-  Q0h[a, ] <- 0L
-  Q0h[a, k] <- 1L
-}
-rh <- pefa(Q0h, Yh, Kmin = 2, Kmax = 5, bifactor = TRUE, v0 = .001,
-           verbose = FALSE)
-rh
-```
-
-It does not: the selection stalls at the lower boundary `K = 2` group
-factors (`K_total = 3`), with the fit indices at their ceilings for every
-candidate, for exactly the absorption reason -- SL-proportionality buys
-nothing, because the omitted group factor's rank-one block is reproducible
-by the free entries either way. Repeating this at several seeds and at
-`N = 500` gives the same lower boundary selection every time; this is an
-identification property, not bad luck. Worse, the truth-sized `K_total = 4`
-candidate *inside* the sweep is not interpretable either. Its padded column
-is never anchored, so nothing pins the general/group allocation: here the
-extra column simply stays empty and the absorbed representation persists
-(cluster 3's group variance sits in inflated general loadings plus
-off-cluster spill), while under other settings and seeds the allocation
-comes out rotated across columns instead. Either way, these loadings must
-not be read, checked for SL proportionality, or transformed back:
-
-```{r ho-sweep-k4}
-f4 <- rh$fits[[which(rh$sweep$K_total == 4)]]
-round(f4$Lam[cl == 3, ], 2)     # cluster-3 rows: compare sim_ho$MLA[cl == 3, ]
-```
-
-All interpretation must instead happen on an *anchored refit* at the chosen
-`K` -- the design of Section 4(b), whose fitted columns match the true SL
-matrix with congruence above `.99`. Anchors pin the rotation; a sweep's
-padded columns, by construction, never have them. That leaves the question
-Section 6 answers: if sweeps cannot decide the bifactor question, what can?
-
-## 6. Which structure? The two-step process
-
-Sections 3 and 5 established what sweeps over *bifactor* candidates cannot
-do. This section assembles what the tools *can* do into the two-step
-process of Chen and Jin (2026b; the "accompanying manuscript" throughout
-this section), run in miniature on the practical situation: data in hand,
-clusters suspected, structure -- correlated factors, bifactor, or
-higher-order -- unknown. Everything below is one replication per
-population at `N = 1000` and is illustrative only: operating
-characteristics come from the manuscript's simulations, and this
-section postdates the analyses reported there (which were generated with
-vbpm 0.7.1; this vignette was built with version
-`r as.character(packageVersion("vbpm"))`).
-
-### Step 1: anchored oblique sweeps from both backbones
-
-Run the plain correlated-factor sweep of the `pefa` vignette -- no general
-column, no `orthogonal = TRUE` (the sweep, its gain cuts, and the
-reproduction statistic below are those of Chen and Jin, 2026a). This asks
-only: *how many cluster-level
-factors are there?* For that question an omitted factor produces honest
-misfit (its within-cluster block is not reproducible by other clusters'
-columns), so interior selections are trustworthy.
-
-One selection is not yet a result, though. The sweep's backbone -- how the
-anchor rows are treated -- is an algorithmic convention with no
-substantive content, so run the sweep from both conventions and ask
-whether they agree: BPC-type anchors (the anchor rows' off-column entries
-fixed to zero, `Q0_ob` below) and LPC-type anchors (the 1s alone, every
-other entry free). Do the same with the selection cut: the 20% ELBO-gain
-cut is the primary rule, the laxer 10% cut the sensitivity. Run all of it
-on both datasets of this vignette -- the genuine bifactor `Y` of Section 2
-and a fresh higher-order sample at the same `N`:
+Run an oblique, diagonal-residual sweep without a general factor. This selects
+the number of cluster-level factors; it does not decide whether their
+correlations should later be represented by a general factor.
 
 ```{r step1}
-sim_ho2 <- sim_fa(N = 1000, K = 3, ipf = 6, lam = .8, gamma = gamma_true,
-                  rseed = 11)
-Yh2 <- sim_ho2$dat
-
-Q0_ob <- matrix(-1L, J, 2)                       # BPC-type backbone
+Q0 <- matrix(-1L, J, 2)
 for (k in 1:2) {
-  a <- which(cl == k)[1:2]
-  Q0_ob[a, ] <- 0L
-  Q0_ob[a, k] <- 1L
+  anchor <- which(cl == k)[1:2]
+  Q0[anchor, ] <- 0L
+  Q0[anchor, k] <- 1L
 }
-Q0_lp <- matrix(-1L, J, 2)                       # LPC-type backbone
-for (k in 1:2) Q0_lp[which(cl == k)[1:2], k] <- 1L
 
-## both cuts in one call; pefa() applies its own eligibility and gap rules,
-## which a direct select_K_elbow() call on the sweep table would bypass
-sweep_at <- function(Q0, Y)
-  pefa(Q0, Y, Kmin = 2, Kmax = 6, verbose = FALSE,
-       cuts = c(primary = 20, sensitivity = 10))
-cut_picks <- function(s) {
-  sel <- s$selection
-  keep <- sel$criterion == "elbo" & sel$form == "gain" &
-          sel$eligibility_scope == "converged+fit"
-  stats::setNames(sel$selected_K[keep], paste0("K_", sel$cut_value[keep]))
-}
-sweeps <- list(bif_BPC = sweep_at(Q0_ob, Y),   bif_LPC = sweep_at(Q0_lp, Y),
-               HO_BPC  = sweep_at(Q0_ob, Yh2), HO_LPC  = sweep_at(Q0_lp, Yh2))
-t(sapply(sweeps, cut_picks))
+count_sweep <- pefa(Q0, Y, Kmin = 2, Kmax = 6, verbose = FALSE)
+subset(
+  count_sweep$selection,
+  criterion == "elbo" & form == "gain" & cut_name == "primary"
+)
 ```
 
-All four sweeps land at `K = 3` -- interior to the window -- under the
-primary cut, the sensitivity cut agrees everywhere, and both selections
-are correct in first-order terms: the HO data genuinely are three
-correlated factors (Section 1), and the bifactor data have three clusters
-whose general factor the oblique model absorbs into the factor
-correlations (Fact 1 -- cross-cluster blocks cannot tell the difference).
-Note what step 1 does **not** claim: it says nothing about whether a
-general factor should be carved out. That is step 2's question.
+Check that the selected count is not merely a requested-window boundary, and
+read the fit trajectories descriptively. The PEFA vignette shows named-cut,
+backbone, and adjacent-count sensitivity summaries. A boundary result requires
+a complete wider sweep before proceeding.
 
-### The stability analysis: adjacent-count reproduction
+### Step 2: compare matched anchored models by BIC
 
-Backbone and cut agreement are cheap consistency checks. The direct
-evidence that a selected solution is worth delivering is *reproduction*:
-the `K` columns just selected should reappear, nearly unchanged, inside
-the `(K+1)`-factor solution the sweep has already fitted. If they do, the
-extra candidate factor is surplus sitting beside a stable structure; if
-instead the columns reorganize, the selection was a score that moved, not
-a structure that persisted. Match each column of the `K`-factor fit to its
-best counterpart in the `(K+1)`-factor fit by Tucker congruence, without
-reuse, and take the minimum:
-
-```{r stability}
-tucker <- function(a, b) abs(sum(a * b) / sqrt(sum(a^2) * sum(b^2) + 1e-12))
-reproduce_up <- function(s, k) {
-  fA <- s$fits[[as.character(k)]]
-  fB <- s$fits[[as.character(k + 1)]]
-  used <- integer(0)
-  phis <- numeric(ncol(fA$Lam))
-  for (i in seq_len(ncol(fA$Lam))) {
-    cong <- sapply(seq_len(ncol(fB$Lam)), function(j)
-      if (j %in% used) -1 else tucker(fA$Lam[, i], fB$Lam[, j]))
-    used <- c(used, which.max(cong))
-    phis[i] <- max(cong)
-  }
-  min(phis)
-}
-round(sapply(sweeps, reproduce_up, k = 3), 3)
-```
-
-All four values sit at or near `1`, far above the `.85` threshold the
-manuscript calibrates for this check (a provisional convention, like every
-cutoff in this vignette). Both datasets therefore *deliver* a stable
-three-factor structure, and the process moves on to step 2.
-
-The other branches matter as much as this one. When the two backbones
-select adjacent counts and the smaller solution reproduces inside the
-larger, the delivery is a stable core with count uncertainty, and step 2
-runs at both counts. When neither holds -- selections apart by more than
-one, or columns that fail to reproduce -- no stable structure is
-delivered, and the honest report is exactly that: non-delivery, with the
-sweep evidence shown. Imposing a structure anyway, because theory demands
-one, is a substantively specified sensitivity analysis rather than a
-delivery, and should be labeled as such.
-
-### Step 2: anchored oblique-K versus anchored bifactor-(K+1), by BIC
-
-At the delivered `K`, fit two *anchored, confirmatory-leaning* models with
-the same anchors: the oblique `K`-factor model, and the orthogonal bifactor
-with the same group design plus a fully specified general factor. Compare
-their `BIC` from `fit_stats()`. This is the payoff of the `bifactor = TRUE`
-argument: the oblique-K and bifactor-K models are now literally the same
-design matrix with a switch, rather than two hand-built designs that have
-to be kept in sync. And as in step 1, the anchoring depth is an
-algorithmic convention, so run the comparison at both depths -- BPC-type
-(`Q3`) and LPC-type (`Q3_lp`) -- and ask whether the two `diff` signs
-agree:
+At the selected count, build one anchored group design and use it unchanged in
+two direct fits: an oblique model and a bifactor model with an added general
+factor. In this simulated example the selected count is three, so the `Q`
+constructed in Section 2 is the matched design.
 
 ```{r step2}
-Q3 <- matrix(-1L, J, 3)
-for (k in 1:3) {
-  a <- which(cl == k)[1:2]
-  Q3[a, ] <- 0L
-  Q3[a, k] <- 1L
-}
-Q3_lp <- matrix(-1L, J, 3)
-for (k in 1:3) Q3_lp[which(cl == k)[1:2], k] <- 1L
+fit_oblique <- vbfa(Y, Q)
+fit_bifactor <- vbfa(Y, Q, bifactor = TRUE)
 
-step2 <- function(Y, Q, ...) {                 # `...` reaches BOTH arms alike
-  b3 <- fit_stats(vbfa(Y, Q, ...))["BIC"]
-  b4 <- fit_stats(vbfa(Y, Q, bifactor = TRUE, ...))["BIC"]
-  c(oblique_K = unname(b3), bifactor_K1 = unname(b4), diff = unname(b4 - b3))
-}
-round(rbind(bifactor_BPC = step2(Y, Q3),   bifactor_LPC = step2(Y, Q3_lp),
-            HO_BPC       = step2(Yh2, Q3), HO_LPC       = step2(Yh2, Q3_lp)), 1)
+bic <- c(
+  oblique = unname(fit_stats(fit_oblique)["BIC"]),
+  bifactor = unname(fit_stats(fit_bifactor)["BIC"])
+)
+data.frame(model = names(bic), BIC = unname(bic),
+           difference_from_oblique = unname(bic - bic["oblique"]))
 ```
 
-The comparison resolves both datasets correctly at `N = 1000`, with the
-depths agreeing in sign. On the genuine bifactor data the bifactor wins at
-both depths (`diff` about `-59` and `-9`; the LPC margin is the smaller
-one because the freer depth lets the oblique model absorb more of the
-general variance). Read that `-9` against the small-margin warning that
-closes this section: a margin of single-digit BIC points is thin, and
-the LPC arm *by itself* would license nothing better than a provisional
-call. What carries the conclusion here is the agreement of the two depths
-in sign together with the substantial BPC margin -- and, in Step 3 below,
-a mean CV far from the HO boundary. Had the depths disagreed, or had both
-margins been this thin, the honest report would be that the comparison did
-not resolve. On the higher-order data the oblique model wins at both
-depths (`diff` about `+103` and `+114`) -- correctly so, since by the SL
-equivalence the bifactor parameterization of an HO model is redundant, and
-BIC refuses to pay 18 extra loadings for it. When the depths *disagree* in
-sign, the comparison has not resolved anything: withhold the structural
-conclusion and look for the reason (the absorbed-dependence subsection
-below shows the usual one).
+Lower BIC is preferred. BIC is the operational comparison here because the
+two competitors contain different loading designs and therefore different
+prior bookkeeping; ELBO remains appropriate for comparing the same-shaped
+candidates within the PEFA sweep.
 
-Use **BIC, not the ELBO, as the operational criterion in this
-comparison**; the ELBO serves as a sensitivity check. The two designs
-place spike-and-slab prior mass on different numbers of entries, so their
-ELBOs differ by prior bookkeeping as well as by fit; in the manuscript's
-simulations the ELBO kept preferring the oblique model in regimes where
-BIC had already (correctly) flipped to the bifactor. Here the two agree in
-direction on both datasets, which is worth one sentence in a report and no
-more. The ELBO is the right currency *within* a sweep of same-shaped
-designs; BIC is the right currency between these two differently-shaped
-ones.
+This comparison is evidence, not an automatic structural verdict. Use the
+same data, anchors, residual assumptions, and estimation controls in both
+arms. Thin margins, sensitivity to defensible anchor choices, or conspicuous
+residual dependence should be reported and investigated before interpreting a
+bifactor preference. If the bifactor is retained, `special_effects()` then
+describes whether it is close to an HO representation and quantifies its
+group/testlet effects.
 
-### Step 3: resolve the winner into a final structure
+## References
 
-**If the bifactor won**, run the SL check of Section 4(c) on the bifactor
-fit. A mean CV under `.1` says the bifactor is SL-degenerate -- collapse it
-to the more parsimonious HO model via the transform of Section 4(d). A
-large mean CV says the general factor is genuinely its own thing:
-
-```{r step3-bifactor}
-f4b <- vbfa(Y, Q3, bifactor = TRUE)
-se  <- special_effects(f4b)
-se$mean_cv
-se$groups[, c("group", "mean_ratio", "cv", "gamma", "D")]
-```
-
-Here it is about `.39` -- far above the line, so these data keep their full
-bifactor: correctly so, since their generating loadings were drawn with no
-proportionality constraint.
-
-**If the oblique model won**, the general factor question is settled
-(no separable general factor) -- but a second-order description may still
-be available for free. Under an HO population, $\Phi$ has the rank-one
-structure $\gamma\gamma'$ off the diagonal, so the second-order loadings
-can be read out of the fitted factor correlations by the classical triad
-(Spearman) relations, e.g. $\hat\gamma_1 =
-\sqrt{\phi_{12}\phi_{13}/\phi_{23}}$:
-
-```{r step3-oblique}
-f3h <- vbfa(Yh2, Q3)
-P <- f3h$Phi
-round(P, 2)
-gamma_triad <- c(sqrt(P[1, 2] * P[1, 3] / P[2, 3]),
-                 sqrt(P[1, 2] * P[2, 3] / P[1, 3]),
-                 sqrt(P[1, 3] * P[2, 3] / P[1, 2]))
-round(gamma_triad, 2)             # true: .80 .70 .60
-```
-
-The triads recover the second-order loadings to within a few hundredths --
-a second, independent route to the HO structure that never fits an
-orthogonal model at all, and that can cross-validate the SL route of
-Section 4 when both are applicable. (With more than three first-order
-factors, replace the triads by a one-factor model fit to $\hat\Phi$; with
-exactly three, the triads are that model's exact solution. Coherent triads
--- all inside the unit interval, stable across item subsets -- support the
-HO reading; incoherent ones say $\Phi$ is just a correlation matrix, and
-the structure is plain correlated factors.)
-
-### The hazard step 2 cannot see: absorbed local dependence
-
-The manuscript's sharpest warning deserves its own demonstration. Take the
-higher-order population -- where the oblique model just won by a hundred
-BIC points -- and contaminate it with a single residual correlation of
-`.25` between two non-anchor items of the first cluster, the kind of extra
-dependence a pair of same-stem items produces:
-
-```{r doublet-simulate}
-bg <- .8 * gamma_true[cl]
-bs <- .8 * sqrt(1 - gamma_true^2)[cl]
-L_sl <- cbind(bg, matrix(0, J, K))
-for (k in 1:K) L_sl[cl == k, k + 1] <- bs[cl == k]
-S0 <- tcrossprod(L_sl) + diag(1 - rowSums(L_sl^2))  # HO population, SL form
-Sd <- S0
-Sd[3, 4] <- Sd[3, 4] + .25
-Sd[4, 3] <- Sd[4, 3] + .25                          # one residual pair
-set.seed(12)
-Yd <- scale(matrix(rnorm(1000 * J), 1000, J) %*% chol(Sd))
-```
-
-Step 1 looks almost clean -- both backbones still select `K = 3` under the
-primary cut, and the three factors still reproduce -- but the sensitivity
-cut now points one count higher on both backbones:
-
-```{r doublet-step1}
-sd_b <- sweep_at(Q0_ob, Yd)
-sd_l <- sweep_at(Q0_lp, Yd)
-t(sapply(list(BPC = sd_b, LPC = sd_l), cut_picks))
-round(c(BPC = reproduce_up(sd_b, 3), LPC = reproduce_up(sd_l, 3)), 3)
-```
-
-And step 2, run mechanically at `K = 3`, is now decisively wrong at *both*
-depths -- the bifactor is the only model on the menu that can reach the
-extra within-cluster covariance, so BIC buys it:
-
-```{r doublet-step2}
-round(rbind(BPC = step2(Yd, Q3), LPC = step2(Yd, Q3_lp)), 1)
-```
-
-A bifactor win of hundreds of BIC points, on data whose general structure
-is exactly the higher-order model the oblique fit represents. The
-manuscript's adversarial population shows this error *grows* with sample
-size; more data do not fix it, because the bifactor genuinely fits better
--- it is just not the right explanation.
-
-This example *happens* to leave a trace at the count level -- the
-sensitivity cut moved while the primary cut did not -- and that trace is
-worth following. But do not generalize it into a safeguard. Cut
-disagreement is not a local-dependence detector: it fires for any thin
-extra dimension, of which absorbed dependence is only one kind, and it
-stays silent whenever the extra covariance is too small to bend a gain
-curve. The manuscript's adversarial populations are precisely the harder
-case, in which the absorbed dependence sits at the *selected* count and
-every count-level indicator -- both cuts, the reproduction statistic, the
-convergence flags -- reads clean while step 2 still hands the win to the
-bifactor. Nothing in Step 1 is designed to catch that; what catches it is
-looking, which is why residual inspection belongs in the workflow
-unconditionally rather than as a response to a warning.
-
-Wherever the suspicion comes from, the cheapest place to look is the
-`(K+1)`-factor solution the sweep already retained -- no refitting
-required:
-
-```{r doublet-inspect}
-round(sd_b$fits[["4"]]$Lam[cl == 1, ], 2)   # cluster-1 rows at K = 4
-```
-
-The four-factor solution splits the first cluster: the residual pair
-(items 3 and 4) keeps the cluster's column nearly to itself with loadings
-around `.95`, while the cluster's other four items move onto the new
-column. Two items dominating a factor is a doublet signature, not a
-substantive dimension.
-
-The repair is to model the pair as what it is -- a residual edge -- and
-rerun *the same* comparison. Two requirements make this informative rather
-than decorative. It has to be a residual, not a factor: an extra two-item
-factor is a different model, and it is a *differently* different model in
-each arm, because the oblique arm would estimate that factor's
-correlations with the others while `bifactor = TRUE` forces the new column
-orthogonal. And it has to be applied identically to both competitors,
-which is what passing the same arguments through `step2()` guarantees:
-
-```{r doublet-model}
-Qe <- matrix(0L, J, J)
-Qe[3, 4] <- Qe[4, 3] <- 1L                 # exactly one free residual edge
-round(rbind(BPC = step2(Yd, Q3,    ld = TRUE, Qe = Qe, tolVal = 1e-3),
-            LPC = step2(Yd, Q3_lp, ld = TRUE, Qe = Qe, tolVal = 1e-3)), 1)
-```
-
-With the pair modeled, the oblique model wins at both depths (`diff` about
-`+82` and `+80`) -- a swing of several hundred BIC points from the
-contaminated comparison, landing near the margins the *uncontaminated*
-higher-order data produced in Step 2 (`+103` and `+114`). The entire
-bifactor preference was the absorbed residual pair. (The loosened
-`tolVal` is bookkeeping: the LD branch's tail converges slowly on these
-data, and at the default tolerance the BIC values are the same to a tenth
-of a point but the fits report unmet convergence.)
-
-Read this as a sensitivity analysis, not a test. It answers one narrowly
-posed question -- does the bifactor preference survive when this specific
-dependence is modeled in both arms? -- and a `Qe` aimed at the wrong pair
-answers nothing. The moral is the manuscript's, and it is unconditional: a
-step-2 bifactor win is credible only after local dependence has been
-looked for, whether or not anything at the count level asked you to look.
-
-### The process in six steps, and its limits
-
-The process this vignette has just walked, in the order the manuscript
-prescribes:
-
-1. **Sweep**: anchored oblique sweeps from both backbones (`pefa()`
-   without a general column); ELBO gain at the 20% cut primary, the 10%
-   cut as sensitivity. Trust interior selections; treat boundaries as
-   instructions to extend the window.
-2. **Check structure**: adjacent-count reproduction on the sweep's own
-   retained fits (matched congruence of the selected solution inside its
-   neighbor).
-3. **Deliver**: a stable structure, a stable core with count uncertainty,
-   or no stable structure (non-delivery) -- reported as such, with step 2
-   running at both counts when the count is uncertain and not at all
-   after non-delivery.
-4. **Compare**: at every delivered count, anchored oblique-`K` versus
-   anchored bifactor-`(K+1)` by `BIC`, at both depths.
-5. **Diagnose**: withhold the conclusion if the comparison reverses across
-   depth or count, or if both margins are thin; treat the ELBO as a
-   sensitivity. Before accepting *any* bifactor win, look for local
-   dependence -- inspect the adjacent solution for doublet signatures and
-   refit both competitors with the suspect residual edges freed
-   (`ld = TRUE`, same `Qe` in both arms). A clean count-level picture is
-   not evidence that there is nothing to find.
-6. **Interpret**: within the winner, the SL mean-CV check (under `.1`:
-   collapse to HO; otherwise keep the bifactor) or the triad check of
-   $\hat\Phi$ (coherent: a second-order description is available;
-   otherwise correlated factors).
-
-Every population in this vignette ends at the right structure: the
-heterogeneous bifactor of Section 2 goes sweep -> `K = 3` -> delivered ->
-bifactor wins at both depths -> CV `.39` -> **bifactor**; the higher-order
-data go sweep -> `K = 3` -> delivered -> oblique wins at both depths ->
-coherent triads (`.76/.72/.62`) -> **higher-order**; and the contaminated
-variant is caught at the diagnosis step rather than swallowed at the
-comparison step -- because step 5 was actually carried out, not because
-step 2 protested.
-
-The honest limits, from a 3-populations x 3-sample-sizes x 3-seeds
-simulation with this design (18 items, 3 clusters):
-
-| population | N = 500 | N = 1000 | N = 3000 |
-|---|---|---|---|
-| bifactor, heterogeneous loadings | bifactor wins 3/3 | bifactor 3/3 | bifactor 3/3 (margin grows) |
-| bifactor, near-homogeneous loadings | oblique 3/3 | oblique 3/3 | bifactor 3/3 |
-| higher-order | oblique 3/3 | oblique 3/3 | oblique 3/3 (margin flat) |
-
-The middle row is Fact 2's degenerate corner: when general and group
-loadings barely vary within clusters, a true bifactor is nearly empirically
-equivalent to correlated factors, and step 2 only resolves it with a large
-sample. Two mitigations: a *small* `|diff|` in step 2 is itself the warning
-sign (the decisive wins above come with margins that grow with `N`, the
-redundant HO comparison stays flat at roughly the parameter penalty); and
-in that regime the parsimonious miss is cheap, because the two descriptions
-of the data are nearly interchangeable by construction. What the process
-never does is what Sections 3 and 5 warned against: asking a bifactor
-*sweep* to make any of these calls.
-
-## 7. Caveats
-
-The SL check is descriptive, not a hypothesis test: there is no p-value
-that certifies "this bifactor is really an HO model," and the
-`mean CV < .1` rule is a working convention, not a distributional result.
-Sampling error alone makes the CV strictly positive even when the data are
-generated exactly under an HO model, as they are in Section 4 -- and the
-loading *ratio* it is built on inherits the softness of the
-general-versus-group split (Fact 2), which is why that section runs at a
-generous `N`; at a few hundred observations the same population can land
-above the line on noise alone, and an occasional item whose posterior
-settles on the wrong group factor will inflate the pooled number further.
-So read the mean CV together with the per-cluster (or per-item) ratios
-rather than as a decision on its own. The same softness bounds step 2 of
-Section 6, as its table shows, and the gain cuts, the `.85` reproduction
-threshold, and the `.1` CV line are all working conventions of the same
-kind: the accompanying manuscript calibrates them, but none is a
-distributional guarantee. The local-dependence check of Section 6 is
-softer still -- an exploratory sensitivity whose reach is limited to the
-residual edges you thought to free, with no accompanying claim that a
-bifactor win surviving it is therefore dependence-free. And the
-diagnostics run both ways -- a large mean CV, when it reflects genuinely
-non-constant ratios rather than noise or an isolated item, is informative
-in its own right: it means the bifactor
-solution is richer than any higher-order representation of it, and
-collapsing it to a single second-order factor per cluster would discard
-real structure.
-
-## 8. References
-
-* Schmid, J., & Leiman, J. M. (1957). The development of hierarchical
-  factor solutions. *Psychometrika*, 22(1), 53-61.
+* Schmid, J., & Leiman, J. M. (1957). The development of hierarchical factor
+  solutions. *Psychometrika*, 22(1), 53--61.
 * Yung, Y.-F., Thissen, D., & McLeod, L. D. (1999). On the relationship
   between the higher-order factor model and the hierarchical factor model.
-  *Psychometrika*, 64(2), 113-128.
-* Zhang, Y., & Chen, J. (2024). Accommodating and extending various models
-  for special effects within the generalized partially confirmatory factor
-  analysis framework. *Applied Psychological Measurement*, 48(4-5),
-  208-229. \doi{10.1177/01466216241261704}
-* Chen, J. (2021). A generalized partially confirmatory factor analysis
-  framework with mixed Bayesian Lasso methods. *Multivariate Behavioral
-  Research*, 57(6), 879-894. \doi{10.1080/00273171.2021.1925520}
-* Jin, Y., & Chen, J. (2025). Regularized variational approximation for
-  partially confirmatory factor analysis. *Structural Equation Modeling*,
-  32(3), 437-449. \doi{10.1080/10705511.2024.2432612}
-* Chen, J., & Jin, Y. (2026a). Recovering latent structures after
-  variational Bayesian variable selection: Fit assessment and
-  factor-number selection in partially exploratory factor analysis.
-  *arXiv preprint* arXiv:2607.07159. -- the sweep, gain-cut, and
-  reproduction machinery of Step 1.
+  *Psychometrika*, 64(2), 113--128.
+* Zhang, Y., & Chen, J. (2024). Accommodating and extending various models for
+  special effects within the generalized partially confirmatory factor
+  analysis framework. *Applied Psychological Measurement*, 48(4--5),
+  208--229. \doi{10.1177/01466216241261704}
+* Chen, J., & Jin, Y. (2026a). Recovering latent structures after variational
+  Bayesian variable selection: Fit assessment and factor-number selection in
+  partially exploratory factor analysis. *arXiv preprint* arXiv:2607.07159.
 * Chen, J., & Jin, Y. (2026b). *When factor count is uncertain: Stable
-  structure before the bifactor decision.* Manuscript in preparation. --
-  the two-step process of Section 6, its simulation-based operating
-  characteristics, the `.85` reproduction convention, and the
-  absorbed-dependence hazard it warns about.
+  structure before the bifactor decision.* Manuscript in preparation.

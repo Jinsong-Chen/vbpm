@@ -46,13 +46,15 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
   loadings per group factor), and testlet/special effect sizes
   (Zhang & Chen, 2024, Eq. 16).
 - **`pefa()`** / **`select_K_elbow()`** — sweep the number of factors and
-  select it with a scale-free gain rule. The result carries three tables,
+  select it with a relative gain rule on one fixed criterion path. The result
+  carries three tables,
   one per index: `$sweep` (per candidate), `$transitions` (per adjacent pair —
   the marginal gains plus adjacent-count **stability** diagnostics, showing how
   much of the `K`-factor solution survives inside the `K+1`-factor one), and
   `$selection` (per rule, so a primary cut and any sensitivity cuts are
-  evaluated in one call via `cuts`). With `summary()`, `plot()`,
-  `selected_fit()`, and `transition_detail()`.
+  evaluated in one call via `cuts`). Adjacent stability is summarized by
+  congruence, ARI, RMSD, and the largest loading in the unmatched column.
+  With `summary()`, `plot()`, and `selected_fit()`.
 - **`sim_fa()`** and **`sim_lvm()`** — two complementary data generators.
   `sim_fa()` is driven by the loading *pattern* (items per factor, alternating
   cross-loadings, minor factors) and can generate **higher-order/testlet**
@@ -192,7 +194,7 @@ round(fit$B, 2)                      # which covariates predict which factors
 
 ## Known limitations
 
-As of 0.7.1:
+As of 0.8.1:
 
 - **Response types.** The estimators model **continuous Gaussian responses**,
   and in-loop missing-data support covers that case in both `vbfa()` and
@@ -201,15 +203,13 @@ As of 0.7.1:
   and augmenting latent responses, which is a modelling extension rather than
   a feature. Simulating them is supported (`cati`/`noc` in `sim_fa()`,
   `ilvl` in `sim_lvm()`); estimating from them is not.
-- **Bifactor factor-number sweeps are weakly identified.** A `pefa()` sweep
-  over bifactor candidates should not be used to decide how many *group*
-  factors there are: an omitted group factor is absorbed almost exactly by the
-  unspecified entries of the remaining columns, so candidates are
-  covariance-equivalent and the selection lands on the lower window boundary
-  regardless of the truth. `print()` flags this case, `?pefa` explains it, and
-  the `bifactor` vignette demonstrates it together with the two-step route that
-  does work (an ordinary oblique sweep for the factor count, then an anchored
-  model comparison by BIC).
+- **Bifactor factor-number sweeps are weakly identified.** The retained
+  bifactor sweep is a research extension and should not be relied on to decide
+  how many *group* factors there are. Flexible unspecified loadings can absorb
+  omitted group structure and bias the result toward the lower end of the
+  requested window. Use an ordinary oblique sweep for the first-order count,
+  then compare matched anchored oblique and bifactor models by BIC; the
+  `bifactor` vignette illustrates that two-step route.
 - **No DIF paths in `vbmimic()`.** Covariates predict the *factors*
   (`Q_B`, i.e. impact); there are no direct covariate-to-item paths, so the
   model cannot currently express or detect differential item functioning.

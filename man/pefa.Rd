@@ -2,176 +2,110 @@
 % Please edit documentation in R/pefa.R
 \name{pefa}
 \alias{pefa}
-\title{Partially exploratory factor analysis with gain-rule factor selection}
+\title{Partially exploratory factor analysis with gain-rule selection}
 \usage{
 pefa(
   Q0,
   Y,
   Kmin,
   Kmax,
-  delta = NULL,
+  cuts = c(primary = 10),
   sustain = 2,
-  fit_cut = FALSE,
-  cutoffs = c(RMSEA = 0.06, SRMR = 0.1, CFI = 0.9, TLI = 0.9),
-  max_it = 10000,
-  tau = 0.5,
-  orthogonal = FALSE,
   bifactor = FALSE,
   general = 1,
+  max_it = 10000,
+  tau = 0.5,
   verbose = TRUE,
-  ...,
-  cuts = c(primary = 10),
-  keep_fits = c("all", "selected", "none")
+  ...
 )
 }
 \arguments{
-\item{Q0}{The \verb{J x K0} backbone design matrix (\code{1}/\code{0}/\code{-1} as in \code{\link[=vbfa]{vbfa()}});
-\code{K0 = ncol(Q0)} specified factors.}
+\item{Q0}{A \code{J} by \code{K0} backbone matrix with entries \code{1}, \code{0}, or \code{-1}.}
 
-\item{Y}{The \verb{N x J} data matrix.}
+\item{Y}{An \code{N} by \code{J} data matrix.}
 
-\item{Kmin, Kmax}{Inclusive factor-number window; \code{Kmin >= K0}.}
+\item{Kmin, Kmax}{Inclusive factor-count window, with \code{Kmin >= ncol(Q0)}.}
 
-\item{delta}{\strong{Deprecated}; use \code{cuts}. A scalar maps to
-\code{cuts = c(primary = delta)}. Supplying both is an error.}
+\item{cuts}{A named numeric vector of thresholds in \verb{[0, 100]}. Names must
+be unique after trimming and exactly one must be \code{primary}.}
 
-\item{sustain}{Consecutive sub-threshold steps required to call the elbow.}
+\item{sustain}{Number of consecutive sub-threshold gains required.}
 
-\item{fit_cut}{Logical; if \code{TRUE}, gate selection on absolute fit passing
-\code{cutoffs}. Default \code{FALSE}.}
+\item{bifactor}{Logical; fit the labelled bifactor extension. In this mode
+\code{Kmin} and \code{Kmax} count group factors.}
 
-\item{cutoffs}{Named absolute-fit cutoffs used when \code{fit_cut = TRUE}.}
+\item{general}{General-column design passed to \code{\link[=vbfa]{vbfa()}} in bifactor mode.}
 
-\item{max_it, tau}{Passed to \code{\link[=vbfa]{vbfa()}} / \code{\link[=fit_stats]{fit_stats()}} (\code{max_it} is per stage).}
+\item{max_it}{Maximum iterations per \code{\link[=vbfa]{vbfa()}} path stage.}
 
-\item{orthogonal}{Passed to \code{\link[=vbfa]{vbfa()}} and \code{\link[=fit_stats]{fit_stats()}}.}
+\item{tau}{Hard-selection threshold passed to \code{\link[=fit_stats]{fit_stats()}}.}
 
-\item{bifactor}{Logical. If \code{TRUE}, sweep \strong{bifactor} candidates with
-\code{Q0} supplying only the group backbone: every candidate gets a general
-column internally (see \code{general}), and \code{Kmin}/\code{Kmax} and the reported
-\code{K} count \strong{group factors} -- directly comparable to an oblique sweep
-over the same window. The sweep table gains a \code{K_total} column
-(\code{K + 1}). Implies orthogonal factors; \code{bifactor = TRUE} overrides
-\code{orthogonal = FALSE} (with a message). The identification warning below
-applies with full force.}
+\item{verbose}{Logical; print per-candidate progress and the primary result.}
 
-\item{general}{Design of the general column when \code{bifactor = TRUE};
-passed to \code{\link[=vbfa]{vbfa()}} (scalar or length-\code{J} vector of \code{1}/\code{0}/\code{-1},
-default \code{1}).}
-
-\item{verbose}{Logical; print per-model progress.}
-
-\item{...}{Further arguments passed to \code{\link[=vbfa]{vbfa()}} (e.g. \code{v0}, \code{Qe},
-\code{ld_control}, \code{tolVal}).}
-
-\item{cuts}{Named numeric vector of gain thresholds, as percentages of the
-largest usable marginal gain. Exactly one entry must be named \code{primary}
-(it drives the returned \code{selected_K}); any further named entries are
-evaluated as sensitivity rules and appear in \verb{$selection}. Default
-\code{c(primary = 10)}. The manuscript workflow uses
-\code{cuts = c(primary = 20, sensitivity = 10)}; that 20\% figure is calibrated
-within its own populations and is therefore \emph{not} the package default.}
-
-\item{keep_fits}{Which candidate fits to retain in \verb{$fits}: \code{"all"}
-(default), \code{"selected"}, or \code{"none"}. \code{selected_fit} is returned in every
-case; the candidate slots exist for \emph{inspection}, which summary columns
-cannot replace.}
+\item{...}{Named estimation controls passed to \code{\link[=vbfa]{vbfa()}}. PEFA controls its
+own model class: \code{ld}, \code{Qe}, \code{ld_control}, and \code{orthogonal} are rejected.}
 }
 \value{
-An object of class \code{c("pefa", "vbpm_sweep")}. Everything a sweep
-produces is indexed by one of three things, and each has its own table:
+An object of class \code{pefa} with these three exact data tables:
 \describe{
-\item{\verb{$sweep}}{One row per candidate: \code{ELBO}, \code{Objective}, \code{AIC},
-\code{BIC}, the fit indices, \code{t}, \code{iter}, \code{flag}, \code{secs}, \code{converged},
-\code{pass_fit}, \code{eligible}. Properties of a single fitted model.}
-\item{\verb{$transitions}}{One row per \strong{adjacent pair} (\code{W - 1} rows):
-the marginal gains (\code{Objective_gain}, \code{ELBO_gain}, \code{BIC_gain},
-oriented so larger is better) together with the adjacent-count
-stability indexes \code{phi_min}, \code{phi_mean}, \code{n_phi90}, \code{ari}, \code{rmsd},
-\code{surplus_max}, the four assignment-coverage counts, and
-\code{stability_status}. Gains live here, not in \verb{$sweep}: they are
-properties of a step, not of a candidate.}
-\item{\verb{$selection}}{One row per rule -- criterion x form x cut x
-eligibility scope -- with the normalizer \code{gain_max}, the absolute
-\code{threshold}, \code{selected_K}, and both boundary readouts.}
+\item{\verb{$sweep}}{Candidate properties: \code{K}, \code{ELBO}, \code{AIC}, \code{BIC},
+\code{RMSEA}, \code{SRMR}, \code{CFI}, \code{TLI}, \code{t}, \code{iter}, \code{secs}, \code{converged}.}
+\item{\verb{$transitions}}{Adjacent-edge gains and descriptive stability:
+\code{K_from}, \code{K_to}, \code{ELBO_gain}, \code{BIC_gain}, \code{phi_min}, \code{phi_mean},
+\code{ari}, \code{rmsd}, \code{max_loading}. Stability is unavailable for bifactor
+endpoints, failed endpoints, and edges where either solution
+contains a zero-norm loading column.}
+\item{\verb{$selection}}{Rule results: \code{criterion}, \code{form}, \code{cut_name},
+\code{cut}, \code{gain_max}, \code{threshold}, \code{selected_K}, \code{boundary}.}
 }
-Plus \code{selected_K}, \code{selected_fit}, \code{fit_stats}, \code{Q_selected}, \verb{$fits}
-(per \code{keep_fits}), \verb{$cuts}, \code{window_boundary}, \code{support_boundary}, and
-the normalized \code{orthogonal}/\code{bifactor}/\code{ld} settings. \verb{$boundary} and
-\verb{$delta} remain as deprecated aliases for the 0.8.x line.
-
-No percentage-of-largest-gain column is stored: the normalizer depends on
-the eligibility scope, so percentages are computed for display from
-\verb{$transitions} and the matching \verb{$selection} row.
-
-Use \code{\link[=summary.pefa]{summary.pefa()}} for the aggregate view, \code{\link[=selected_fit]{selected_fit()}} for the
-selected model, and \code{\link[=transition_detail]{transition_detail()}} for the per-column material
-behind one transition row.
+Candidate fits are always retained in \verb{$fits}. The remaining fields are
+\code{call}, \code{selected_K}, \code{window}, \code{cuts}, \code{sustain}, \code{bifactor}, \code{general},
+and \code{tau}.
 }
 \description{
-Fits \code{\link[=vbfa]{vbfa()}} over a window of factor numbers, holding a fixed partially
-confirmatory backbone \code{Q0} and padding each model with fully exploratory
-columns, then selects the number of factors with the scale-free gain rule
-(\code{\link[=select_K_elbow]{select_K_elbow()}}). Raw ELBO and BIC optima are reported for reference.
+Fits \code{\link[=vbfa]{vbfa()}} over a consecutive factor-count window while holding the
+partially specified backbone \code{Q0} fixed and adding exploratory columns. It
+reports raw and gain-rule selections for ELBO and BIC. AIC and absolute fit
+indices remain descriptive trajectories and do not gate selection.
 }
-\section{Orthogonal (bifactor) sweeps are weakly identified}{
+\details{
+Ordinary \code{pefa()} candidates are oblique and have diagonal residuals. The
+optional bifactor sweep is retained as a research extension: its reported
+\code{K} is the number of group factors and \code{\link[=vbfa]{vbfa()}} adds one general factor.
+Bifactor sweeps are not presented as a reliable way to discover the number
+of group factors.
+}
+\section{Complete paths and boundaries}{
 
-With \code{bifactor = TRUE} (or, equivalently, \code{orthogonal = TRUE} and a
-hand-built general column in the backbone), do \strong{not}
-expect a sweep to discover the number of group factors. An omitted
-orthogonal group factor contributes a rank-one within-cluster covariance
-block that the unspecified (\code{-1}) entries of the \emph{remaining} columns can
-reproduce almost exactly, so the smaller candidate is covariance-equivalent
-to the truth: fit indices sit at their ceilings for every candidate, the
-objective typically \emph{falls} with \code{K}, and the selection lands on the lower
-window boundary regardless of the true \code{K}. In simulations from true
-bifactor and true higher-order populations this failure is systematic (it
-is an identification property, not sampling noise), and the truth-sized
-candidate inside such a sweep is itself rotationally scrambled -- its
-loadings must not be interpreted. Encoding every loading that is \emph{known}
-to be absent as a fixed \code{0} rather than \code{-1} restores an interior
-selection for the factor count, but the sweep's fits remain
-uninterpretable; all interpretation belongs to an anchored refit.
+Selection requires every candidate on a criterion path to have converged
+and to have a finite value. A failed path produces \code{NA} raw and gain
+selections; candidates on opposite sides of a gap are never joined. A
+lower or upper boundary result calls for a complete rerun over a wider
+window. If the lower boundary equals the backbone size, reduce or revise
+the backbone instead of requesting fewer factors.
+}
 
-The decision route that works runs through the \emph{ordinary} sweep instead:
-(1) sweep \strong{without} a general column (\code{orthogonal = FALSE}) for the
-first-order factor count \code{K} -- for that question an omitted factor
-produces honest misfit, and interior selections are trustworthy even when
-the data are truly bifactor or higher-order (the general factor is then
-absorbed into the factor correlations, which is harmless at this step);
-(2) at the selected \code{K}, fit the anchored oblique \code{K}-factor model and
-the anchored orthogonal bifactor with one added, fully specified general
-column, and compare their \code{BIC} from \code{\link[=fit_stats]{fit_stats()}} -- compare \code{BIC}, not
-\code{ELBO}, because the two designs carry spike-and-slab prior mass on
-different numbers of entries; (3) if the bifactor wins, check
-Schmid-Leiman proportionality to decide between a genuine bifactor and a
-higher-order collapse; if the oblique model wins, a higher-order layer
-may still be read from the factor correlations. The \code{bifactor} vignette
-works through the failure, the route, and its power limits (a true
-bifactor with near-homogeneous loadings needs a large sample at step 2).
+\section{Comparability}{
+
+Positive affine transformations of one fixed criterion path leave the gain
+rule unchanged. This does not make sweeps with different preprocessing,
+priors, hyperparameters, \code{tau}, or optimization settings comparable.
 }
 
 \examples{
 \donttest{
-## three-factor data; the backbone Q0 anchors only the first two factors,
-## and the sweep asks how many factors the data actually support
 sim <- sim_fa(N = 400, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
-J   <- ncol(sim$dat)
-Q0  <- matrix(-1L, J, 2)
-for (k in 1:2) { a <- which(rep(1:3, each = 6) == k)[1:2]
-                 Q0[a, ] <- 0L; Q0[a, k] <- 1L }
-
-r <- pefa(Q0, sim$dat, Kmin = 2, Kmax = 4, verbose = FALSE)
-summary(r)            # objective, objective-gain, BIC and BIC-gain selections
-r$sweep               # the full sweep table (ELBO, gains, fit, timing)
-selected_fit(r)$flag  # the refitted selected model is returned
-
-## bifactor sweep: Q0 is the GROUP backbone and the window counts GROUP
-## factors (the general column is added internally to every candidate).
-## Read the identification warning above before interpreting one.
-rb <- pefa(Q0, sim$dat, Kmin = 2, Kmax = 4, bifactor = TRUE, v0 = .001,
-           verbose = FALSE)
-rb$sweep[, c("K", "K_total", "BIC")]
+Q0 <- matrix(-1L, ncol(sim$dat), 2)
+groups <- rep(1:3, each = 6)
+for (k in 1:2) {
+  anchors <- which(groups == k)[1:2]
+  Q0[anchors, ] <- 0L
+  Q0[anchors, k] <- 1L
+}
+result <- pefa(Q0, sim$dat, 2, 4, verbose = FALSE)
+result$sweep
+result$selection
+selected_fit(result)
 }
 
 }
@@ -182,8 +116,8 @@ partially exploratory factor analysis. \emph{arXiv preprint} arXiv:2607.07159.
 
 Chen, J. (2023). Fully and partially exploratory factor analysis with
 bi-level Bayesian regularization. \emph{Behavior Research Methods}, 55(4),
-2125-2142. \doi{10.3758/s13428-022-01884-7}
+2125--2142. \doi{10.3758/s13428-022-01884-7}
 }
 \seealso{
-\code{\link[=vbfa]{vbfa()}}, \code{\link[=select_K_elbow]{select_K_elbow()}}
+\code{\link[=vbfa]{vbfa()}}, \code{\link[=fit_stats]{fit_stats()}}, \code{\link[=select_K_elbow]{select_K_elbow()}}
 }

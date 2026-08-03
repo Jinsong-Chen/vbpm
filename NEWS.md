@@ -1,3 +1,53 @@
+# vbpm 0.8.1
+
+`pefa()` is reduced to a compact, in-memory factor-number sweep. This is a
+breaking cleanup of the 0.8.0 interface; the 0.8.0 release history below is
+left unchanged.
+
+* The paper-defined workflow now fits only ordinary oblique candidates with
+  diagonal residuals. The research-extension `bifactor = TRUE` mode remains,
+  with `K` consistently denoting the number of group factors. Standalone
+  orthogonal and local-dependence models remain available through `vbfa()` but
+  are no longer PEFA sweep modes.
+* ELBO and BIC each receive raw and gain selections. AIC remains in `$sweep`
+  as a descriptive fit statistic but is not automated as a gain rule.
+  `select_K_elbow()` and `pefa()` now use the same full sustained-drop scan: a
+  stop requires all `sustain` following gains, including near the right edge.
+* RMSEA, SRMR, CFI, and TLI are descriptive trajectories, not eligibility
+  gates. A selection requires one complete, converged, finite criterion path;
+  failed paths are not bridged or split into later components.
+* The result has three compact tables: candidate-level `$sweep`, edge-level
+  `$transitions`, and rule-level `$selection`. Raw adjacent ELBO and BIC gains
+  are stored with their transitions, while each rule records its own gain
+  normalizer and threshold.
+* Every candidate fit is retained in `$fits`, and `selected_fit()` retrieves
+  the primary selected fit. Removed are `keep_fits`, duplicate selected-fit
+  fields, compatibility aliases and schema fields, the secondary
+  `vbpm_sweep` class, and `transition_detail()`.
+* Removed without deprecated aliases are the 0.8.0 `delta`, `fit_cut`,
+  `cutoffs`, `orthogonal`, and `keep_fits` arguments. Named `cuts` remains the
+  only multi-rule interface; PEFA rejects local-dependence and orthogonal mode
+  controls passed through `...`.
+* Adjacent-count stability is deliberately small and descriptive. Consecutive
+  oblique solutions are aligned by a simple best-unused-column convention and
+  report `phi_min`, `phi_mean`, `ari`, `rmsd`, and the unmatched column's
+  `max_loading`. There is no assignment search, tie policy, fixed stability
+  cutoff, status vocabulary, or public matching detail.
+* `pefa()` has no persistence, checkpoint, resume, interrupt, or overlap-reuse
+  subsystem. A boundary selection asks for a complete rerun with a better
+  bracketed window.
+* PEFA fit statistics now use the nominal hard-selected parameter count
+  consistently. Hard-selected CFI returns one when its comparison denominator
+  is zero, matching the paper's stated convention. **This changes reported
+  numbers, not just interfaces**: on identical data, `$sweep` AIC/BIC (and
+  potentially a BIC selection) can differ from a 0.8.0 run that silently used
+  the optional Jacobian rank adjustment, and the new column alignment changes
+  every stability column relative to 0.8.0's matcher.
+* The PEFA vignette now follows the paper's compact workflow and labels
+  adjacent-count stability as a package extension. The bifactor vignette is
+  reduced to definitions, direct anchored fitting, `special_effects()`, and a
+  two-step first-order-count then matched BIC comparison.
+
 # vbpm 0.8.0
 
 `pefa()` is reorganized around what each quantity is indexed by, and gains

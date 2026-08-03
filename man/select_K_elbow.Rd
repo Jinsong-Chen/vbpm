@@ -2,62 +2,50 @@
 % Please edit documentation in R/pefa.R
 \name{select_K_elbow}
 \alias{select_K_elbow}
-\title{Scale-free gain rule for choosing the number of factors}
+\title{Gain rule for choosing the number of factors}
 \usage{
 select_K_elbow(K, score, delta = 10, sustain = 2)
 }
 \arguments{
-\item{K}{Candidate numbers of factors (any order).}
+\item{K}{Consecutive candidate factor counts (any order).}
 
-\item{score}{A criterion for which larger is better. For an information
-criterion (smaller is better), pass \code{score = -IC}.}
+\item{score}{A finite criterion for which larger is better. Pass the negative
+of an information criterion for which smaller is better.}
 
-\item{delta}{Threshold as a percentage (0-100) of the largest marginal gain
-(default \code{10}).}
+\item{delta}{Threshold as a percentage of the largest marginal gain.}
 
-\item{sustain}{Consecutive sub-threshold steps required to call the elbow
-(default \code{2}).}
+\item{sustain}{Number of consecutive sub-threshold gains required.}
 }
 \value{
-The selected number of factors (a scalar from \code{K}).
+One factor count from \code{K}.
 }
 \description{
-Selects a number of factors from a criterion curve by thresholding the
-marginal gain of each added factor against the largest gain in the candidate
-range. Because the threshold is a fraction of the maximum gain, the rule is
-dimensionless and invariant to sample size, item count, and window.
+Selects a factor count by comparing each marginal gain with a percentage of
+the largest gain on the same fixed criterion path. The rule is invariant to
+positive affine transformations of that path; candidates must otherwise use
+the same data, priors, tuning, and optimization setup.
 }
 \details{
-A sustained-drop guard prevents a transient one-step dip from firing the
-elbow prematurely: a step counts as the elbow only if the next
-\code{sustain - 1} steps are also below threshold (or it is the last step).
-\code{sustain = 1} reproduces a first-crossing rule.
+A candidate is selected only when all \code{sustain} gains following it are
+strictly below the threshold. The complete look-ahead is required: a short
+suffix at the right edge does not qualify.
 }
 \examples{
-## ELBOs from a window sweep over K = 2:6 -- large gains up to K = 4,
-## then only dust. The rule fires at the elbow:
 elbo <- c(-5400, -5100, -4900, -4895, -4892)
-select_K_elbow(K = 2:6, score = elbo)          # 4
+select_K_elbow(2:6, elbo)
 
-## for an information criterion (smaller is better), pass its negative
 bic <- c(10900, 10500, 10310, 10395, 10480)
-select_K_elbow(K = 2:6, score = -bic)          # 4
+select_K_elbow(2:6, -bic)
 
-## sustain = 1 is a plain first-crossing rule; the default sustain = 2
-## refuses to fire on a single transient dip
-jag <- c(-5400, -5100, -5095, -4900, -4897, -4895)
-select_K_elbow(K = 2:7, score = jag, sustain = 1)  # 3 (fooled by the dip)
-select_K_elbow(K = 2:7, score = jag, sustain = 2)  # 5 (rides through it)
+jagged <- c(-5400, -5100, -5095, -4900, -4897, -4895)
+select_K_elbow(2:7, jagged, sustain = 1)
+select_K_elbow(2:7, jagged, sustain = 2)
 
 }
 \references{
 Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
 Bayesian variable selection: Fit assessment and factor-number selection in
 partially exploratory factor analysis. \emph{arXiv preprint} arXiv:2607.07159.
-
-Chen, J. (2023). Fully and partially exploratory factor analysis with
-bi-level Bayesian regularization. \emph{Behavior Research Methods}, 55(4),
-2125-2142. \doi{10.3758/s13428-022-01884-7}
 }
 \seealso{
 \code{\link[=pefa]{pefa()}}

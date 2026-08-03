@@ -178,31 +178,36 @@ test_that("pefa selects a factor number within the window", {
   expect_true(r$selected_K %in% 2:4)
   expect_true(all(r$sweep$converged))
   expect_s3_class(r, "pefa")
-  expect_s3_class(r, "vbpm_sweep")
+  expect_false(inherits(r, "vbpm_sweep"))
+  expect_named(r, c("call", "selected_K", "fits", "sweep", "transitions",
+                    "selection", "window", "cuts", "sustain", "bifactor",
+                    "general", "tau"))
   expect_identical(r$window$K, 2:4)
-  ## gains are edge quantities: they live in $transitions, not $sweep (0.8.0)
+  expect_named(r$sweep, c("K", "ELBO", "AIC", "BIC", "RMSEA", "SRMR",
+                          "CFI", "TLI", "t", "iter", "secs", "converged"))
+  ## Gains are edge quantities: they live in $transitions, not $sweep.
   expect_false(any(grepl("_gain", names(r$sweep))))
-  expect_true(all(c("ELBO_gain", "BIC_gain", "phi_min", "ari",
-                    "stability_status") %in% names(r$transitions)))
+  expect_named(r$transitions,
+               c("K_from", "K_to", "ELBO_gain", "BIC_gain", "phi_min",
+                 "phi_mean", "ari", "rmsd", "max_loading"))
   expect_identical(nrow(r$transitions), nrow(r$sweep) - 1L)
   expect_s3_class(selected_fit(r), "vbpm_fit")
 
   s <- summary(r)
   expect_s3_class(s, "summary.pefa")
-  ## $selection is a long-form rule table (0.8.0)
-  expect_true(all(c("criterion", "form", "cut", "eligibility_scope",
-                    "gain_max", "threshold", "selected_K", "window_boundary",
-                    "support_boundary") %in% names(s$selection)))
-  prim <- with(s$selection, criterion == "objective" & form == "gain" &
-                 cut == "primary" & eligibility_scope == "converged+fit")
+  expect_named(s$selection,
+               c("criterion", "form", "cut_name", "cut", "gain_max",
+                 "threshold", "selected_K", "boundary"))
+  prim <- with(s$selection, criterion == "elbo" & form == "gain" &
+                 cut_name == "primary")
   expect_identical(s$selection$selected_K[prim], r$selected_K)
   expect_identical(s$cuts, c(primary = 10))
-  expect_identical(s$delta, 10)                      # deprecated alias
   expect_identical(s$sweep, r$sweep)
-  expect_null(s$selected_fit)                        # summary carries no fits
-  expect_true(s$window_boundary %in% c("lower", "interior", "upper", "none"))
+  expect_null(s$fits)                               # summary carries no fits
+  expect_true(s$selection$boundary[prim] %in%
+                c("lower", "interior", "upper", "single", "none"))
   expect_output(print(r), "PEFA sweep")
-  expect_output(print(s), "primary cut = 10%")
+  expect_output(print(s), "ELBO gain \\[primary = 10%\\]")
 })
 
 test_that("fits carry the vbpm_fit class; print and coef dispatch", {
@@ -286,18 +291,21 @@ test_that("bifactor mode validates general and rejects a general column in Q", {
   expect_true(all(f$Lam[1:4, 1] == 0))
 })
 
-test_that("pefa bifactor sweep counts group factors and carries K_total", {
+test_that("pefa bifactor sweep counts group factors without storing K_total", {
   d  <- make_dat()
   Q0 <- d$Q[, 1:2, drop = FALSE]
   r  <- pefa(Q0, d$Y, Kmin = 2, Kmax = 3, bifactor = TRUE, v0 = .001,
              max_it = 500, verbose = FALSE)
   expect_true(isTRUE(r$bifactor))
   expect_identical(r$sweep$K, 2:3)
-  expect_identical(r$sweep$K_total, 3:4)
+  expect_false("K_total" %in% names(r$sweep))
   expect_true(all(vapply(r$fits, function(f) isTRUE(f$bifactor), logical(1))))
-  ## selected fit's Q has the general column prepended
-  expect_identical(ncol(selected_fit(r)$Q), r$selected_K + 1L)
-  expect_output(print(r), "group factors [(][+] 1 general[)]")
+  expect_identical(unname(vapply(r$fits, function(f) ncol(f$Q), integer(1))),
+                   3:4)
+  expect_true(all(is.na(r$transitions[c(
+    "phi_min", "phi_mean", "ari", "rmsd", "max_loading"
+  )])))
+  expect_output(print(r), "group factors [(][+] 1 general")
   expect_output(print(summary(r)), "K_total")
 })
 
@@ -322,9 +330,12 @@ test_that("the fit object stores each quantity exactly once", {
     dupes <- apply(pairs, 2, function(ij) identical(big[[ij[1]]], big[[ij[2]]]))
     expect_false(any(dupes))
   }
-  ## pefa keeps the selected fit under one name only
+  ## pefa keeps all candidate fits and stores no duplicate selected fit
   r <- pefa(d$Q[, 1:2, drop = FALSE], d$Y, Kmin = 2, Kmax = 3, v0 = .001,
             max_it = 500, verbose = FALSE)
-  expect_null(r$fit)
-  expect_false(is.null(r$selected_fit))
+  expect_null(r[["fit", exact = TRUE]])
+  expect_null(r[["selected_fit", exact = TRUE]])
+  expect_true(all(vapply(r$fits, inherits, logical(1), what = "vbpm_fit")))
+  if (!is.na(r$selected_K))
+    expect_identical(selected_fit(r), r$fits[[as.character(r$selected_K)]])
 })
