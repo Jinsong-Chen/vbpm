@@ -2,18 +2,12 @@
 % Please edit documentation in R/pefa.R
 \name{pefa-methods}
 \alias{pefa-methods}
-\alias{selected_fit}
-\alias{selected_fit.pefa}
 \alias{print.pefa}
 \alias{summary.pefa}
 \alias{print.summary.pefa}
 \alias{plot.pefa}
 \title{Methods for a PEFA factor-number sweep}
 \usage{
-selected_fit(object, ...)
-
-\method{selected_fit}{pefa}(object, ...)
-
 \method{print}{pefa}(x, ...)
 
 \method{summary}{pefa}(object, ...)
@@ -28,10 +22,10 @@ selected_fit(object, ...)
 )
 }
 \arguments{
-\item{object, x}{A result returned by \code{\link[=pefa]{pefa()}}.}
-
 \item{...}{Further arguments. For \code{plot()}, graphical arguments passed to
 the first base plot in the selected display.}
+
+\item{object, x}{A result returned by \code{\link[=pefa]{pefa()}}.}
 
 \item{digits}{Number of decimals used when printing fit and stability
 summaries.}
@@ -41,16 +35,15 @@ trajectory (\code{"gain"}), or descriptive absolute-fit trajectories
 (\code{"fit"}).}
 
 \item{criterion}{Criterion used when \code{type = "gain"}: \code{"elbo"} (default)
-or \code{"bic"}.}
+or \code{"bic"}. Only the ELBO panel draws automatic cut thresholds and the
+primary selection; the BIC-gain panel is descriptive.}
 }
 \value{
-\code{selected_fit()} returns the selected \code{\link[=vbfa]{vbfa()}} fit, or \code{NULL} when
-selection is unavailable. \code{summary()} returns a compact \code{summary.pefa}
-object without fit payloads. Print and plot methods return their input
-invisibly.
+\code{summary()} returns a compact \code{summary.pefa} object without loading
+or PIP matrices. Print and plot methods return their input invisibly.
 }
 \description{
-\code{selected_fit()} indexes the always-retained candidate fits using the
-primary ELBO gain selection. \code{summary()} and the print methods read the
-sweep, transition, and selection tables directly.
+Methods consume the compact sweep and transition tables directly. Matrix
+list-columns remain available on the original object but are omitted from
+summaries and console candidate tables.
 }

@@ -175,36 +175,31 @@ test_that("pefa selects a factor number within the window", {
   Q0 <- d$Q[, 1:2, drop = FALSE]
   r <- pefa(Q0, d$Y, Kmin = 2, Kmax = 4, verbose = FALSE,
                max_it = 1500, v0 = 0.001)
-  expect_true(r$selected_K %in% 2:4)
+  expect_true(all(r$selected_K %in% 2:4))
   expect_true(all(r$sweep$converged))
   expect_s3_class(r, "pefa")
   expect_false(inherits(r, "vbpm_sweep"))
-  expect_named(r, c("call", "selected_K", "fits", "sweep", "transitions",
-                    "selection", "window", "cuts", "sustain", "bifactor",
-                    "general", "tau"))
-  expect_identical(r$window$K, 2:4)
+  expect_identical(r$window, c(Kmin = 2L, Kmax = 4L, K0 = 2L))
   expect_named(r$sweep, c("K", "ELBO", "AIC", "BIC", "RMSEA", "SRMR",
-                          "CFI", "TLI", "t", "iter", "secs", "converged"))
+                          "CFI", "TLI", "t", "iter", "secs", "converged",
+                          "loading", "pip"))
   ## Gains are edge quantities: they live in $transitions, not $sweep.
   expect_false(any(grepl("_gain", names(r$sweep))))
   expect_named(r$transitions,
-               c("K_from", "K_to", "ELBO_gain", "BIC_gain", "phi_min",
-                 "phi_mean", "ari", "rmsd", "max_loading"))
+               c("K_from", "K_to", "ELBO_gain", "BIC_gain", "rmsd",
+                 "rmsd_max", "phi_min", "ari", "pip_sum", "pip_product",
+                 "max_unmatched_loading"))
   expect_identical(nrow(r$transitions), nrow(r$sweep) - 1L)
-  expect_s3_class(selected_fit(r), "vbpm_fit")
+  expect_true(all(vapply(r$sweep$loading, is.matrix, logical(1))))
+  expect_true(all(vapply(r$sweep$pip, is.matrix, logical(1))))
 
   s <- summary(r)
   expect_s3_class(s, "summary.pefa")
-  expect_named(s$selection,
-               c("criterion", "form", "cut_name", "cut", "gain_max",
-                 "threshold", "selected_K", "boundary"))
-  prim <- with(s$selection, criterion == "elbo" & form == "gain" &
-                 cut_name == "primary")
-  expect_identical(s$selection$selected_K[prim], r$selected_K)
+  expect_identical(s$selected_K, r$selected_K)
+  expect_identical(s$boundary, r$boundary)
   expect_identical(s$cuts, c(primary = 10))
-  expect_identical(s$sweep, r$sweep)
-  expect_null(s$fits)                               # summary carries no fits
-  expect_true(s$selection$boundary[prim] %in%
+  expect_false(any(c("loading", "pip") %in% names(s$sweep)))
+  expect_true(s$boundary[["primary"]] %in%
                 c("lower", "interior", "upper", "single", "none"))
   expect_output(print(r), "PEFA sweep")
   expect_output(print(s), "ELBO gain \\[primary = 10%\\]")
@@ -299,11 +294,11 @@ test_that("pefa bifactor sweep counts group factors without storing K_total", {
   expect_true(isTRUE(r$bifactor))
   expect_identical(r$sweep$K, 2:3)
   expect_false("K_total" %in% names(r$sweep))
-  expect_true(all(vapply(r$fits, function(f) isTRUE(f$bifactor), logical(1))))
-  expect_identical(unname(vapply(r$fits, function(f) ncol(f$Q), integer(1))),
-                   3:4)
+  expect_identical(vapply(r$sweep$loading, ncol, integer(1)), 3:4)
+  expect_identical(vapply(r$sweep$pip, ncol, integer(1)), 3:4)
   expect_true(all(is.na(r$transitions[c(
-    "phi_min", "phi_mean", "ari", "rmsd", "max_loading"
+    "rmsd", "rmsd_max", "phi_min", "ari", "pip_sum", "pip_product",
+    "max_unmatched_loading"
   )])))
   expect_output(print(r), "group factors [(][+] 1 general")
   expect_output(print(summary(r)), "K_total")
@@ -330,12 +325,12 @@ test_that("the fit object stores each quantity exactly once", {
     dupes <- apply(pairs, 2, function(ij) identical(big[[ij[1]]], big[[ij[2]]]))
     expect_false(any(dupes))
   }
-  ## pefa keeps all candidate fits and stores no duplicate selected fit
+  ## pefa keeps only compact loading/PIP matrices, never full candidate fits
   r <- pefa(d$Q[, 1:2, drop = FALSE], d$Y, Kmin = 2, Kmax = 3, v0 = .001,
             max_it = 500, verbose = FALSE)
   expect_null(r[["fit", exact = TRUE]])
   expect_null(r[["selected_fit", exact = TRUE]])
-  expect_true(all(vapply(r$fits, inherits, logical(1), what = "vbpm_fit")))
-  if (!is.na(r$selected_K))
-    expect_identical(selected_fit(r), r$fits[[as.character(r$selected_K)]])
+  expect_null(r[["fits", exact = TRUE]])
+  expect_true(all(vapply(r$sweep$loading, is.matrix, logical(1))))
+  expect_true(all(vapply(r$sweep$pip, is.matrix, logical(1))))
 })

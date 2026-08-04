@@ -1,3 +1,45 @@
+# vbpm 0.8.2
+
+This release deliberately simplifies PEFA before 1.0 and changes both its
+object schema and its adjacent-solution diagnostics.
+
+* `fit_stats.vbfa()` now uses the deterministic nominal hard-selected
+  parameter count by default (`rank_adjust = FALSE`). The numerical
+  Jacobian-rank count remains available only by explicit request and requires
+  the suggested package `numDeriv`; `rank_max_J` is an explicit computational
+  guard. `pefa()` exposes and records the same controls, computing the chosen
+  statistics while each candidate fit still exists.
+* A `pefa` result now has exactly two data frames. `$sweep` retains scalar
+  candidate statistics and adds `loading` and `pip` matrix list-columns;
+  `$transitions` retains adjacent ELBO/BIC gains and the revised diagnostics.
+  Named `$selected_K` and parallel `$boundary` vectors report the ELBO-gain
+  result for every named cut. Raw ELBO/BIC and BIC-gain selections are no
+  longer returned automatically, but remain directly reproducible from the
+  retained scalar paths.
+* Full candidate fits, `$selection`, and `selected_fit()` are removed. Extract
+  loading/PIP matrices by matching a desired `K` to `$sweep$K`; explicitly
+  refit that design when downstream work needs a complete `vbfa` object.
+* Adjacent oblique candidates are compared with a deterministic,
+  backbone-aware loading/PIP matcher. It holds the `Q0` columns fixed by
+  position, screens free columns by squared L2 norm, and matches the retained
+  free columns by minimum SSE. The transition fields are now `rmsd`,
+  `rmsd_max`, signed `phi_min`, `ari`, `pip_sum`, `pip_product`, and the
+  separate size diagnostic `max_unmatched_loading`; the previous `phi_mean`
+  and ambiguous `max_loading` fields are removed.
+* All transition diagnostics remain descriptive and do not enter automatic
+  selection. Signed congruence can be unstable for near-zero-mean contrast
+  columns; PIP summaries can be diluted by fixed design cells; and
+  `max_unmatched_loading` is not a `.3` salient-loading rule. Bifactor edges,
+  failed endpoints, and inapplicable or incomplete comparisons return typed
+  `NA` diagnostics.
+* General sweep mechanics and stability interpretation now live in the PEFA
+  vignette. The bifactor vignette stays focused on the compact two-step
+  first-order-count and matched-model comparison.
+* Version 0.8.2 still has no persistence, checkpoint, resume, extension, or
+  interrupt subsystem. Its internal sweep seam is groundwork only: this
+  release does not export `extend.pefa()`, `vblvm()`, MIMIC sweeping, ESEM
+  support, or a generic sweep engine.
+
 # vbpm 0.8.1
 
 `pefa()` is reduced to a compact, in-memory factor-number sweep. This is a

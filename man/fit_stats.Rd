@@ -16,7 +16,7 @@ fit_stats(object, ...)
   tau = 0.5,
   gamma = 0.5,
   orthogonal = NULL,
-  rank_adjust = TRUE,
+  rank_adjust = FALSE,
   rank_max_J = 100,
   ...
 )
@@ -47,12 +47,14 @@ default \code{NULL} reads the setting from the fit object itself, which is the
 recommended use. Supplying a value that contradicts the fit raises an
 error rather than silently miscounting parameters.}
 
-\item{rank_adjust}{Logical; if \code{TRUE}, the effective parameter count is the
-rank of the Jacobian of the model-implied covariance (needs the \code{numDeriv}
-package). Automatically skipped for large \code{J}.}
+\item{rank_adjust}{Logical; if \code{TRUE}, compute the effective parameter count
+as the rank of the Jacobian of the model-implied covariance. This explicit
+opt-in requires the suggested \code{numDeriv} package. The default \code{FALSE}
+uses the nominal parameter count.}
 
-\item{rank_max_J}{Skip the Jacobian rank check when \code{J} exceeds this value
-(default \code{100}); the nominal parameter count is used instead.}
+\item{rank_max_J}{Largest number of observed variables for which an explicit
+Jacobian-rank calculation is allowed (default \code{100}). If \code{rank_adjust = TRUE} and \code{J} exceeds this value, the method errors rather than silently
+substituting the nominal count.}
 }
 \value{
 An object of class \code{vbpm_fit_stats} (a named numeric vector) with

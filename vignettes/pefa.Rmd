@@ -14,9 +14,9 @@ library(vbpm)
 
 `pefa()` fits a bracketed window of partially exploratory factor models. Its
 paper-defined use is an ordinary oblique factor sweep with diagonal residuals.
-The result is a sweep, not another fitted probability model: candidate fits
-live in `$fits`, and candidate-, transition-, and rule-level quantities live in
-three separate tables.
+The result is a compact comparison object, not another fitted probability
+model: it retains scalar diagnostics and loading/PIP matrices, but not the
+complete candidate fits.
 
 ## A compact sweep
 
@@ -40,32 +40,43 @@ p <- pefa(
 )
 ```
 
-The object has three tables with different indexing units:
+The object has two tables with different indexing units:
 
-```{r three-tables}
-p$sweep
+```{r two-tables}
+scalar_columns <- setdiff(names(p$sweep), c("loading", "pip"))
+p$sweep[scalar_columns]
 p$transitions
-p$selection
 ```
 
-- `$sweep` has one row per candidate. ELBO, AIC, BIC, and the absolute fit
-  indices describe that fitted model.
+- `$sweep` has one row per candidate. Its scalar columns contain ELBO, AIC,
+  BIC, absolute fit indices, timing, iteration, and convergence information.
+  Its `loading` and `pip` list-columns contain the corresponding matrices;
+  list-columns are necessary because their column counts change with `K`. In
+  the bifactor research extension each matrix has `K + 1` columns, with the
+  general factor first.
 - `$transitions` has one row per adjacent step. It stores raw ELBO and
-  larger-is-better BIC gains, plus small adjacent-count stability summaries.
-- `$selection` has one row per rule. Each gain rule records the named cut, its
-  normalization denominator (`gain_max`), and the resulting absolute
-  `threshold`.
+  larger-is-better BIC gains, six descriptive stability metrics, and the size
+  of the unmatched loading structure.
 
-The primary top-level result is the ELBO gain selection at the cut named
-`primary`. Every candidate fit is retained, and the accessor retrieves that
-fit without storing another copy:
+Named vectors give the ELBO-gain choices and their positions in the requested
+window. Their names and order follow `cuts`; `primary` is a role, not a fixed
+percentage.
 
-```{r selected-fit}
-p$selected_K
-selected_fit(p)
+```{r named-selections}
+data.frame(
+  cut = unname(p$cuts),
+  selected_K = unname(p$selected_K[names(p$cuts)]),
+  boundary = unname(p$boundary[names(p$cuts)]),
+  row.names = names(p$cuts)
+)
 ```
 
-## Raw and gain selections
+The remaining compact metadata records `Q0`, the named window, cuts, model and
+objective type, and the estimation/comparison controls needed to interpret
+these tables. This is still an object of class `pefa`, not a public generic
+sweep framework.
+
+## The gain rule
 
 For a larger-is-better criterion $c(K)$, the adjacent gain is
 $g(K)=c(K)-c(K-1)$. The gain rule finds the first candidate followed by a
@@ -83,15 +94,32 @@ select_K_elbow(2:6, elbo, delta = 10, sustain = 2)
 ```
 
 Here the gains are 300, 200, 5, and 3: after the two large steps, the complete
-run of two small gains selects `K = 4`. `pefa()` applies
-the same scanner to ELBO and to `-BIC`; AIC remains available in `$sweep` as a
-descriptive fit statistic but has no automated selection rule.
+run of two small gains selects `K = 4`. `pefa()` applies this rule to ELBO for
+every named cut. The normalizer and threshold need no separate selection table
+because they are exactly reproducible from the transition gains:
 
-Raw optima and gain choices answer different questions and are kept together
-for comparison. Multiple named cuts provide a compact sensitivity analysis:
+```{r thresholds}
+gain_max <- max(p$transitions$ELBO_gain)
+p$cuts / 100 * gain_max
+```
 
-```{r selection-rules}
-subset(p$selection, criterion %in% c("elbo", "bic"))
+AIC and BIC remain useful descriptive trajectories, but `pefa()` does not
+automatically select their optima or elbows. Raw optima, when wanted, are
+ordinary operations on the retained paths:
+
+```{r raw-optima}
+c(
+  ELBO = p$sweep$K[which.max(p$sweep$ELBO)],
+  BIC = p$sweep$K[which.min(p$sweep$BIC)]
+)
+```
+
+For a BIC-gain sensitivity analysis, make the smaller-is-better criterion
+larger-is-better explicitly:
+
+```{r bic-sensitivity}
+select_K_elbow(p$sweep$K, -p$sweep$BIC, delta = 10,
+               sustain = p$sustain)
 ```
 
 The normalization is relative to one fixed criterion path. Consequently the
@@ -99,7 +127,41 @@ gain decision is unchanged by a positive affine transformation of that same
 path. This does not make results invariant to changing the data, items,
 preprocessing, priors, `tau`, optimization settings, or candidate window.
 
-## Reading fit and plots
+## Reading candidates and refitting a selected model
+
+Match on `K` when extracting a candidate matrix; do not assume that `K` is a
+list position.
+
+```{r candidate-matrices}
+K_selected <- p$selected_K[["primary"]]
+i <- match(K_selected, p$sweep$K)
+loading_selected <- p$sweep$loading[[i]]
+pip_selected <- p$sweep$pip[[i]]
+
+dim(loading_selected)
+dim(pip_selected)
+```
+
+These matrices support structural inspection and post-hoc comparison. They
+are not partial `vbfa` objects. If downstream work needs factor correlations,
+residual parameters, scores, optimizer state, or another fit component,
+explicitly refit the chosen model using the same data and estimation controls:
+
+```{r explicit-refit, eval=FALSE}
+K_selected <- p$selected_K[["primary"]]
+Q_selected <- if (K_selected == ncol(Q0)) {
+  Q0
+} else {
+  cbind(Q0, matrix(-1L, nrow(Q0), K_selected - ncol(Q0)))
+}
+fit_selected <- vbfa(Y, Q_selected)
+```
+
+There is deliberately no `$fits`, `$selection`, or `selected_fit()` interface.
+`summary(p)` omits the matrix payloads, while `print(p)` reports each named
+cut, selection, and boundary compactly.
+
+## Fit trajectories and parameter counting
 
 RMSEA, SRMR, CFI, and TLI are descriptive trajectories. They help assess
 whether the selected model is adequate and whether fit has levelled off, but
@@ -111,10 +173,25 @@ plot(p, type = "gain")
 plot(p, type = "fit")
 ```
 
-The gain plot defaults to ELBO; use `criterion = "bic"` to display BIC gains.
-Gains belong to transitions, so their points are located at the factor count
-reached by each step. The fit plot deliberately shows trajectories without
-fixed cutoff lines.
+The gain plot defaults to ELBO. Use `criterion = "bic"` for a descriptive BIC
+gain trajectory; it has no automatic threshold or selection marker. Gains
+belong to transitions, so their points are located at the factor count reached
+by each step. The fit plot deliberately shows trajectories without fixed
+cutoff lines.
+
+Candidate information criteria use the nominal hard-selected parameter count
+by default. The optional Jacobian-rank sensitivity can be requested while the
+candidate fits still exist:
+
+```{r rank-adjusted-sweep, eval=FALSE}
+p_rank <- pefa(Q0, Y, Kmin = 2, Kmax = 6,
+               rank_adjust = TRUE, rank_max_J = 100,
+               verbose = FALSE)
+```
+
+This optional calculation requires `numDeriv` and is guarded by `rank_max_J`;
+the default sweep does not invoke numerical derivatives. Record the setting
+when comparing BIC values across analyses.
 
 ## Boundary results require a new bracket
 
@@ -124,44 +201,87 @@ does not contain the two following steps needed by the default rule:
 
 ```{r boundary}
 p_narrow <- pefa(Q0, Y, Kmin = 2, Kmax = 4, verbose = FALSE)
-subset(
-  p_narrow$selection,
-  criterion == "elbo" & form == "gain" & cut_name == "primary"
+data.frame(
+  selected_K = p_narrow$selected_K[["primary"]],
+  boundary = p_narrow$boundary[["primary"]]
 )
 ```
 
 An `upper` result asks for a complete rerun with a larger `Kmax`; a `lower`
 result asks for a smaller `Kmin` when the backbone permits it. Because the
 backbone has `ncol(Q0)` specified columns, `Kmin` cannot be smaller than that
-count. Rerun the complete requested window after changing either boundary.
+count; a lower result there asks you to reduce or revise `Q0`. A one-candidate
+window has boundary `single`.
 
-Every selection also requires a complete, converged, finite criterion path.
-An unsuccessful interior candidate invalidates that criterion's selection;
-the rule does not bridge the gap or continue on a later fragment.
+Every selection also requires a complete, converged, finite ELBO path. An
+unsuccessful interior candidate invalidates the selections, which become typed
+`NA` with boundary `none`; the rule does not bridge the gap or continue on a
+later fragment. Version 0.8.2 has no checkpoint, resume, or sweep-extension
+API, so changing either boundary requires a complete rerun.
 
 ## Adjacent-count stability is descriptive
 
-For consecutive converged oblique fits, `$transitions` also asks how well the
+For consecutive converged oblique fits, `$transitions` asks how well the
 smaller loading solution reappears in the larger one:
 
 ```{r adjacent-stability}
 p$transitions[, c(
-  "K_from", "K_to", "phi_min", "phi_mean", "ari", "rmsd", "max_loading"
+  "K_from", "K_to", "rmsd", "rmsd_max", "phi_min", "ari",
+  "pip_sum", "pip_product", "max_unmatched_loading"
 )]
 ```
 
-`phi_min` and `phi_mean` summarize absolute Tucker congruence after a simple
-best-unused-column alignment; `ari` compares dominant-factor item assignments;
-`rmsd` is computed after sign alignment; and `max_loading` describes the one
-unmatched column in the larger solution. There is no built-in stability cutoff.
+The comparison first orients each loading column to have a nonnegative mean.
+The `K0 = ncol(Q0)` backbone columns remain fixed by position. Beyond the
+backbone, a column is retained when its squared L2 norm is at least
+`stability_eps` (default `.1`), and retained smaller-fit columns are matched in
+order to the minimum-SSE unused retained columns of the larger fit. Exact ties
+choose the lowest available larger-fit column. This is a deterministic
+one-to-one heuristic, not a rotation or globally optimal assignment search.
+
+The six stability metrics are:
+
+- `rmsd`, over all entries in the fixed and matched common columns;
+- `rmsd_max`, the largest column-wise RMSD, which exposes a changing factor
+  that the aggregate RMSD can dilute;
+- `phi_min`, the minimum **signed** Tucker congruence after the common
+  orientation;
+- `ari`, comparing dominant-absolute-loading item partitions using all
+  retained columns, including unmatched retained columns in the larger fit;
+- `pip_sum`, the proportion of matched cells whose `PIP >= .5` status reverses
+  in either direction; and
+- `pip_product`, the product of the two directional reversal proportions.
+
+Read signed `phi_min` beside both RMSDs. A bipolar or contrast column with
+zero or nearly zero mean has a weak orientation: equivalent reflected columns
+can then produce `phi_min` near `-1`. For PIPs, a positive `pip_sum` with zero
+`pip_product` means that reversals occurred in only one direction, not that the
+solutions were perfectly stable. The bounds are
+`0 <= pip_product <= pip_sum^2 / 4 <= .25`.
+
+The PIP summaries use all matched cells. Fixed design entries can therefore
+dilute them, sometimes differently across Q designs; do not compare their
+magnitudes substantively across differently constrained backbones.
+`max_unmatched_loading` is separate from the six stability metrics. It is the
+largest absolute loading outside the matched non-backbone core, including
+larger-fit columns screened out by `stability_eps`; it is zero when nothing is
+unmatched and `NA` when a complete match is impossible. It is a continuous
+size diagnostic, not a `.3` salient-loading rule and not proof that one column
+is uniquely the added factor.
+
+`stability_eps` is a squared-column-norm screen, not a loading cutoff, a PIP
+threshold, or an ELBO gain cut. Values around `.1`--`.2` can be used as a
+sensitivity range, but are not validated structural thresholds. All these
+fields are descriptive and none enters automatic factor-number selection.
+Stability values are `NA` for bifactor edges, failed endpoints, incomplete
+matches, and malformed endpoint matrices as applicable.
+
 These summaries are a package extension, not part of Chen and Jin's gain rule.
 The paper's separate robustness analysis instead compares solutions obtained
-from alternative backbones.
-
-When backbone choice is uncertain, repeat the complete sweep from another
-substantively defensible backbone and compare the selected counts and loading
-patterns. Candidate comparisons are meaningful only when the data and all
-other estimation settings are held fixed.
+from alternative backbones. When backbone choice is uncertain, repeat the
+complete sweep from another substantively defensible backbone and compare the
+selected counts and loading patterns. Candidate comparisons are meaningful
+only when the data and all other estimation settings are held fixed.
 
 `pefa()` does not sweep local-dependence models. Fit a prespecified residual
 structure directly with `vbfa(..., ld = TRUE)` when that model is required.

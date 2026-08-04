@@ -287,6 +287,17 @@ test_that("plot.pefa draws its three compact displays without error", {
   expect_silent(plot(r, type = "objective"))
   expect_silent(plot(r, type = "gain", criterion = "elbo"))
   expect_silent(plot(r, type = "gain", criterion = "bic"))
+  ablines <- list()
+  testthat::with_mocked_bindings(
+    plot(r, type = "gain", criterion = "bic"),
+    abline = function(...) {
+      ablines[[length(ablines) + 1L]] <<- list(...)
+    },
+    .package = "vbpm"
+  )
+  ## The only BIC-panel reference is zero: no cut threshold or selected-K line.
+  expect_length(ablines, 1L)
+  expect_identical(ablines[[1L]]$h, 0)
   expect_silent(plot(r, type = "fit"))
   expect_error(plot(r, type = "gain", criterion = "aic"), "arg")
   expect_error(plot(r, type = "stability"), "arg")
@@ -365,7 +376,9 @@ test_that("pefa validates its window", {
 
   args <- list(Q0 = Q0, Y = d$Y, Kmin = 2, Kmax = 2,
                cuts = c(primary = 10), sustain = 2, bifactor = FALSE,
-               general = 1, max_it = 50, tau = .5, verbose = FALSE)
+               general = 1, max_it = 50, tau = .5,
+               stability_eps = .1, rank_adjust = FALSE, rank_max_J = 100,
+               verbose = FALSE)
   args[[length(args) + 1L]] <- .001
   expect_error(do.call(pefa, args), "Every argument in \\.\\.\\. must be named")
 })

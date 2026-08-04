@@ -40,21 +40,24 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
   plus the model's objective. An S3 generic over fitted models: it builds the
   implied covariance from the residual covariance, so it is correct for
   diagonal *and* local-dependence `vbfa` fits, and it reads `orthogonal`/`ld`
-  from the fit rather than asking you to repeat them.
+  from the fit rather than asking you to repeat them. Information criteria use
+  the nominal hard-selected parameter count by default; the numerical
+  Jacobian-rank count is an explicit `rank_adjust = TRUE` sensitivity.
 - **`special_effects()`** — post-process a bifactor fit: Schmid-Leiman
   proportionality CVs, approximate higher-order parameters (second-order
   loadings per group factor), and testlet/special effect sizes
   (Zhang & Chen, 2024, Eq. 16).
 - **`pefa()`** / **`select_K_elbow()`** — sweep the number of factors and
-  select it with a relative gain rule on one fixed criterion path. The result
-  carries three tables,
-  one per index: `$sweep` (per candidate), `$transitions` (per adjacent pair —
-  the marginal gains plus adjacent-count **stability** diagnostics, showing how
-  much of the `K`-factor solution survives inside the `K+1`-factor one), and
-  `$selection` (per rule, so a primary cut and any sensitivity cuts are
-  evaluated in one call via `cuts`). Adjacent stability is summarized by
-  congruence, ARI, RMSD, and the largest loading in the unmatched column.
-  With `summary()`, `plot()`, and `selected_fit()`.
+  select it with a relative ELBO-gain rule on one fixed criterion path. The
+  compact result carries two tables: `$sweep` has one row per candidate plus
+  loading/PIP matrix list-columns, and `$transitions` has one row per adjacent
+  pair with ELBO/BIC gains and descriptive stability diagnostics. Named
+  `$selected_K` and `$boundary` vectors report every requested cut. The six
+  stability summaries are aggregate and maximum column RMSD, signed minimum
+  congruence, ARI, and two PIP-reversal summaries; maximum unmatched loading is
+  a separate continuous size diagnostic. Full candidate fits are not retained:
+  explicitly refit a selected `K` when downstream work needs a complete model.
+  Includes compact `print()`, `summary()`, and `plot()` methods.
 - **`sim_fa()`** and **`sim_lvm()`** — two complementary data generators.
   `sim_fa()` is driven by the loading *pattern* (items per factor, alternating
   cross-loadings, minor factors) and can generate **higher-order/testlet**
@@ -129,7 +132,7 @@ Q[1:2, ] <- 0; Q[1:2, 1] <- 1        # two anchors on factor 1, etc.
 
 fit <- vbfa(Y, Q)                    # dynamic path on by default; quiet
 fit                                  # compact summary (S3 print method)
-idx <- fit_stats(fit)                # reads Q, orthogonal and ld from the fit
+idx <- fit_stats(fit)                # nominal hard-selected count by default
 ```
 
 Fits are ordinary named lists with a shared `vbpm_fit` class attached — fields
@@ -194,7 +197,7 @@ round(fit$B, 2)                      # which covariates predict which factors
 
 ## Known limitations
 
-As of 0.8.1:
+As of 0.8.2:
 
 - **Response types.** The estimators model **continuous Gaussian responses**,
   and in-loop missing-data support covers that case in both `vbfa()` and
@@ -209,7 +212,8 @@ As of 0.8.1:
   omitted group structure and bias the result toward the lower end of the
   requested window. Use an ordinary oblique sweep for the first-order count,
   then compare matched anchored oblique and bifactor models by BIC; the
-  `bifactor` vignette illustrates that two-step route.
+  `bifactor` vignette illustrates that two-step route. Adjacent loading
+  stability is intentionally unavailable for bifactor sweep edges.
 - **No DIF paths in `vbmimic()`.** Covariates predict the *factors*
   (`Q_B`, i.e. impact); there are no direct covariate-to-item paths, so the
   model cannot currently express or detect differential item functioning.

@@ -2,6 +2,24 @@
 ## inclusion probability >= tau) is the default for every statistic; soft
 ## variants carry an "_S" suffix. fit_stats() is the S3 generic.
 
+## Shared validation for fit_stats() and sweep interfaces that expose the same
+## parameter-count policy.  Keep this separate from the Jacobian path so a
+## nominal-count request neither inspects nor needs the optional dependency.
+.validate_rank_controls <- function(rank_adjust, rank_max_J) {
+    if (!is.logical(rank_adjust) || length(rank_adjust) != 1L ||
+        is.na(rank_adjust)) {
+        stop("`rank_adjust` must be one non-missing logical value.",
+             call. = FALSE)
+    }
+    if (!is.numeric(rank_max_J) || length(rank_max_J) != 1L ||
+        is.na(rank_max_J) || !is.finite(rank_max_J) || rank_max_J <= 0 ||
+        rank_max_J != floor(rank_max_J)) {
+        stop("`rank_max_J` must be one finite positive whole number.",
+             call. = FALSE)
+    }
+    invisible(NULL)
+}
+
 #' Fit statistics for vbpm models
 #'
 #' Computes structural-equation-model fit statistics for a fitted [vbfa()]
@@ -22,11 +40,14 @@
 #'   default `NULL` reads the setting from the fit object itself, which is the
 #'   recommended use. Supplying a value that contradicts the fit raises an
 #'   error rather than silently miscounting parameters.
-#' @param rank_adjust Logical; if `TRUE`, the effective parameter count is the
-#'   rank of the Jacobian of the model-implied covariance (needs the `numDeriv`
-#'   package). Automatically skipped for large `J`.
-#' @param rank_max_J Skip the Jacobian rank check when `J` exceeds this value
-#'   (default `100`); the nominal parameter count is used instead.
+#' @param rank_adjust Logical; if `TRUE`, compute the effective parameter count
+#'   as the rank of the Jacobian of the model-implied covariance. This explicit
+#'   opt-in requires the suggested `numDeriv` package. The default `FALSE`
+#'   uses the nominal parameter count.
+#' @param rank_max_J Largest number of observed variables for which an explicit
+#'   Jacobian-rank calculation is allowed (default `100`). If `rank_adjust =
+#'   TRUE` and `J` exceeds this value, the method errors rather than silently
+#'   substituting the nominal count.
 #' @param ... Further arguments passed to methods. Unused by the methods
 #'   supplied with the package.
 #'
@@ -74,8 +95,9 @@ fit_stats <- function(object, ...) UseMethod("fit_stats")
 #' @export
 ## `...` is required for S3 consistency with the generic fit_stats(object, ...)
 fit_stats.vbfa <- function(object, Y = NULL, Q = object$Q, tau = 0.50, gamma = 0.5,
-                     orthogonal = NULL, rank_adjust = TRUE, rank_max_J = 100,
+                     orthogonal = NULL, rank_adjust = FALSE, rank_max_J = 100,
                      ...) {
+    .validate_rank_controls(rank_adjust, rank_max_J)
     fit <- object
 
     ## resolve `orthogonal` from the fit object; this used to default to FALSE,
@@ -93,6 +115,20 @@ fit_stats.vbfa <- function(object, Y = NULL, Q = object$Q, tau = 0.50, gamma = 0
     N <- if (is.null(Y)) fit$nobs else nrow(Y)
     J <- nrow(fit$Lam); K <- ncol(Q); Ns <- N - 1
     m  <- J * (J + 1) / 2                    # unique covariance moments
+
+    if (rank_adjust) {
+        if (J > rank_max_J) {
+            stop("`rank_adjust = TRUE` requires `J <= rank_max_J` (J = ", J,
+                 ", rank_max_J = ", rank_max_J,
+                 "). Raise `rank_max_J` or use `rank_adjust = FALSE`.",
+                 call. = FALSE)
+        }
+        if (!requireNamespace("numDeriv", quietly = TRUE)) {
+            stop("`rank_adjust = TRUE` requires the suggested package ",
+                 "'numDeriv'. Install it or use `rank_adjust = FALSE`.",
+                 call. = FALSE)
+        }
+    }
 
     ## ---- plug-in variational posterior summaries ----------------------
     Lam_h <- fit$Lam                    # Lambda_hat
@@ -137,35 +173,33 @@ fit_stats.vbfa <- function(object, Y = NULL, Q = object$Q, tau = 0.50, gamma = 0
     n_edge <- sum(edge_H)
     t_nom <- p_H + J + n_phi + n_edge
 
-    ## rank-adjusted count: t = rank( d vech(Sigma) / d theta' )
-    resid0 <- if (is_ld) c(diag(fit$Psi), fit$Psi[edge_H]) else diag(Wres)
-    th0 <- c(Lam_H[aH], if (n_phi > 0) Phi[lower.tri(Phi)], resid0)
-    rebuild_vech <- function(th) {
-        L <- matrix(0, J, K); L[aH] <- th[seq_len(p_H)]
-        P <- diag(K)
-        if (n_phi > 0) {
-            P[lower.tri(P)] <- th[p_H + seq_len(n_phi)]
-            P[upper.tri(P)] <- t(P)[upper.tri(P)]
-        }
-        pos <- p_H + n_phi
-        rd <- th[pos + seq_len(J)]
-        if (is_ld) {
-            Prec <- diag(rd, J)
-            if (n_edge > 0) {
-                ev <- th[pos + J + seq_len(n_edge)]
-                Prec[edge_H] <- ev
-                Prec[t(edge_H)] <- ev
+    if (rank_adjust) {
+        ## Rank-adjusted count: t = rank(d vech(Sigma) / d theta').  All
+        ## derivative inputs and closures deliberately live in this explicit
+        ## opt-in branch; the nominal path below does no Jacobian setup.
+        resid0 <- if (is_ld) c(diag(fit$Psi), fit$Psi[edge_H]) else diag(Wres)
+        th0 <- c(Lam_H[aH], if (n_phi > 0) Phi[lower.tri(Phi)], resid0)
+        rebuild_vech <- function(th) {
+            L <- matrix(0, J, K); L[aH] <- th[seq_len(p_H)]
+            P <- diag(K)
+            if (n_phi > 0) {
+                P[lower.tri(P)] <- th[p_H + seq_len(n_phi)]
+                P[upper.tri(P)] <- t(P)[upper.tri(P)]
             }
-            Rcov <- solve(Prec)
-        } else Rcov <- diag(rd)
-        Sg <- L %*% P %*% t(L) + Rcov
-        Sg[lower.tri(Sg, diag = TRUE)]
-    }
-    ## Rank-adjusted t needs a numDeriv Jacobian of vech(Sigma) (J(J+1)/2 rows),
-    ## whose cost explodes with J; auto-skip for large J and fall back to t_nom.
-    do_rank <- isTRUE(rank_adjust) && (J <= rank_max_J) &&
-        requireNamespace("numDeriv", quietly = TRUE)
-    if (do_rank) {
+            pos <- p_H + n_phi
+            rd <- th[pos + seq_len(J)]
+            if (is_ld) {
+                Prec <- diag(rd, J)
+                if (n_edge > 0) {
+                    ev <- th[pos + J + seq_len(n_edge)]
+                    Prec[edge_H] <- ev
+                    Prec[t(edge_H)] <- ev
+                }
+                Rcov <- solve(Prec)
+            } else Rcov <- diag(rd)
+            Sg <- L %*% P %*% t(L) + Rcov
+            Sg[lower.tri(Sg, diag = TRUE)]
+        }
         Delta  <- numDeriv::jacobian(rebuild_vech, th0)
         sv     <- svd(Delta, nu = 0, nv = 0)$d
         t_H    <- sum(sv > 1e-6 * max(sv))    # rank count; == t_nom when identified

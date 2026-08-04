@@ -13,14 +13,16 @@ with fit statistics, factor-number selection, and two data simulators.
 
 ## Test environments
 
-* Windows 11 x64, R 4.5.1 (local), `R CMD check --as-cran`
+* Windows 11 x64, R 4.5.1 (local),
+  `R CMD check --as-cran --run-donttest` (PDF manual included)
 
 ## R CMD check results
 
-Status: OK -- no ERRORs, WARNINGs, or NOTEs on the local check. (An
-environmental "unable to verify current time" NOTE has appeared on this
-machine when the time server was unreachable; it is unrelated to the
-package.)
+Status: 1 NOTE -- the check environment did not have pandoc on its PATH, so
+`README.md`/`NEWS.md` went unchecked; this is environmental, not a package
+issue. There were no ERRORs or WARNINGs. Compiled installation, examples,
+tests, Rd validation, vignette rebuilding, and PDF-manual generation all
+passed.
 
 ## Notes for the reviewer
 

@@ -126,16 +126,33 @@ over raising `max_it` when a fit misbehaves.
 ## Fit statistics
 
 `fit_stats()` computes SEM-like statistics for a fit, with hard selection
-(PIP >= `tau`) as the default:
+(PIP >= `tau`) and the nominal parameter count as the defaults:
 
 ```{r vbfit}
 round(fit_stats(fit), 3)
 ```
 
-`t_nom`/`t`/`t_S` are parameter counts (nominal, rank-adjusted, soft), the rest
-are the usual absolute and information indices. The function reads `orthogonal`
-and `ld` from the fit object itself, so a bifactor fit needs no extra argument
-— and supplying a contradictory one is an error, not a silent miscount.
+`t_nom` and `t_S` are the nominal and soft counts; by default `t = t_nom`.
+This deterministic default does not depend on whether an optional package is
+installed. The function reads `orthogonal` and `ld` from the fit object itself,
+so a bifactor fit needs no extra argument — and supplying a contradictory one
+is an error, not a silent miscount.
+
+For a specifically motivated sensitivity analysis, request the numerical
+Jacobian-rank count explicitly:
+
+```{r rank-adjustment, eval=FALSE}
+fit_stats(fit, rank_adjust = TRUE, rank_max_J = 100)
+```
+
+That branch requires the suggested package `numDeriv`. It stops rather than
+silently reverting to the nominal count when `numDeriv` is unavailable or
+when the number of items exceeds `rank_max_J`; raise the guard deliberately
+only when the computational cost is acceptable. Because the count can affect
+degrees of freedom, AIC, BIC, and derived fit indices, record the setting and
+use one policy throughout a comparison. `pefa()` exposes the same two
+arguments and computes the requested counts before discarding full candidate
+fits.
 
 Selecting the number of factors (the gain rule implemented by `pefa()`) is
 covered in `vignette("pefa")`; bifactor and higher-order models are covered in

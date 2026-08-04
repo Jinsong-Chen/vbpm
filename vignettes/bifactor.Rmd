@@ -149,7 +149,9 @@ both uncertain, use two steps. The first is the PEFA workflow of Chen and Jin
 
 Run an oblique, diagonal-residual sweep without a general factor. This selects
 the number of cluster-level factors; it does not decide whether their
-correlations should later be represented by a general factor.
+correlations should later be represented by a general factor. The named cuts
+below are the companion manuscript's convention: a 20% gain cut is primary
+and the laxer 10% cut is read as a sensitivity.
 
 ```{r step1}
 Q0 <- matrix(-1L, J, 2)
@@ -159,10 +161,14 @@ for (k in 1:2) {
   Q0[anchor, k] <- 1L
 }
 
-count_sweep <- pefa(Q0, Y, Kmin = 2, Kmax = 6, verbose = FALSE)
-subset(
-  count_sweep$selection,
-  criterion == "elbo" & form == "gain" & cut_name == "primary"
+count_sweep <- pefa(Q0, Y, Kmin = 2, Kmax = 6,
+                    cuts = c(primary = 20, sensitivity = 10),
+                    verbose = FALSE)
+data.frame(
+  cut = unname(count_sweep$cuts),
+  selected_K = unname(count_sweep$selected_K[names(count_sweep$cuts)]),
+  boundary = unname(count_sweep$boundary[names(count_sweep$cuts)]),
+  row.names = names(count_sweep$cuts)
 )
 ```
 
