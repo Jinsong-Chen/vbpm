@@ -20,9 +20,11 @@ complete candidate fits.
 
 ## A compact sweep
 
-Start with a small confirmatory backbone, then leave enough room above the
-plausible count for the sustained-drop rule to observe what happens after the
-elbow.
+Start with a small LPC (least partially confirmatory) backbone, then leave
+enough room above the plausible count for the sustained-drop rule to observe
+what happens after the elbow. In an LPC backbone each anchor carries its `1`,
+but its entries on the other backbone factors remain unspecified (`-1`); LPC
+therefore imposes no fixed-zero cross-loading assumptions.
 
 ```{r sweep}
 sim <- sim_fa(N = 500, K = 4, ipf = 5, cpf = 0, lam = .7, phi = .3,
@@ -30,8 +32,8 @@ sim <- sim_fa(N = 500, K = 4, ipf = 5, cpf = 0, lam = .7, phi = .3,
 Y <- sim$dat
 
 Q0 <- matrix(-1L, ncol(Y), 2)
-Q0[1:2, ] <- 0L; Q0[1:2, 1] <- 1L
-Q0[6:7, ] <- 0L; Q0[6:7, 2] <- 1L
+Q0[1:2, 1] <- 1L
+Q0[6:7, 2] <- 1L
 
 p <- pefa(
   Q0, Y, Kmin = 2, Kmax = 6,
@@ -40,41 +42,53 @@ p <- pefa(
 )
 ```
 
-The object has two tables with different indexing units:
+The object has two scalar tables with different indexing units, while the
+larger candidate matrices are kept separately:
 
 ```{r two-tables}
-scalar_columns <- setdiff(names(p$sweep), c("loading", "pip"))
-p$sweep[scalar_columns]
+p$sweep
 p$transitions
+names(p$loadings)
 ```
 
 - `$sweep` has one row per candidate. Its scalar columns contain ELBO, AIC,
   BIC, absolute fit indices, timing, iteration, and convergence information.
-  Its `loading` and `pip` list-columns contain the corresponding matrices;
-  list-columns are necessary because their column counts change with `K`. In
-  the bifactor research extension each matrix has `K + 1` columns, with the
-  general factor first.
 - `$transitions` has one row per adjacent step. It stores raw ELBO and
-  larger-is-better BIC gains, six descriptive stability metrics, and the size
-  of the unmatched loading structure.
+  larger-is-better BIC gains, five descriptive stability metrics, a logical
+  column-match collision flag, and the size of the unmatched loading structure.
+- `$loadings` and `$pips` are lists whose names are exactly
+  `as.character(p$sweep$K)`. Each element is a matrix at its natural size, so
+  no padding is needed as `K` changes. In the bifactor research extension each
+  matrix has `K + 1` columns, with the general factor first.
 
 Named vectors give the ELBO-gain choices and their positions in the requested
 window. Their names and order follow `cuts`; `primary` is a role, not a fixed
 percentage.
 
 ```{r named-selections}
+cuts <- p$settings$cuts
 data.frame(
-  cut = unname(p$cuts),
-  selected_K = unname(p$selected_K[names(p$cuts)]),
-  boundary = unname(p$boundary[names(p$cuts)]),
-  row.names = names(p$cuts)
+  cut = unname(cuts),
+  selected_K = unname(p$selected_K[names(cuts)]),
+  boundary = unname(p$boundary[names(cuts)]),
+  row.names = names(cuts)
 )
 ```
 
-The remaining compact metadata records `Q0`, the named window, cuts, model and
-objective type, and the estimation/comparison controls needed to interpret
-these tables. This is still an object of class `pefa`, not a public generic
-sweep framework.
+The complete top-level contract is deliberately short:
+
+```{r object-contract}
+names(p)
+names(p$settings)
+c(Kmin = min(p$sweep$K), Kmax = max(p$sweep$K), K0 = ncol(p$Q0))
+```
+
+`Q0` records the backbone. The lean `$settings` list records only the controls
+needed to interpret the selections, candidate statistics, matrix dimensions,
+and transitions: `cuts`, `sustain`, `bifactor`, `general`, `tau`,
+`stability_eps`, and `rank_adjust`. The requested window is already determined
+by `$sweep$K`, and the backbone size by `ncol(p$Q0)`, so neither is duplicated.
+This is still an object of class `pefa`, not a public generic sweep framework.
 
 ## The gain rule
 
@@ -100,7 +114,7 @@ because they are exactly reproducible from the transition gains:
 
 ```{r thresholds}
 gain_max <- max(p$transitions$ELBO_gain)
-p$cuts / 100 * gain_max
+p$settings$cuts / 100 * gain_max
 ```
 
 AIC and BIC remain useful descriptive trajectories, but `pefa()` does not
@@ -119,7 +133,7 @@ larger-is-better explicitly:
 
 ```{r bic-sensitivity}
 select_K_elbow(p$sweep$K, -p$sweep$BIC, delta = 10,
-               sustain = p$sustain)
+               sustain = p$settings$sustain)
 ```
 
 The normalization is relative to one fixed criterion path. Consequently the
@@ -129,18 +143,66 @@ preprocessing, priors, `tau`, optimization settings, or candidate window.
 
 ## Reading candidates and refitting a selected model
 
-Match on `K` when extracting a candidate matrix; do not assume that `K` is a
-list position.
+Use the character form of `K` when extracting a candidate matrix; do not assume
+that `K` is a list position.
 
 ```{r candidate-matrices}
 K_selected <- p$selected_K[["primary"]]
-i <- match(K_selected, p$sweep$K)
-loading_selected <- p$sweep$loading[[i]]
-pip_selected <- p$sweep$pip[[i]]
+loading_selected <- p$loadings[[as.character(K_selected)]]
+pip_selected <- p$pips[[as.character(K_selected)]]
 
 dim(loading_selected)
 dim(pip_selected)
 ```
+
+The retained matrices also let you inspect why a neighboring candidate may be
+structurally weak. Here are the maximum absolute loading and the number of
+loadings with `PIP >= .5` in every column of the `K = 5` and `K = 6`
+candidates:
+
+```{r inspect-extra-columns}
+Lam5 <- p$loadings[["5"]]
+PIP5 <- p$pips[["5"]]
+Lam6 <- p$loadings[["6"]]
+PIP6 <- p$pips[["6"]]
+
+rbind(
+  data.frame(
+    K = 5, column = seq_len(ncol(Lam5)),
+    max_abs_loading = round(apply(abs(Lam5), 2, max), 3),
+    active_PIPs = colSums(PIP5 >= .5)
+  ),
+  data.frame(
+    K = 6, column = seq_len(ncol(Lam6)),
+    max_abs_loading = round(apply(abs(Lam6), 2, max), 3),
+    active_PIPs = colSums(PIP6 >= .5)
+  )
+)
+```
+
+At `K = 5`, column 4 is a singleton: it has one active PIP while the four
+substantive columns have five each. At `K = 6` that singleton persists and the
+sixth column is essentially empty, with no active PIP and a very small maximum
+loading. The matrices expose both features instead of hiding them inside one
+aggregate transition number. This `.5` count is a candidate-level diagnostic,
+not the continuous PIP stability metric defined below and not an automatic
+rule.
+
+The unmatched maximum alone does not establish that diagnosis. After locating
+the unmatched fourth column by comparing the `K = 4` and `K = 5` matrices,
+pull its loading and PIP entries directly:
+
+```{r inspect-singleton}
+data.frame(
+  item = seq_len(nrow(p$loadings[["5"]])),
+  loading = round(p$loadings[["5"]][, 4], 3),
+  PIP = round(p$pips[["5"]][, 4], 3)
+)
+```
+
+One loading is about `.61`, the second largest is only about `.054`, and only
+the first has `PIP >= .5`. That is the singleton evidence; the transition
+maximum is only the signal to perform this matrix-level check.
 
 These matrices support structural inspection and post-hoc comparison. They
 are not partial `vbfa` objects. If downstream work needs factor correlations,
@@ -157,9 +219,16 @@ Q_selected <- if (K_selected == ncol(Q0)) {
 fit_selected <- vbfa(Y, Q_selected)
 ```
 
-There is deliberately no `$fits`, `$selection`, or `selected_fit()` interface.
-`summary(p)` omits the matrix payloads, while `print(p)` reports each named
-cut, selection, and boundary compactly.
+`summary(p)` omits the matrix payloads but derives a per-candidate `ssl`
+component -- the column sums of squared loadings, `colSums(Lam^2)` -- and
+prints one row per candidate, which makes weak or emptied columns visible at
+a glance. `print(p)` reports each named cut, selection, and boundary
+compactly:
+
+```{r summary-print}
+summary(p)
+print(p)
+```
 
 ## Fit trajectories and parameter counting
 
@@ -216,30 +285,34 @@ window has boundary `single`.
 Every selection also requires a complete, converged, finite ELBO path. An
 unsuccessful interior candidate invalidates the selections, which become typed
 `NA` with boundary `none`; the rule does not bridge the gap or continue on a
-later fragment. Version 0.8.2 has no checkpoint, resume, or sweep-extension
+later fragment. Version 0.8.3 has no checkpoint, resume, or sweep-extension
 API, so changing either boundary requires a complete rerun.
 
 ## Adjacent-count stability is descriptive
 
-For consecutive converged oblique fits, `$transitions` asks how well the
-smaller loading solution reappears in the larger one:
+For consecutive converged candidates, `$transitions` asks how well the smaller
+loading solution reappears in the larger one:
 
 ```{r adjacent-stability}
 p$transitions[, c(
   "K_from", "K_to", "rmsd", "rmsd_max", "phi_min", "ari",
-  "pip_sum", "pip_product", "max_unmatched_loading"
+  "pip_rmsd", "collision", "unmatched_max"
 )]
 ```
 
-The comparison first orients each loading column to have a nonnegative mean.
-The `K0 = ncol(Q0)` backbone columns remain fixed by position. Beyond the
-backbone, a column is retained when its squared L2 norm is at least
-`stability_eps` (default `.1`), and retained smaller-fit columns are matched in
-order to the minimum-SSE unused retained columns of the larger fit. Exact ties
-choose the lowest available larger-fit column. This is a deterministic
-one-to-one heuristic, not a rotation or globally optimal assignment search.
+For a bifactor edge, the labelled general column is removed first so that the
+same comparison operates on group columns in both modes. The comparison then
+orients each loading column to have a nonnegative mean. The
+`K0 = ncol(Q0)` backbone columns remain fixed by position. Beyond the backbone,
+a column is retained when its squared L2 norm is at least
+`stability_eps` (default `.1`). Following Chen (2023, Eq. 17), each retained
+smaller-fit non-backbone column independently selects the minimum-SSE retained
+column of the larger fit; exact ties choose the lowest larger-fit column.
+Larger-fit columns are not removed after a match, so repeated selections are
+possible. This is deterministic nearest-column matching, not a rotation or a
+global assignment search.
 
-The six stability metrics are:
+The five stability metrics are:
 
 - `rmsd`, over all entries in the fixed and matched common columns;
 - `rmsd_max`, the largest column-wise RMSD, which exposes a changing factor
@@ -248,21 +321,29 @@ The six stability metrics are:
   orientation;
 - `ari`, comparing dominant-absolute-loading item partitions using all
   retained columns, including unmatched retained columns in the larger fit;
-- `pip_sum`, the proportion of matched cells whose `PIP >= .5` status reverses
-  in either direction; and
-- `pip_product`, the product of the two directional reversal proportions.
+- `pip_rmsd`, the continuous RMSD between PIPs after applying the same column
+  match, restricted to cells that are selectable at both endpoints.
 
-Read signed `phi_min` beside both RMSDs. A bipolar or contrast column with
-zero or nearly zero mean has a weak orientation: equivalent reflected columns
-can then produce `phi_min` near `-1`. For PIPs, a positive `pip_sum` with zero
-`pip_product` means that reversals occurred in only one direction, not that the
-solutions were perfectly stable. The bounds are
-`0 <= pip_product <= pip_sum^2 / 4 <= .25`.
+The logical `collision` flag is `TRUE` when two or more retained non-backbone
+columns in the smaller fit independently select the same larger-fit column.
+It exposes a many-to-one reproduction rather than silently forcing a distinct
+match; `FALSE` only says that no match index was reused, not that the edge is
+otherwise stable. It is `NA` when loading matching is unavailable. A malformed
+PIP endpoint alone does not erase it because collision is loading-based.
 
-The PIP summaries use all matched cells. Fixed design entries can therefore
-dilute them, sometimes differently across Q designs; do not compare their
-magnitudes substantively across differently constrained backbones.
-`max_unmatched_loading` is separate from the six stability metrics. It is the
+Read signed `phi_min` beside both loading RMSDs. A bipolar or contrast column
+with zero or nearly zero mean has a weak orientation: equivalent reflected
+columns can then produce `phi_min` near `-1`.
+
+For `pip_rmsd`, a backbone cell is eligible only when its `Q0` entry is `-1`
+at both endpoints; every cell in a matched added exploratory column is
+eligible. Fixed backbone entries (`0` or `1`) and unmatched columns are
+excluded, so they cannot dilute the result. Zero means identical PIP values
+over the eligible matched cells, without dichotomizing them at `.5`; no
+eligible cells or a malformed PIP endpoint gives typed `NA`. The loading-based
+metrics remain available when only the PIP comparison is malformed.
+
+`unmatched_max` is separate from the five stability metrics. It is the
 largest absolute loading outside the matched non-backbone core, including
 larger-fit columns screened out by `stability_eps`; it is zero when nothing is
 unmatched and `NA` when a complete match is impossible. It is a continuous
@@ -273,8 +354,8 @@ is uniquely the added factor.
 threshold, or an ELBO gain cut. Values around `.1`--`.2` can be used as a
 sensitivity range, but are not validated structural thresholds. All these
 fields are descriptive and none enters automatic factor-number selection.
-Stability values are `NA` for bifactor edges, failed endpoints, incomplete
-matches, and malformed endpoint matrices as applicable.
+Stability values are `NA` for failed endpoints, incomplete matches, and
+malformed endpoint matrices as applicable.
 
 These summaries are a package extension, not part of Chen and Jin's gain rule.
 The paper's separate robustness analysis instead compares solutions obtained
@@ -288,6 +369,9 @@ structure directly with `vbfa(..., ld = TRUE)` when that model is required.
 
 ## References
 
+* Chen, J. (2023). Fully and partially exploratory factor analysis with
+  bi-level Bayesian regularization. *Behavior Research Methods*, 55(4),
+  2125--2142. \doi{10.3758/s13428-022-01884-7}
 * Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
   Bayesian variable selection: Fit assessment and factor-number selection in
   partially exploratory factor analysis. *arXiv preprint* arXiv:2607.07159.

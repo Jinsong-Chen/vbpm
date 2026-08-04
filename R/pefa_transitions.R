@@ -2,11 +2,15 @@
 ##
 ## Loading/PIP matching is deliberately separate from transition-table
 ## construction.  The matcher is deterministic and uses base R only; the
-## builder adds PEFA-specific convergence and bifactor gates.
+## builder adds PEFA-specific convergence gates and bifactor group extraction.
 
 .transition_metric_names <- c(
-  "rmsd", "rmsd_max", "phi_min", "ari", "pip_sum", "pip_product",
-  "max_unmatched_loading"
+  "rmsd", "rmsd_max", "phi_min", "ari", "pip_rmsd",
+  "collision", "unmatched_max"
+)
+
+.transition_numeric_metric_names <- setdiff(
+  .transition_metric_names, "collision"
 )
 
 .na_transition_metrics <- function() {
@@ -15,7 +19,9 @@
 }
 
 .match_sweep_loadings <- function(lam1, lam2, K0, eps = 0.1,
-                                  pip1 = NULL, pip2 = NULL) {
+                                  pip1 = NULL, pip2 = NULL,
+                                  regularized1 = NULL,
+                                  regularized2 = NULL) {
   lam1 <- as.matrix(lam1)
   lam2 <- as.matrix(lam2)
 
@@ -129,9 +135,25 @@
   if (xor(have_pip1, have_pip2)) {
     stop("Supply both pip1 and pip2, or neither.", call. = FALSE)
   }
+  have_mask1 <- !is.null(regularized1)
+  have_mask2 <- !is.null(regularized2)
+  if (xor(have_mask1, have_mask2)) {
+    stop("Supply both regularized1 and regularized2, or neither.",
+         call. = FALSE)
+  }
+  if (have_pip1 && !have_mask1) {
+    stop("Supply regularized1 and regularized2 with the PIP matrices.",
+         call. = FALSE)
+  }
+  if (!have_pip1 && have_mask1) {
+    stop("Regularized masks are used only with PIP matrices.",
+         call. = FALSE)
+  }
   if (have_pip1) {
     pip1 <- as.matrix(pip1)
     pip2 <- as.matrix(pip2)
+    regularized1 <- as.matrix(regularized1)
+    regularized2 <- as.matrix(regularized2)
     compatible_names <- function(x, reference) {
       (is.null(rownames(x)) || is.null(rownames(reference)) ||
          identical(rownames(x), rownames(reference))) &&
@@ -147,6 +169,17 @@
       stop(paste0(
         "PIP matrices must match their loading dimensions and supplied ",
         "dimnames, and contain only finite values in [0, 1]."
+      ), call. = FALSE)
+    }
+    valid_mask <- function(x, reference) {
+      is.logical(x) && !anyNA(x) && identical(dim(x), dim(reference)) &&
+        compatible_names(x, reference)
+    }
+    if (!valid_mask(regularized1, lam1) ||
+        !valid_mask(regularized2, lam2)) {
+      stop(paste0(
+        "Regularized masks must be logical matrices matching their loading ",
+        "dimensions and supplied dimnames, without missing values."
       ), call. = FALSE)
     }
   }
@@ -179,34 +212,35 @@
 
   out <- c(
     rmsd = NA_real_, rmsd_max = NA_real_, phi_min = NA_real_, ari = ari,
-    pip_sum = NA_real_, pip_product = NA_real_,
-    max_unmatched_loading = NA_real_
+    pip_rmsd = NA_real_,
+    collision = NA_real_,
+    unmatched_max = NA_real_
   )
 
   ## ARI needs no factor match, so it remains available if a retained smaller
-  ## factor lacks an eligible candidate in the larger fit.
-  if (length(keep2) < length(keep1)) return(out)
+  ## factor lacks any eligible candidate in the larger fit.
+  if (length(keep1) && !length(keep2)) return(out)
 
-  idx1 <- backbone
-  idx2 <- backbone
-  available <- keep2
-
-  for (k in keep1) {
+  ## Equation 17 matches each retained non-backbone column independently.
+  ## Consequently, more than one smaller-fit column may select the same
+  ## larger-fit column; the collision flag makes that reuse explicit.
+  matched2 <- vapply(keep1, function(k) {
     distance <- vapply(
-      available,
+      keep2,
       function(j) distance_key(lam1[, k], lam2[, j]),
       numeric(1)
     )
-    pos <- which.min(distance)
-    idx1 <- c(idx1, k)
-    idx2 <- c(idx2, available[pos])
-    available <- available[-pos]
-  }
+    keep2[which.min(distance)]
+  }, integer(1))
+  out["collision"] <- as.numeric(anyDuplicated(matched2) > 0L)
+
+  idx1 <- c(backbone, keep1)
+  idx2 <- c(backbone, matched2)
 
   ## Screened columns remain eligible for this raw size diagnostic.  It does
   ## not identify a unique "added factor" or impose a salience cutoff.
   unmatched2 <- setdiff(free2, idx2)
-  out["max_unmatched_loading"] <- if (length(unmatched2)) {
+  out["unmatched_max"] <- if (length(unmatched2)) {
     max(abs(lam2[, unmatched2, drop = FALSE]))
   } else {
     0
@@ -232,13 +266,15 @@
   if (!anyNA(phi)) out["phi_min"] <- min(phi)
 
   if (have_pip1) {
-    active1 <- pip1[, idx1, drop = FALSE] >= 0.5
-    active2 <- pip2[, idx2, drop = FALSE] >= 0.5
-    n <- length(active1)
-    pip_drop <- sum(active1 & !active2) / n
-    pip_gain <- sum(!active1 & active2) / n
-    out["pip_sum"] <- pip_drop + pip_gain
-    out["pip_product"] <- pip_drop * pip_gain
+    eligible <- regularized1[, idx1, drop = FALSE] &
+      regularized2[, idx2, drop = FALSE]
+    if (any(eligible)) {
+      common_pip1 <- pip1[, idx1, drop = FALSE]
+      common_pip2 <- pip2[, idx2, drop = FALSE]
+      out["pip_rmsd"] <- stable_rmsd(
+        common_pip1[eligible], common_pip2[eligible]
+      )
+    }
   }
 
   out
@@ -254,14 +290,15 @@
     rmsd_max = rep(NA_real_, n),
     phi_min = rep(NA_real_, n),
     ari = rep(NA_real_, n),
-    pip_sum = rep(NA_real_, n),
-    pip_product = rep(NA_real_, n),
-    max_unmatched_loading = rep(NA_real_, n),
+    pip_rmsd = rep(NA_real_, n),
+    collision = rep(NA, n),
+    unmatched_max = rep(NA_real_, n),
     stringsAsFactors = FALSE
   )
 }
 
-.build_transitions <- function(sweep, K0, stability_eps = 0.1,
+.build_transitions <- function(sweep, loadings, pips, Q0,
+                               stability_eps = 0.1,
                                bifactor = FALSE) {
   n <- nrow(sweep) - 1L
   if (n <= 0L) return(.transition_table())
@@ -280,42 +317,94 @@
   edge_converged <- vapply(from, function(i) {
     isTRUE(sweep$converged[i]) && isTRUE(sweep$converged[i + 1L])
   }, logical(1))
-  malformed <- logical(n)
+  malformed_loading <- logical(n)
+  malformed_pip <- logical(n)
+  K0 <- ncol(Q0)
 
-  for (i in from) {
-    if (isTRUE(bifactor) || !edge_converged[i]) next
-
-    metrics <- tryCatch({
-      if (!all(c("loading", "pip") %in% names(sweep))) {
-        stop("the sweep must contain loading and pip list-columns")
+  endpoint <- function(x, K) {
+    value <- x[[as.character(K)]]
+    if (is.null(value)) {
+      stop("missing K-named sweep endpoint", call. = FALSE)
+    }
+    if (isTRUE(bifactor)) {
+      expected <- as.integer(K) + 1L
+      if (!is.matrix(value) || ncol(value) != expected) {
+        stop(
+          "bifactor sweep endpoints must be matrices with K + 1 columns",
+          call. = FALSE
+        )
       }
-      lam1 <- sweep$loading[[i]]
-      lam2 <- sweep$loading[[i + 1L]]
-      pip1 <- sweep$pip[[i]]
-      pip2 <- sweep$pip[[i + 1L]]
-      if (!is.matrix(pip1) || !is.matrix(pip2)) {
-        stop("PIP endpoints must be matrices")
-      }
-      .match_sweep_loadings(
-        lam1, lam2, K0 = K0, eps = stability_eps,
-        pip1 = pip1, pip2 = pip2
-      )
-    }, error = function(e) {
-      malformed[i] <<- TRUE
-      .na_transition_metrics()
-    })
-    out[i, .transition_metric_names] <- as.list(metrics)
+      ## The first column is the labelled general factor.  Stability is
+      ## defined on the group block so the ordinary backbone-aware matcher and
+      ## every diagnostic retain exactly the same meaning in both modes.
+      value <- value[, -1L, drop = FALSE]
+    }
+    value
+  }
+  regularized_mask <- function(lam) {
+    if (!is.matrix(Q0) || nrow(Q0) != nrow(lam) || K0 > ncol(lam)) {
+      stop("Q0 is incompatible with a sweep endpoint", call. = FALSE)
+    }
+    added <- ncol(lam) - K0
+    mask <- cbind(
+      Q0 == -1,
+      matrix(TRUE, nrow(lam), added)
+    )
+    dimnames(mask) <- dimnames(lam)
+    mask
   }
 
+  for (i in from) {
+    if (!edge_converged[i]) next
+
+    metrics <- tryCatch({
+      lam1 <- endpoint(loadings, out$K_from[i])
+      lam2 <- endpoint(loadings, out$K_to[i])
+      .match_sweep_loadings(
+        lam1, lam2, K0 = K0, eps = stability_eps
+      )
+    }, error = function(e) {
+      malformed_loading[i] <<- TRUE
+      .na_transition_metrics()
+    })
+
+    ## A malformed PIP endpoint should not erase valid loading diagnostics.
+    if (!malformed_loading[i]) {
+      pip_metric <- tryCatch({
+        pip1 <- endpoint(pips, out$K_from[i])
+        pip2 <- endpoint(pips, out$K_to[i])
+        if (!is.matrix(pip1) || !is.matrix(pip2)) {
+          stop("PIP endpoints must be matrices", call. = FALSE)
+        }
+        with_pip <- .match_sweep_loadings(
+          lam1, lam2, K0 = K0, eps = stability_eps,
+          pip1 = pip1, pip2 = pip2,
+          regularized1 = regularized_mask(lam1),
+          regularized2 = regularized_mask(lam2)
+        )
+        with_pip["pip_rmsd"]
+      }, error = function(e) {
+        malformed_pip[i] <<- TRUE
+        NA_real_
+      })
+      metrics["pip_rmsd"] <- pip_metric
+    }
+    out[i, .transition_numeric_metric_names] <-
+      as.list(metrics[.transition_numeric_metric_names])
+    out$collision[i] <- as.logical(metrics["collision"])
+  }
+
+  malformed <- malformed_loading | malformed_pip
   if (any(malformed)) {
     edges <- paste0(out$K_from[malformed], "->", out$K_to[malformed])
     warning(
       paste0(
-        "Stability diagnostics are unavailable for ", sum(malformed),
+        "Some stability diagnostics are unavailable for ", sum(malformed),
         " PEFA transition edge", if (sum(malformed) == 1L) "" else "s",
         " (K ", paste(edges, collapse = ", "),
         ") because a converged endpoint has malformed or nonfinite ",
-        "loading/PIP matrices; finite ELBO and BIC gains were retained."
+        "loading/PIP data; finite gains and any valid loading diagnostics ",
+        "were retained."
       ),
       call. = FALSE
     )

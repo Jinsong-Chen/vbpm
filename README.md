@@ -49,15 +49,19 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
   (Zhang & Chen, 2024, Eq. 16).
 - **`pefa()`** / **`select_K_elbow()`** — sweep the number of factors and
   select it with a relative ELBO-gain rule on one fixed criterion path. The
-  compact result carries two tables: `$sweep` has one row per candidate plus
-  loading/PIP matrix list-columns, and `$transitions` has one row per adjacent
-  pair with ELBO/BIC gains and descriptive stability diagnostics. Named
-  `$selected_K` and `$boundary` vectors report every requested cut. The six
-  stability summaries are aggregate and maximum column RMSD, signed minimum
-  congruence, ARI, and two PIP-reversal summaries; maximum unmatched loading is
-  a separate continuous size diagnostic. Full candidate fits are not retained:
-  explicitly refit a selected `K` when downstream work needs a complete model.
-  Includes compact `print()`, `summary()`, and `plot()` methods.
+  compact result carries two scalar tables: `$sweep` has one row per candidate,
+  and `$transitions` has one row per adjacent pair with ELBO/BIC gains and
+  descriptive stability diagnostics. Candidate matrices live separately in
+  K-named `$loadings` and `$pips` lists (`result$loadings[["4"]]`). Named
+  `$selected_K` and `$boundary` vectors report every requested cut. Transition
+  summaries include aggregate and maximum column RMSD, signed minimum
+  congruence, ARI, continuous PIP RMSD over mutually selectable matched cells,
+  a logical collision flag for repeated Equation-17 column matches, and a
+  separate maximum-unmatched-loading size diagnostic. Full candidate fits are
+  not retained: explicitly refit a selected `K` when downstream work needs a
+  complete model. The lean `$settings` list records only the controls needed
+  to interpret these results. Includes compact `print()`, `summary()`, and
+  `plot()` methods.
 - **`sim_fa()`** and **`sim_lvm()`** — two complementary data generators.
   `sim_fa()` is driven by the loading *pattern* (items per factor, alternating
   cross-loadings, minor factors) and can generate **higher-order/testlet**
@@ -197,7 +201,7 @@ round(fit$B, 2)                      # which covariates predict which factors
 
 ## Known limitations
 
-As of 0.8.2:
+As of 0.8.3:
 
 - **Response types.** The estimators model **continuous Gaussian responses**,
   and in-loop missing-data support covers that case in both `vbfa()` and
@@ -206,14 +210,14 @@ As of 0.8.2:
   and augmenting latent responses, which is a modelling extension rather than
   a feature. Simulating them is supported (`cati`/`noc` in `sim_fa()`,
   `ilvl` in `sim_lvm()`); estimating from them is not.
-- **Bifactor factor-number sweeps are weakly identified.** The retained
-  bifactor sweep is a research extension and should not be relied on to decide
-  how many *group* factors there are. Flexible unspecified loadings can absorb
-  omitted group structure and bias the result toward the lower end of the
-  requested window. Use an ordinary oblique sweep for the first-order count,
-  then compare matched anchored oblique and bifactor models by BIC; the
-  `bifactor` vignette illustrates that two-step route. Adjacent loading
-  stability is intentionally unavailable for bifactor sweep edges.
+- **Bifactor factor-number sweeps are a research extension.** Their `K` counts
+  group factors, and their adjacent diagnostics remove the labelled general
+  column before applying exactly the same loading/PIP matcher used by an
+  ordinary oblique sweep. General and group columns can nevertheless
+  redistribute common variance as `K` changes, so compare the two modes on the
+  same data, backbone, and window rather than assuming that either route must
+  agree. The `bifactor` vignette shows this empirical comparison and the
+  paper-defined two-step ordinary-count then matched-model route.
 - **No DIF paths in `vbmimic()`.** Covariates predict the *factors*
   (`Q_B`, i.e. impact); there are no direct covariate-to-item paths, so the
   model cannot currently express or detect differential item functioning.

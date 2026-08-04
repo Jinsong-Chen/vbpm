@@ -81,14 +81,14 @@ the other group entries are fixed at zero; the remaining entries stay
 partially exploratory.
 
 ```{r bifactor-fit}
-Q <- matrix(-1L, J, K)
+Q_direct <- matrix(-1L, J, K)
 for (k in seq_len(K)) {
   anchor <- which(cl == k)[1:2]
-  Q[anchor, ] <- 0L
-  Q[anchor, k] <- 1L
+  Q_direct[anchor, ] <- 0L
+  Q_direct[anchor, k] <- 1L
 }
 
-fit_bi <- vbfa(Y, Q, bifactor = TRUE)
+fit_bi <- vbfa(Y, Q_direct, bifactor = TRUE)
 fit_bi$Phi
 round(fit_stats(fit_bi), 3)
 ```
@@ -119,7 +119,7 @@ sim_ho <- sim_fa(
   N = 3000, K = K, ipf = ipf, lam = .8,
   gamma = gamma_true, rseed = 11
 )
-fit_ho <- vbfa(sim_ho$dat, Q, bifactor = TRUE)
+fit_ho <- vbfa(sim_ho$dat, Q_direct, bifactor = TRUE)
 
 effects <- special_effects(fit_ho)
 effects$mean_cv
@@ -147,67 +147,249 @@ both uncertain, use two steps. The first is the PEFA workflow of Chen and Jin
 
 ### Step 1: select the first-order count with ordinary PEFA
 
-Run an oblique, diagonal-residual sweep without a general factor. This selects
+Run oblique, diagonal-residual sweeps without a general factor. This selects
 the number of cluster-level factors; it does not decide whether their
-correlations should later be represented by a general factor. The named cuts
-below are the companion manuscript's convention: a 20% gain cut is primary
-and the laxer 10% cut is read as a sensitivity.
+correlations should later be represented by a general factor. We compare two
+backbones that use the same anchors. LPC (least partially confirmatory) gives
+each anchor its own-factor `1` and leaves every other entry unspecified. BPC
+(bifactor partially confirmatory) additionally fixes the other backbone
+entries in each anchor row to zero. The named cuts below are the
+companion manuscript's convention: a 20% gain cut is primary and the laxer
+10% cut is read as a sensitivity. In this tutorial LPC is the primary Step 1
+branch and BPC is its specification check.
 
 ```{r step1}
-Q0 <- matrix(-1L, J, 2)
+Q0_lpc <- matrix(-1L, J, 2)
 for (k in 1:2) {
   anchor <- which(cl == k)[1:2]
-  Q0[anchor, ] <- 0L
-  Q0[anchor, k] <- 1L
+  Q0_lpc[anchor, k] <- 1L
 }
 
-count_sweep <- pefa(Q0, Y, Kmin = 2, Kmax = 6,
-                    cuts = c(primary = 20, sensitivity = 10),
-                    verbose = FALSE)
-data.frame(
-  cut = unname(count_sweep$cuts),
-  selected_K = unname(count_sweep$selected_K[names(count_sweep$cuts)]),
-  boundary = unname(count_sweep$boundary[names(count_sweep$cuts)]),
-  row.names = names(count_sweep$cuts)
+Q0_bpc <- Q0_lpc
+for (k in 1:2) {
+  anchor <- which(cl == k)[1:2]
+  Q0_bpc[anchor, ] <- 0L
+  Q0_bpc[anchor, k] <- 1L
+}
+
+sweep_lpc <- pefa(
+  Q0_lpc, Y, Kmin = 2, Kmax = 5,
+  cuts = c(primary = 20, sensitivity = 10), verbose = FALSE
+)
+sweep_bpc <- pefa(
+  Q0_bpc, Y, Kmin = 2, Kmax = 5,
+  cuts = c(primary = 20, sensitivity = 10), verbose = FALSE
+)
+
+rbind(
+  data.frame(
+    backbone = "LPC", role = names(sweep_lpc$settings$cuts),
+    cut = unname(sweep_lpc$settings$cuts),
+    selected_K = unname(sweep_lpc$selected_K),
+    boundary = unname(sweep_lpc$boundary)
+  ),
+  data.frame(
+    backbone = "BPC", role = names(sweep_bpc$settings$cuts),
+    cut = unname(sweep_bpc$settings$cuts),
+    selected_K = unname(sweep_bpc$selected_K),
+    boundary = unname(sweep_bpc$boundary)
+  )
 )
 ```
 
-Check that the selected count is not merely a requested-window boundary, and
-read the fit trajectories descriptively. The PEFA vignette shows named-cut,
-backbone, and adjacent-count sensitivity summaries. A boundary result requires
-a complete wider sweep before proceeding.
+Check that each selected count is not merely a requested-window boundary, and
+read the fit trajectories descriptively. Agreement between LPC and BPC is a
+specification check, not proof of the count; disagreement must be carried
+forward rather than silently resolved in favor of one backbone. The PEFA
+vignette shows named-cut and adjacent-count sensitivity summaries. A boundary
+result requires a complete wider sweep before proceeding.
+
+### Compare ordinary and bifactor sweeps on the same backbone
+
+The workflow uses the ordinary oblique sweep above to count group factors. To
+see why sweep mode still deserves scrutiny, fit the exact bifactor extension
+to the same data, LPC backbone, candidate window, cuts, and optimization
+controls. In bifactor mode `K` still counts group factors; the fitted loading
+matrix has an additional general column.
+
+```{r compare-sweep-modes}
+sweep_bifactor <- pefa(
+  Q0_lpc, Y, Kmin = 2, Kmax = 5,
+  cuts = c(primary = 20, sensitivity = 10),
+  bifactor = TRUE, verbose = FALSE
+)
+
+rbind(
+  data.frame(
+    mode = "ordinary oblique", role = names(sweep_lpc$settings$cuts),
+    cut = unname(sweep_lpc$settings$cuts),
+    selected_K = unname(sweep_lpc$selected_K),
+    boundary = unname(sweep_lpc$boundary)
+  ),
+  data.frame(
+    mode = "bifactor", role = names(sweep_bifactor$settings$cuts),
+    cut = unname(sweep_bifactor$settings$cuts),
+    selected_K = unname(sweep_bifactor$selected_K),
+    boundary = unname(sweep_bifactor$boundary)
+  )
+)
+
+edge_columns <- c(
+  "K_from", "K_to", "ELBO_gain", "BIC_gain", "rmsd", "rmsd_max",
+  "phi_min", "ari", "pip_rmsd", "collision", "unmatched_max"
+)
+rbind(
+  data.frame(
+    mode = "ordinary oblique",
+    sweep_lpc$transitions[, edge_columns]
+  ),
+  data.frame(
+    mode = "bifactor",
+    sweep_bifactor$transitions[, edge_columns]
+  )
+)
+```
+
+This population contains three group factors. In this run the ordinary sweep
+selects `K = 3` at both cuts, whereas the bifactor sweep selects its lower
+boundary, `K = 2`, and gains no ELBO by adding the third group column. Thus the
+bifactor sweep is the less successful counter in this particular example.
+
+The transition definitions are identical across modes. For the bifactor
+sweep, matching removes the labelled general column and compares only the
+group loading and PIP blocks, so the stability columns address the same group
+structure as the ordinary sweep.
+
+The loading matrices permit a second, wholly descriptive view. The SS loading
+(SSL) for a column is its squared length, `colSums(Lam^2)`, equivalently the
+diagonal of `crossprod(Lam)`. The bifactor values below include the general
+column first, unlike its transition matching, which compares only group
+columns.
+
+```{r loading-ss}
+loading_ss <- data.frame()
+for (mode in c("ordinary oblique", "bifactor")) {
+  x <- if (mode == "ordinary oblique") sweep_lpc else sweep_bifactor
+  for (K_group in x$sweep$K) {
+    Lam <- x$loadings[[as.character(K_group)]]
+    SSL <- colSums(Lam^2)
+    loading_ss <- rbind(
+      loading_ss,
+      data.frame(
+        mode = mode,
+        K_group = K_group,
+        SSL = paste(sprintf("%.2f", SSL), collapse = ", ")
+      )
+    )
+  }
+}
+loading_ss
+```
+
+For example, the final two group-column SSL values at bifactor `K = 4` are
+about `0.00` and `0.28`. Their column lengths are about `0.00` and
+`sqrt(0.28) = 0.53`; that ordered `.53` is a norm, not a Gram eigenvalue.
+SS loadings can reveal a weak fitted column, but they are not eigenvalues of
+the loading Gram matrix unless the columns are orthogonal in item space. They
+therefore do not establish effective rank, choose a factor count, or add a
+`pefa()` selection rule. The same per-candidate values are printed by
+`summary()` for any sweep, derived from `$loadings` on the fly. This one
+simulated comparison illustrates how to assess the relative behavior of the
+two sweep modes; it does not establish that one mode is generally more
+reliable. That claim requires the planned replicated R6 analysis.
 
 ### Step 2: compare matched anchored models by BIC
 
-At the selected count, build one anchored group design and use it unchanged in
-two direct fits: an oblique model and a bifactor model with an added general
-factor. In this simulated example the selected count is three, so the `Q`
-constructed in Section 2 is the matched design.
+At each backbone's primary selected count, reconstruct the exact candidate
+design used in its Step 1 sweep: retain that sweep's `Q0` and append an
+unspecified column for every factor added above the backbone. Use this derived
+design unchanged in two direct fits, an oblique model and a bifactor model with
+an added general factor. Thus Step 2 cannot silently substitute the known
+population design from Section 2.
 
 ```{r step2}
-fit_oblique <- vbfa(Y, Q)
-fit_bifactor <- vbfa(Y, Q, bifactor = TRUE)
-
-bic <- c(
-  oblique = unname(fit_stats(fit_oblique)["BIC"]),
-  bifactor = unname(fit_stats(fit_bifactor)["BIC"])
+K_lpc <- unname(sweep_lpc$selected_K[["primary"]])
+K_bpc <- unname(sweep_bpc$selected_K[["primary"]])
+stopifnot(
+  sweep_lpc$boundary[["primary"]] == "interior",
+  sweep_bpc$boundary[["primary"]] == "interior"
 )
-data.frame(model = names(bic), BIC = unname(bic),
-           difference_from_oblique = unname(bic - bic["oblique"]))
+
+Q_step2_lpc <- cbind(
+  sweep_lpc$Q0,
+  matrix(-1L, J, K_lpc - ncol(sweep_lpc$Q0))
+)
+Q_step2_bpc <- cbind(
+  sweep_bpc$Q0,
+  matrix(-1L, J, K_bpc - ncol(sweep_bpc$Q0))
+)
+
+fit_lpc_oblique <- vbfa(Y, Q_step2_lpc)
+fit_lpc_bifactor <- vbfa(Y, Q_step2_lpc, bifactor = TRUE)
+fit_bpc_oblique <- vbfa(Y, Q_step2_bpc)
+fit_bpc_bifactor <- vbfa(Y, Q_step2_bpc, bifactor = TRUE)
+
+bic_lpc <- c(
+  oblique = unname(fit_stats(fit_lpc_oblique)["BIC"]),
+  bifactor = unname(fit_stats(fit_lpc_bifactor)["BIC"])
+)
+bic_bpc <- c(
+  oblique = unname(fit_stats(fit_bpc_oblique)["BIC"]),
+  bifactor = unname(fit_stats(fit_bpc_bifactor)["BIC"])
+)
+rbind(
+  data.frame(
+    backbone = "LPC", selected_K = K_lpc, model = names(bic_lpc),
+    BIC = unname(bic_lpc),
+    difference_from_oblique = unname(bic_lpc - bic_lpc[["oblique"]])
+  ),
+  data.frame(
+    backbone = "BPC", selected_K = K_bpc, model = names(bic_bpc),
+    BIC = unname(bic_bpc),
+    difference_from_oblique = unname(bic_bpc - bic_bpc[["oblique"]])
+  )
+)
 ```
 
-Lower BIC is preferred. BIC is the operational comparison here because the
-two competitors contain different loading designs and therefore different
-prior bookkeeping; ELBO remains appropriate for comparing the same-shaped
-candidates within the PEFA sweep.
+Lower BIC is preferred. Here both backbones select three factors, but their
+backbone-preserving Step 2 margins point in opposite directions (about `-22`
+under LPC and `+21` under BPC, where negative favors the bifactor). The example
+therefore delivers a depth-sensitivity result, not permission to choose the
+more favorable arm.
+
+An alternative is to derive a fully hard design from one selected Step 1 PIP
+matrix. Here is the LPC version as a separate sensitivity:
+
+```{r pip-hard-design}
+PIP_lpc <- sweep_lpc$pips[[as.character(K_lpc)]]
+Q_pip_lpc <- ifelse(PIP_lpc > .5, 1L, 0L)
+
+backbone_columns <- seq_len(ncol(sweep_lpc$Q0))
+anchors_ok <- all(
+  Q_pip_lpc[, backbone_columns, drop = FALSE][sweep_lpc$Q0 == 1L] == 1L
+)
+stopifnot(anchors_ok, all(colSums(Q_pip_lpc == 1L) >= 2L))
+colSums(Q_pip_lpc == 1L)
+```
+
+The strict `PIP > .5` operator differs at exact ties from the package's
+`PIP >= .5` convention for descriptive active-loading counts and nominal hard
+selection. This hard route is data-adaptive and remains an explicit
+sensitivity rather than part of the backbone-preserving comparison;
+transition `pip_rmsd` is continuous and uses no PIP threshold. BIC is the
+operational Step 2 comparison because the two competitors contain different
+loading designs and therefore different prior bookkeeping; ELBO remains
+appropriate for comparing same-shaped candidates within a PEFA sweep.
 
 This comparison is evidence, not an automatic structural verdict. Use the
-same data, anchors, residual assumptions, and estimation controls in both
-arms. Thin margins, sensitivity to defensible anchor choices, or conspicuous
-residual dependence should be reported and investigated before interpreting a
-bifactor preference. If the bifactor is retained, `special_effects()` then
-describes whether it is close to an HO representation and quantifies its
-group/testlet effects.
+same data, derived `Q`, residual assumptions, and estimation controls in the
+two arms within each backbone. If LPC and BPC select different counts, their
+Step 2 margins answer questions at different dimensions and must not be
+attributed to backbone depth alone. Thin margins, sensitivity to defensible
+anchor choices, or conspicuous residual dependence should be reported and
+investigated before interpreting a bifactor preference. If the bifactor is
+retained, `special_effects()` then describes whether it is close to an HO
+representation and quantifies its group/testlet effects.
 
 ## References
 

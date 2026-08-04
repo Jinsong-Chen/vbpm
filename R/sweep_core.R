@@ -39,9 +39,15 @@
       )
     }
 
-    if (!is.list(value) || !is.data.frame(value$row) ||
-        nrow(value$row) != 1L || !is.matrix(value$loading) ||
-        !is.matrix(value$pip)) {
+    valid_K <- is.list(value) && is.data.frame(value$row) &&
+      nrow(value$row) == 1L && "K" %in% names(value$row) &&
+      is.numeric(value$row$K) && !is.complex(value$row$K) &&
+      length(value$row$K) == 1L && !is.na(value$row$K) &&
+      is.finite(value$row$K) && value$row$K == floor(value$row$K) &&
+      identical(as.integer(value$row$K), k)
+    valid_matrices <- is.list(value) && is.matrix(value$loading) &&
+      is.matrix(value$pip) && identical(dim(value$loading), dim(value$pip))
+    if (!valid_K || !valid_matrices) {
       stop("Internal sweep adapter returned a malformed candidate payload.",
            call. = FALSE)
     }
@@ -54,7 +60,9 @@
 
   sweep <- do.call(rbind, rows)
   rownames(sweep) <- NULL
-  sweep$loading <- I(loading)
-  sweep$pip <- I(pip)
-  sweep
+  candidate_names <- as.character(sweep$K)
+  names(loading) <- candidate_names
+  names(pip) <- candidate_names
+
+  list(sweep = sweep, loadings = loading, pips = pip)
 }

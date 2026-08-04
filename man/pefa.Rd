@@ -60,19 +60,20 @@ counting.}
 own model class: \code{ld}, \code{Qe}, \code{ld_control}, and \code{orthogonal} are rejected.}
 }
 \value{
-An object of class \code{pefa} with two data frames:
+An object of class \code{pefa} with two data frames and two matrix lists:
 \describe{
 \item{\verb{$sweep}}{Candidate properties: \code{K}, \code{ELBO}, \code{AIC}, \code{BIC},
-\code{RMSEA}, \code{SRMR}, \code{CFI}, \code{TLI}, \code{t}, \code{iter}, \code{secs}, \code{converged}, plus
-\code{loading} and \code{pip} matrix list-columns.}
+\code{RMSEA}, \code{SRMR}, \code{CFI}, \code{TLI}, \code{t}, \code{iter}, \code{secs}, and \code{converged}.}
 \item{\verb{$transitions}}{Adjacent edges: \code{K_from}, \code{K_to}, \code{ELBO_gain},
-\code{BIC_gain}, \code{rmsd}, \code{rmsd_max}, \code{phi_min}, \code{ari}, \code{pip_sum},
-\code{pip_product}, and \code{max_unmatched_loading}.}
+\code{BIC_gain}, \code{rmsd}, \code{rmsd_max}, \code{phi_min}, \code{ari}, \code{pip_rmsd}, the
+logical \code{collision} flag, and \code{unmatched_max}.}
+\item{\verb{$loadings}, \verb{$pips}}{Named lists containing the natural loading
+and PIP matrix for every candidate \code{K}.}
 }
-Small metadata fields are \code{call}, \code{model}, \code{objective_type}, \code{Q0}, named
-\code{selected_K} and \code{boundary} vectors, \code{window}, \code{cuts}, \code{sustain},
-\code{bifactor}, the normalized \code{general} design, \code{tau}, \code{stability_eps},
-\code{rank_adjust}, and \code{rank_max_J}. Full candidate fits are not retained.
+In order, the other top-level fields are named \code{selected_K} and \code{boundary}
+vectors, the backbone \code{Q0}, and \code{settings}. The settings are \code{cuts},
+\code{sustain}, \code{bifactor}, \code{general}, \code{tau}, \code{stability_eps}, and
+\code{rank_adjust}. Full candidate fits are not retained.
 }
 \description{
 Fits \code{\link[=vbfa]{vbfa()}} over a consecutive factor-count window while holding the
@@ -84,27 +85,36 @@ fit indices, BIC gains, and adjacent structural summaries are descriptive.
 Ordinary \code{pefa()} candidates are oblique and have diagonal residuals. The
 optional bifactor sweep is retained as a research extension: its reported
 \code{K} is the number of group factors and \code{\link[=vbfa]{vbfa()}} adds one general factor.
-Bifactor sweeps are not presented as a reliable way to discover the number
-of group factors, and their transition stability diagnostics are \code{NA}.
+For directly comparable adjacent-count summaries, bifactor transitions
+remove that labelled general column and apply the ordinary matcher to the
+remaining group-loading and group-PIP blocks. Whether the bifactor extension
+recovers a useful group-factor count is an empirical question rather than a
+guarantee of the paper-defined ordinary workflow.
 }
 \section{Adjacent loading and PIP summaries}{
 
-The first \code{ncol(Q0)} loading columns retain their identities. Remaining
-columns are oriented to nonnegative means, screened by \code{stability_eps}, and
-greedily matched from the smaller fit to the minimum-SSE unused column in
-the larger fit. \code{rmsd} pools common cells; \code{rmsd_max} is the largest
+Every compared loading column is oriented to have a nonnegative mean. In a
+bifactor sweep the labelled general column is first removed, so the same
+definitions below operate on group factors in both modes. The first
+\code{ncol(Q0)} backbone columns retain their positions and bypass screening;
+remaining columns are screened by \code{stability_eps}, then each smaller-fit
+column is independently matched to its minimum-SSE larger-fit column. \code{rmsd}
+pools common cells; \code{rmsd_max} is the largest
 column-wise RMSD; and \code{phi_min} is signed Tucker congruence. For bipolar or
 contrast columns with means at or near zero, reflection orientation is weak,
 so interpret \code{phi_min} beside both RMSDs. \code{ari} compares dominant-loading
 item partitions using all retained columns, including an unmatched larger-
-fit column.
+fit column. \code{collision} is \code{TRUE} when two or more retained non-backbone
+columns in the smaller fit select the same retained larger-fit column; this
+reuse is permitted by the independent matching rule.
 
-PIP summaries use \code{PIP >= .5} over all matched cells. \code{pip_sum} is the total
-directional reversal proportion and \code{pip_product} records whether reversals
-occur in both directions. Fixed 0/1 entries are unmasked and can dilute these
-descriptive rates. \code{max_unmatched_loading} is the largest absolute loading
-outside the completely matched non-backbone core, including screened-out
-columns; it is descriptive and is not an added-factor or salience rule.
+\code{pip_rmsd} is the continuous PIP RMSD over matched cells that are
+unspecified/regularized in both adjacent candidates; fixed backbone cells
+are excluded. \code{unmatched_max} is the largest absolute loading outside
+the completely matched non-backbone core, including screened-out columns; it
+is descriptive and is not an added-factor or salience rule. The complete
+bifactor loading and PIP matrices, including the general column, remain in
+\verb{$loadings} and \verb{$pips} for candidate-level inspection.
 }
 
 \section{Complete paths and boundaries}{
@@ -135,14 +145,13 @@ Q0 <- matrix(-1L, ncol(sim$dat), 2)
 groups <- rep(1:3, each = 6)
 for (k in 1:2) {
   anchors <- which(groups == k)[1:2]
-  Q0[anchors, ] <- 0L
   Q0[anchors, k] <- 1L
 }
 result <- pefa(Q0, sim$dat, 2, 4, verbose = FALSE)
 result$selected_K
 result$transitions
-i <- match(result$selected_K[["primary"]], result$sweep$K)
-result$sweep$loading[[i]]
+K_selected <- result$selected_K[["primary"]]
+result$loadings[[as.character(K_selected)]]
 }
 
 }

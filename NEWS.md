@@ -1,3 +1,56 @@
+# vbpm 0.8.3
+
+This release makes the compact PEFA object easier to inspect and removes two
+uninformative PIP summaries. It is a breaking refinement of the 0.8.2 schema;
+the 0.8.2 release history below is unchanged.
+
+* `$sweep` is now an ordinary scalar-only data frame. Candidate loading and
+  PIP matrices move to top-level, K-named `$loadings` and `$pips` lists, so a
+  candidate is read directly as `x$loadings[["4"]]` or `x$pips[["4"]]`.
+  Their names always equal `as.character(x$sweep$K)`; full candidate fits are
+  still not retained.
+* `pip_sum` and `pip_product` are removed from `$transitions`. Both thresholded
+  PIPs at `.5` and were diluted by fixed design cells; the product also returned
+  zero whenever all changes ran in one direction. The replacement `pip_rmsd`
+  is continuous: after loading-column matching, it is the RMSD between PIPs
+  over matched cells that are selectable at both endpoints. Fixed backbone
+  cells and unmatched columns are excluded. Loading-based metrics remain
+  available when only a PIP endpoint is malformed.
+* Loading alignment now follows Equation 17 directly: each retained
+  non-backbone column in the smaller fit independently selects its nearest
+  retained column in the larger fit. Reuse is allowed and the logical
+  `$transitions$collision` flag reports when a larger-fit column is selected
+  more than once; it is not silently resolved by a one-to-one assignment.
+* Bifactor transitions no longer suppress all stability fields. The labelled
+  general column is removed and the same alignment, screening, loading, PIP,
+  collision, and unmatched-column definitions are applied to the group block,
+  making same-data oblique and bifactor sweeps directly comparable. The full
+  `K + 1` matrices remain available for candidate-level inspection.
+  This supersedes the earlier blanket implementation warning: relative sweep
+  reliability is now assessed empirically rather than decided from model class.
+* The remaining `unmatched_max` stays a separate continuous,
+  descriptive size diagnostic. It is not a loading-salience cutoff or an
+  automatic selection rule.
+* The bifactor vignette now runs ordinary-oblique and bifactor LPC sweeps on
+  the same heterogeneous bifactor population and `K = 2:5` window. In this
+  reproducible example the ordinary sweep selects the true three groups at
+  both cuts, whereas the bifactor sweep selects its lower boundary. A derived
+  SS-loading table (`colSums(Lam^2)`) exposes weak columns without adding a
+  result field or selection rule; replicated R6 work will test whether this
+  example generalizes.
+* `summary()` derives a per-candidate `ssl` component -- the sums of squared
+  loadings `colSums(Lam^2)` -- from `$loadings` at summary time, and its print
+  method displays one row per candidate. In bifactor mode the values cover
+  all `K + 1` columns with the general factor first, unlike the group-block
+  transition diagnostics. SS loadings are descriptive column sizes, not Gram
+  eigenvalues, and enter no selection rule; the sweep object itself stores no
+  derived state.
+* The top-level object is reduced to `$sweep`, `$transitions`, `$loadings`,
+  `$pips`, `$selected_K`, `$boundary`, `$Q0`, and `$settings`. The lean
+  `$settings` list contains only `cuts`, `sustain`, `bifactor`, `general`,
+  `tau`, `stability_eps`, and `rank_adjust`. The requested window is derived
+  from `$sweep$K`, and the backbone size from `ncol(x$Q0)`.
+
 # vbpm 0.8.2
 
 This release deliberately simplifies PEFA before 1.0 and changes both its

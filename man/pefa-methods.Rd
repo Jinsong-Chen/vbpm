@@ -40,10 +40,15 @@ primary selection; the BIC-gain panel is descriptive.}
 }
 \value{
 \code{summary()} returns a compact \code{summary.pefa} object without loading
-or PIP matrices. Print and plot methods return their input invisibly.
+or PIP matrices. It carries \code{ssl}, the per-candidate sums of squared
+loadings (\code{colSums(Lam^2)}), derived from \verb{$loadings} at summary time
+rather than stored on the sweep object; in bifactor mode each vector
+covers all \code{K + 1} columns with the general factor first. SS loadings
+are descriptive column sizes, not Gram eigenvalues, and take part in no
+selection rule. Print and plot methods return their input invisibly.
 }
 \description{
-Methods consume the compact sweep and transition tables directly. Matrix
-list-columns remain available on the original object but are omitted from
-summaries and console candidate tables.
+Methods consume the compact sweep and transition tables directly. Loading
+and PIP matrices remain available in separate named lists on the original
+object but are omitted from summaries and console candidate tables.
 }

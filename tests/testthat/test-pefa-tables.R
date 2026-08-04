@@ -1,4 +1,4 @@
-## Compact two-table PEFA contract (0.8.2).
+## Compact PEFA contract (0.8.3).
 
 .make_pefa_data <- function(N = 180, K = 3, seed = 4) {
   set.seed(seed)
@@ -20,13 +20,13 @@
 
 .transition_names <- c(
   "K_from", "K_to", "ELBO_gain", "BIC_gain",
-  "rmsd", "rmsd_max", "phi_min", "ari", "pip_sum", "pip_product",
-  "max_unmatched_loading"
+  "rmsd", "rmsd_max", "phi_min", "ari", "pip_rmsd", "collision",
+  "unmatched_max"
 )
 
 .sweep_names <- c(
   "K", "ELBO", "AIC", "BIC", "RMSEA", "SRMR", "CFI", "TLI",
-  "t", "iter", "secs", "converged", "loading", "pip"
+  "t", "iter", "secs", "converged"
 )
 
 test_that("the elbow rule requires the full sustained run", {
@@ -47,7 +47,7 @@ test_that("the elbow rule requires the full sustained run", {
   )
 })
 
-test_that("pefa has the exact 0.8.2 public signature", {
+test_that("pefa retains its public signature in 0.8.3", {
   expect_identical(
     names(formals(pefa)),
     c("Q0", "Y", "Kmin", "Kmax", "cuts", "sustain", "bifactor",
@@ -100,7 +100,7 @@ test_that("the internal runner is model-neutral and preserves typed failures", {
       pip = matrix(if (converged) .5 else NA_real_, 2, K)
     )
   }
-  sweep <- vbpm:::.run_sweep(
+  run <- vbpm:::.run_sweep(
     2:3,
     fit_one = fit_one,
     extract_one = function(fit, K) {
@@ -109,19 +109,22 @@ test_that("the internal runner is model-neutral and preserves typed failures", {
     },
     failure_one = function(K, elapsed, error) payload(K, elapsed, FALSE)
   )
-  expect_identical(sweep$K, 2:3)
-  expect_identical(sweep$converged, c(TRUE, FALSE))
-  expect_true(is.matrix(sweep$loading[[1L]]))
-  expect_true(all(is.na(sweep$pip[[2L]])))
-  expect_gte(sweep$secs[[1L]], .02)
+  expect_named(run, c("sweep", "loadings", "pips"))
+  expect_identical(run$sweep$K, 2:3)
+  expect_identical(run$sweep$converged, c(TRUE, FALSE))
+  expect_identical(names(run$loadings), c("2", "3"))
+  expect_identical(names(run$pips), c("2", "3"))
+  expect_true(is.matrix(run$loadings[[1L]]))
+  expect_true(all(is.na(run$pips[[2L]])))
+  expect_gte(run$sweep$secs[[1L]], .02)
   extraction_failed <- vbpm:::.run_sweep(
     2L,
     fit_one = function(K) list(K = K),
     extract_one = function(fit, K) stop("synthetic extraction failure"),
     failure_one = function(K, elapsed, error) payload(K, elapsed, FALSE)
   )
-  expect_false(extraction_failed$converged[[1L]])
-  expect_true(is.finite(extraction_failed$secs[[1L]]))
+  expect_false(extraction_failed$sweep$converged[[1L]])
+  expect_true(is.finite(extraction_failed$sweep$secs[[1L]]))
   expect_error(
     vbpm:::.run_sweep(
       c(2L, 4L), fit_one = fit_one,
@@ -129,6 +132,26 @@ test_that("the internal runner is model-neutral and preserves typed failures", {
       failure_one = function(K, elapsed, error) payload(K, elapsed, FALSE)
     ),
     "consecutive increasing"
+  )
+  expect_error(
+    vbpm:::.run_sweep(
+      2L, fit_one = function(K) list(K = K),
+      extract_one = function(fit, K) payload(K + 1L, NA_real_, TRUE),
+      failure_one = function(K, elapsed, error) payload(K, elapsed, FALSE)
+    ),
+    "malformed candidate payload"
+  )
+  expect_error(
+    vbpm:::.run_sweep(
+      2L, fit_one = function(K) list(K = K),
+      extract_one = function(fit, K) {
+        out <- payload(K, NA_real_, TRUE)
+        out$pip <- matrix(.5, 2, K + 1L)
+        out
+      },
+      failure_one = function(K, elapsed, error) payload(K, elapsed, FALSE)
+    ),
+    "malformed candidate payload"
   )
 })
 
@@ -148,7 +171,7 @@ test_that("hard-selected CFI is one when its denominator is zero", {
   expect_identical(unname(stats[["CFI"]]), 1)
 })
 
-test_that("pefa returns the exact compact two-table object", {
+test_that("pefa returns the exact compact 0.8.3 object", {
   dat <- .make_pefa_data()
   object <- pefa(
     dat$Q0, dat$Y, Kmin = 2, Kmax = 3,
@@ -159,18 +182,20 @@ test_that("pefa returns the exact compact two-table object", {
   expect_s3_class(object, "pefa")
   expect_false(inherits(object, "vbpm_sweep"))
   expect_named(object, c(
-    "call", "model", "objective_type", "Q0", "selected_K", "boundary",
-    "sweep", "transitions", "window", "cuts", "sustain", "bifactor",
-    "general", "tau", "stability_eps", "rank_adjust", "rank_max_J"
+    "sweep", "transitions", "loadings", "pips", "selected_K", "boundary",
+    "Q0", "settings"
   ))
-  expect_identical(object$model, "vbfa")
-  expect_identical(object$objective_type, "elbo")
   expect_identical(object$Q0, dat$Q0)
   expect_named(object$sweep, .sweep_names)
   expect_named(object$transitions, .transition_names)
-  expect_identical(object$window, c(Kmin = 2L, Kmax = 3L, K0 = 2L))
-  expect_identical(names(object$selected_K), names(object$cuts))
-  expect_identical(names(object$boundary), names(object$cuts))
+  expect_named(object$settings, c(
+    "cuts", "sustain", "bifactor", "general", "tau", "stability_eps",
+    "rank_adjust"
+  ))
+  expect_identical(names(object$selected_K), names(object$settings$cuts))
+  expect_identical(names(object$boundary), names(object$settings$cuts))
+  expect_identical(names(object$loadings), as.character(object$sweep$K))
+  expect_identical(names(object$pips), as.character(object$sweep$K))
   expect_null(object$fits)
   expect_null(object$selection)
   expect_null(object$selected_fit)
@@ -178,23 +203,36 @@ test_that("pefa returns the exact compact two-table object", {
                       inherits = FALSE))
 
   for (i in seq_len(nrow(object$sweep))) {
-    expect_true(is.matrix(object$sweep$loading[[i]]))
-    expect_true(is.matrix(object$sweep$pip[[i]]))
-    expect_identical(dim(object$sweep$loading[[i]]),
+    expect_true(is.matrix(object$loadings[[i]]))
+    expect_true(is.matrix(object$pips[[i]]))
+    expect_identical(dim(object$loadings[[i]]),
                      c(ncol(dat$Y), object$sweep$K[i]))
-    expect_identical(dim(object$sweep$pip[[i]]),
-                     dim(object$sweep$loading[[i]]))
+    expect_identical(dim(object$pips[[i]]),
+                     dim(object$loadings[[i]]))
   }
   expect_false(any(grepl("_gain", names(object$sweep))))
   expect_identical(nrow(object$transitions), nrow(object$sweep) - 1L)
 
   summary <- summary(object)
   expect_s3_class(summary, "summary.pefa")
-  expect_false(any(c("loading", "pip") %in% names(summary$sweep)))
+  expect_identical(names(summary$sweep), .sweep_names)
   expect_identical(summary$selected_K, object$selected_K)
   expect_identical(summary$boundary, object$boundary)
+
+  ## SS loadings are derived at summary time, never stored on the object.
+  expect_null(object$ssl)
+  expect_identical(names(summary$ssl), names(object$loadings))
+  expect_identical(
+    unname(lengths(summary$ssl)),
+    unname(vapply(object$loadings, ncol, integer(1)))
+  )
+  first <- names(object$loadings)[1L]
+  expect_equal(summary$ssl[[first]],
+               colSums(object$loadings[[first]]^2))
+
   expect_output(print(object), "ELBO gain \\[primary = 20%\\]")
   expect_output(print(summary), "Candidates")
+  expect_output(print(summary), "SS loadings")
 })
 
 test_that("pefa validates new controls before fitting", {
@@ -226,12 +264,11 @@ test_that("pefa validates new controls before fitting", {
 test_that("print gives actionable advice for every named open boundary", {
   object <- structure(
     list(
-      bifactor = FALSE,
-      window = c(Kmin = 2L, Kmax = 4L, K0 = 2L),
-      cuts = c(primary = 10),
+      settings = list(cuts = c(primary = 10), bifactor = FALSE),
       selected_K = c(primary = 4L),
       boundary = c(primary = "upper"),
-      sweep = data.frame(K = 2:4, converged = TRUE)
+      sweep = data.frame(K = 2:4, converged = TRUE),
+      Q0 = matrix(-1L, 6, 2)
     ),
     class = "pefa"
   )
@@ -241,15 +278,28 @@ test_that("print gives actionable advice for every named open boundary", {
   object$boundary[["primary"]] <- "lower"
   expect_output(print(object), "reduce or revise Q0")
 
-  object$window <- c(Kmin = 3L, Kmax = 4L, K0 = 2L)
+  object$sweep <- data.frame(K = 3:4, converged = TRUE)
   object$selected_K[["primary"]] <- 3L
   expect_output(print(object), "smaller Kmin")
 
-  object$window <- c(Kmin = 2L, Kmax = 4L, K0 = 2L)
-  object$cuts <- c(primary = 20, sensitivity = 10)
+  object$sweep <- data.frame(K = 2:4, converged = TRUE)
+  object$settings$cuts <- c(primary = 20, sensitivity = 10)
   object$selected_K <- c(primary = 3L, sensitivity = 4L)
   object$boundary <- c(primary = "interior", sensitivity = "upper")
   expect_output(print(object), "sensitivity.*larger Kmax")
+
+  object$settings$bifactor <- TRUE
+  expect_output(print(object), "sensitivity.*larger Kmax")
+  expect_output(print(object), "not a reliable", negate = TRUE)
+
+  object$settings$bifactor <- FALSE
+  object$sweep <- data.frame(K = 1:2, converged = TRUE)
+  object$Q0 <- matrix(integer(0), 6, 0)
+  object$selected_K <- c(primary = 1L)
+  object$boundary <- c(primary = "lower")
+  object$settings$cuts <- c(primary = 10)
+  expect_output(print(object), "minimum supported K")
+  expect_output(print(object), "smaller Kmin", negate = TRUE)
 })
 
 test_that("pefa stores fit statistics under the requested rank policy", {
@@ -284,9 +334,9 @@ test_that("pefa stores fit statistics under the requested rank policy", {
     unname(unlist(adjusted$sweep[1L, fields], use.names = TRUE)),
     unname(direct_adjusted[fields])
   )
-  expect_false(nominal$rank_adjust)
-  expect_true(adjusted$rank_adjust)
-  expect_identical(nominal$rank_max_J, 3e9)
+  expect_false(nominal$settings$rank_adjust)
+  expect_true(adjusted$settings$rank_adjust)
+  expect_null(nominal$rank_max_J)
   expect_lt(adjusted$sweep$t, nominal$sweep$t)
 })
 
@@ -307,20 +357,33 @@ test_that("a failed sweep emits one aggregate selection warning", {
   expect_true(all(object$boundary == "none"))
 })
 
-test_that("bifactor sweeps store K plus general matrices and gate stability", {
+test_that("bifactor sweeps store general matrices and compare group blocks", {
   dat <- .make_pefa_data(N = 120)
   object <- suppressWarnings(pefa(
     dat$Q0, dat$Y, 2, 3, bifactor = TRUE,
     cuts = c(primary = 20, sensitivity = 10),
     v0 = .001, max_it = 300, verbose = FALSE
   ))
-  expect_true(object$bifactor)
-  expect_identical(object$general, rep(1L, ncol(dat$Y)))
+  expect_true(object$settings$bifactor)
+  expect_identical(object$settings$general, rep(1L, ncol(dat$Y)))
   expect_identical(object$sweep$K, 2:3)
   expect_identical(
-    vapply(object$sweep$loading, ncol, integer(1)), 3:4
+    vapply(object$loadings, ncol, integer(1)),
+    stats::setNames(3:4, c("2", "3"))
   )
-  expect_true(all(is.na(object$transitions[vbpm:::.transition_metric_names])))
+  expect_named(object$transitions, .transition_names)
+  expect_type(object$transitions$collision, "logical")
+  if (all(object$sweep$converged)) {
+    expect_true(any(is.finite(unlist(object$transitions[
+      vbpm:::.transition_numeric_metric_names
+    ], use.names = FALSE))))
+  }
   expect_output(print(object), "group factors [(][+] 1 general")
   expect_output(print(summary(object)), "K_total")
+
+  ## Summary SSL covers ALL factors in bifactor mode: K + 1 values,
+  ## general column first, while transitions stay group-block based.
+  ssl <- summary(object)$ssl
+  expect_identical(unname(lengths(ssl)), object$sweep$K + 1L)
+  expect_output(print(summary(object)), "general column first")
 })

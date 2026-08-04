@@ -168,7 +168,7 @@ for model comparison, and only across fits sharing one \code{objective_type}.
 
 \examples{
 ## partially confirmatory: two anchors per factor, the rest exploratory
-sim <- sim_fa(N = 300, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
+sim <- sim_fa(N = 200, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
 Q <- matrix(-1L, ncol(sim$dat), 3)
 for (k in 1:3) { a <- which(rep(1:3, each = 6) == k)[1:2]; Q[a, ] <- 0; Q[a, k] <- 1 }
 fit <- vbfa(sim$dat, Q)
@@ -185,7 +185,7 @@ fb$Phi                      # identity by construction
 ## equivalent long form: vbfa(sim$dat, cbind(1L, Q), orthogonal = TRUE)
 
 ## local dependence: simulate correlated residuals, then set ld = TRUE
-simLD <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, lac = .3, ecr = .3,
+simLD <- sim_fa(N = 300, K = 3, ipf = 6, lam = .7, lac = .3, ecr = .3,
                 rseed = 2)
 fLD <- vbfa(simLD$dat, Q, ld = TRUE, max_it = 300,
             tolVal = 1e-3)
@@ -195,9 +195,9 @@ which(Poff >= sort(Poff, decreasing = TRUE)[3], arr.ind = TRUE)
 simLD$ofd_ind
 
 ## empirical illustration: NLSY 1997, 27 items treated as continuous.
-## A 1,000-row subset keeps the example quick; the vignette fits all 3,458.
+## A 500-row subset keeps the example quick; the vignette fits all 3,458.
 data(nlsy27)
-Yn <- as.matrix(nlsy27$dat)[1:1000, ]
+Yn <- as.matrix(nlsy27$dat)[1:500, ]
 sum(is.na(Yn))            # incomplete cells, imputed in-loop
 fn <- vbfa(Yn, nlsy27$Q)
 round(fn$Lam, 2)

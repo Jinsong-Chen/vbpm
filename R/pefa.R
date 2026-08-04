@@ -75,8 +75,11 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #' Ordinary `pefa()` candidates are oblique and have diagonal residuals. The
 #' optional bifactor sweep is retained as a research extension: its reported
 #' `K` is the number of group factors and [vbfa()] adds one general factor.
-#' Bifactor sweeps are not presented as a reliable way to discover the number
-#' of group factors, and their transition stability diagnostics are `NA`.
+#' For directly comparable adjacent-count summaries, bifactor transitions
+#' remove that labelled general column and apply the ordinary matcher to the
+#' remaining group-loading and group-PIP blocks. Whether the bifactor extension
+#' recovers a useful group-factor count is an empirical question rather than a
+#' guarantee of the paper-defined ordinary workflow.
 #'
 #' @param Q0 A `J` by `K0` backbone matrix with entries `1`, `0`, or `-1`.
 #' @param Y An `N` by `J` data matrix.
@@ -101,37 +104,44 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #' @param ... Named estimation controls passed to [vbfa()]. PEFA controls its
 #'   own model class: `ld`, `Qe`, `ld_control`, and `orthogonal` are rejected.
 #'
-#' @return An object of class `pefa` with two data frames:
+#' @return An object of class `pefa` with two data frames and two matrix lists:
 #'   \describe{
 #'     \item{`$sweep`}{Candidate properties: `K`, `ELBO`, `AIC`, `BIC`,
-#'       `RMSEA`, `SRMR`, `CFI`, `TLI`, `t`, `iter`, `secs`, `converged`, plus
-#'       `loading` and `pip` matrix list-columns.}
+#'       `RMSEA`, `SRMR`, `CFI`, `TLI`, `t`, `iter`, `secs`, and `converged`.}
 #'     \item{`$transitions`}{Adjacent edges: `K_from`, `K_to`, `ELBO_gain`,
-#'       `BIC_gain`, `rmsd`, `rmsd_max`, `phi_min`, `ari`, `pip_sum`,
-#'       `pip_product`, and `max_unmatched_loading`.}
+#'       `BIC_gain`, `rmsd`, `rmsd_max`, `phi_min`, `ari`, `pip_rmsd`, the
+#'       logical `collision` flag, and `unmatched_max`.}
+#'     \item{`$loadings`, `$pips`}{Named lists containing the natural loading
+#'       and PIP matrix for every candidate `K`.}
 #'   }
-#'   Small metadata fields are `call`, `model`, `objective_type`, `Q0`, named
-#'   `selected_K` and `boundary` vectors, `window`, `cuts`, `sustain`,
-#'   `bifactor`, the normalized `general` design, `tau`, `stability_eps`,
-#'   `rank_adjust`, and `rank_max_J`. Full candidate fits are not retained.
+#'   In order, the other top-level fields are named `selected_K` and `boundary`
+#'   vectors, the backbone `Q0`, and `settings`. The settings are `cuts`,
+#'   `sustain`, `bifactor`, `general`, `tau`, `stability_eps`, and
+#'   `rank_adjust`. Full candidate fits are not retained.
 #'
 #' @section Adjacent loading and PIP summaries:
-#' The first `ncol(Q0)` loading columns retain their identities. Remaining
-#' columns are oriented to nonnegative means, screened by `stability_eps`, and
-#' greedily matched from the smaller fit to the minimum-SSE unused column in
-#' the larger fit. `rmsd` pools common cells; `rmsd_max` is the largest
+#' Every compared loading column is oriented to have a nonnegative mean. In a
+#' bifactor sweep the labelled general column is first removed, so the same
+#' definitions below operate on group factors in both modes. The first
+#' `ncol(Q0)` backbone columns retain their positions and bypass screening;
+#' remaining columns are screened by `stability_eps`, then each smaller-fit
+#' column is independently matched to its minimum-SSE larger-fit column. `rmsd`
+#' pools common cells; `rmsd_max` is the largest
 #' column-wise RMSD; and `phi_min` is signed Tucker congruence. For bipolar or
 #' contrast columns with means at or near zero, reflection orientation is weak,
 #' so interpret `phi_min` beside both RMSDs. `ari` compares dominant-loading
 #' item partitions using all retained columns, including an unmatched larger-
-#' fit column.
+#' fit column. `collision` is `TRUE` when two or more retained non-backbone
+#' columns in the smaller fit select the same retained larger-fit column; this
+#' reuse is permitted by the independent matching rule.
 #'
-#' PIP summaries use `PIP >= .5` over all matched cells. `pip_sum` is the total
-#' directional reversal proportion and `pip_product` records whether reversals
-#' occur in both directions. Fixed 0/1 entries are unmasked and can dilute these
-#' descriptive rates. `max_unmatched_loading` is the largest absolute loading
-#' outside the completely matched non-backbone core, including screened-out
-#' columns; it is descriptive and is not an added-factor or salience rule.
+#' `pip_rmsd` is the continuous PIP RMSD over matched cells that are
+#' unspecified/regularized in both adjacent candidates; fixed backbone cells
+#' are excluded. `unmatched_max` is the largest absolute loading outside
+#' the completely matched non-backbone core, including screened-out columns; it
+#' is descriptive and is not an added-factor or salience rule. The complete
+#' bifactor loading and PIP matrices, including the general column, remain in
+#' `$loadings` and `$pips` for candidate-level inspection.
 #'
 #' @section Complete paths and boundaries:
 #' ELBO-gain selection requires every candidate to have converged and the whole
@@ -166,14 +176,13 @@ select_K_elbow <- function(K, score, delta = 10, sustain = 2) {
 #' groups <- rep(1:3, each = 6)
 #' for (k in 1:2) {
 #'   anchors <- which(groups == k)[1:2]
-#'   Q0[anchors, ] <- 0L
 #'   Q0[anchors, k] <- 1L
 #' }
 #' result <- pefa(Q0, sim$dat, 2, 4, verbose = FALSE)
 #' result$selected_K
 #' result$transitions
-#' i <- match(result$selected_K[["primary"]], result$sweep$K)
-#' result$sweep$loading[[i]]
+#' K_selected <- result$selected_K[["primary"]]
+#' result$loadings[[as.character(K_selected)]]
 #' }
 #'
 #' @seealso [vbfa()], [fit_stats()], [select_K_elbow()]
@@ -185,7 +194,6 @@ pefa <- function(Q0, Y, Kmin, Kmax,
                  stability_eps = 0.1,
                  rank_adjust = FALSE, rank_max_J = 100,
                  verbose = TRUE, ...) {
-  call <- match.call()
   dots <- list(...)
   if (length(dots)) {
     dot_names <- names(dots)
@@ -357,12 +365,16 @@ pefa <- function(Q0, Y, Kmin, Kmax,
                 as.integer(row$converged), row$secs))
   } else NULL
 
-  sweep <- .run_sweep(
+  run <- .run_sweep(
     Ks, fit_one = fit_one, extract_one = extract_one,
     failure_one = failed_payload, progress_one = progress_one
   )
+  sweep <- run$sweep
+  loadings <- run$loadings
+  pips <- run$pips
   transitions <- .build_transitions(
-    sweep, K0 = K0, stability_eps = stability_eps, bifactor = bifactor
+    sweep, loadings, pips, Q0 = Q0,
+    stability_eps = stability_eps, bifactor = bifactor
   )
 
   complete <- isTRUE(all(sweep$converged & is.finite(sweep$ELBO))) &&
@@ -391,23 +403,22 @@ pefa <- function(Q0, Y, Kmin, Kmax,
   }
 
   out <- list(
-    call = call,
-    model = "vbfa",
-    objective_type = "elbo",
-    Q0 = Q0,
-    selected_K = selection$selected_K,
-    boundary = selection$boundary,
     sweep = sweep,
     transitions = transitions,
-    window = c(Kmin = Kmin, Kmax = Kmax, K0 = K0),
-    cuts = cuts,
-    sustain = sustain,
-    bifactor = bifactor,
-    general = general_design,
-    tau = tau,
-    stability_eps = stability_eps,
-    rank_adjust = rank_adjust,
-    rank_max_J = rank_max_J
+    loadings = loadings,
+    pips = pips,
+    selected_K = selection$selected_K,
+    boundary = selection$boundary,
+    Q0 = Q0,
+    settings = list(
+      cuts = cuts,
+      sustain = sustain,
+      bifactor = bifactor,
+      general = general_design,
+      tau = tau,
+      stability_eps = stability_eps,
+      rank_adjust = rank_adjust
+    )
   )
   class(out) <- "pefa"
   out
@@ -415,9 +426,9 @@ pefa <- function(Q0, Y, Kmin, Kmax,
 
 #' Methods for a PEFA factor-number sweep
 #'
-#' Methods consume the compact sweep and transition tables directly. Matrix
-#' list-columns remain available on the original object but are omitted from
-#' summaries and console candidate tables.
+#' Methods consume the compact sweep and transition tables directly. Loading
+#' and PIP matrices remain available in separate named lists on the original
+#' object but are omitted from summaries and console candidate tables.
 #'
 #' @param object,x A result returned by [pefa()].
 #' @param ... Further arguments. For `plot()`, graphical arguments passed to
@@ -432,22 +443,33 @@ pefa <- function(Q0, Y, Kmin, Kmax,
 #'   summaries.
 #'
 #' @return `summary()` returns a compact `summary.pefa` object without loading
-#'   or PIP matrices. Print and plot methods return their input invisibly.
+#'   or PIP matrices. It carries `ssl`, the per-candidate sums of squared
+#'   loadings (`colSums(Lam^2)`), derived from `$loadings` at summary time
+#'   rather than stored on the sweep object; in bifactor mode each vector
+#'   covers all `K + 1` columns with the general factor first. SS loadings
+#'   are descriptive column sizes, not Gram eigenvalues, and take part in no
+#'   selection rule. Print and plot methods return their input invisibly.
 #'
 #' @name pefa-methods
 NULL
 
 .print_pefa_rules <- function(x, indent = "  ") {
-  for (nm in names(x$cuts)) {
+  cuts <- x$settings$cuts
+  for (nm in names(cuts)) {
     selected <- x$selected_K[[nm]]
     shown <- if (is.na(selected)) "NA" else as.character(selected)
     cat(sprintf("%sELBO gain [%s = %g%%] -> K = %-3s (%s)\n",
-                indent, nm, x$cuts[[nm]], shown, x$boundary[[nm]]))
+                indent, nm, cuts[[nm]], shown, x$boundary[[nm]]))
   }
   invisible(NULL)
 }
 
+.pefa_window <- function(x) {
+  c(Kmin = min(x$sweep$K), Kmax = max(x$sweep$K), K0 = ncol(x$Q0))
+}
+
 .pefa_boundary_advice <- function(x) {
+  window <- .pefa_window(x)
   upper <- names(x$boundary)[x$boundary == "upper"]
   lower <- names(x$boundary)[x$boundary == "lower"]
   if (length(upper)) {
@@ -457,9 +479,15 @@ NULL
     ))
   }
   if (length(lower)) {
-    if (x$window[["Kmin"]] > x$window[["K0"]]) {
+    minimum_K <- max(1L, window[["K0"]])
+    if (window[["Kmin"]] > minimum_K) {
       cat(sprintf(
         "  Lower-window selection [%s]: rerun the complete sweep with a smaller Kmin.\n",
+        paste(lower, collapse = ", ")
+      ))
+    } else if (window[["K0"]] == 0L) {
+      cat(sprintf(
+        "  Lower selection [%s] is already at the minimum supported K; revise the search or model.\n",
         paste(lower, collapse = ", ")
       ))
     } else {
@@ -475,9 +503,11 @@ NULL
 #' @rdname pefa-methods
 #' @export
 print.pefa <- function(x, ...) {
-  mode <- if (isTRUE(x$bifactor)) " group factors (+ 1 general)" else ""
+  window <- .pefa_window(x)
+  mode <- if (isTRUE(x$settings$bifactor))
+    " group factors (+ 1 general)" else ""
   cat(sprintf("PEFA sweep: K = %d:%d%s; %d of %d converged\n",
-              x$window[["Kmin"]], x$window[["Kmax"]], mode,
+              window[["Kmin"]], window[["Kmax"]], mode,
               sum(x$sweep$converged), nrow(x$sweep)))
   .print_pefa_rules(x)
   .pefa_boundary_advice(x)
@@ -487,24 +517,16 @@ print.pefa <- function(x, ...) {
 #' @rdname pefa-methods
 #' @export
 summary.pefa <- function(object, ...) {
-  scalar <- setdiff(names(object$sweep), c("loading", "pip"))
   out <- list(
-    call = object$call,
-    model = object$model,
-    objective_type = object$objective_type,
-    bifactor = object$bifactor,
-    general = object$general,
-    window = object$window,
-    cuts = object$cuts,
-    sustain = object$sustain,
-    tau = object$tau,
-    stability_eps = object$stability_eps,
-    rank_adjust = object$rank_adjust,
-    rank_max_J = object$rank_max_J,
+    window = .pefa_window(object),
+    sweep = object$sweep,
+    transitions = object$transitions,
+    ## Derived at summary time from $loadings; never stored on the object.
+    ## In bifactor mode each vector covers all K + 1 columns, general first.
+    ssl = lapply(object$loadings, function(m) colSums(m^2)),
     selected_K = object$selected_K,
     boundary = object$boundary,
-    sweep = object$sweep[, scalar, drop = FALSE],
-    transitions = object$transitions,
+    settings = object$settings,
     convergence = c(converged = sum(object$sweep$converged),
                     total = nrow(object$sweep))
   )
@@ -515,14 +537,16 @@ summary.pefa <- function(object, ...) {
 #' @rdname pefa-methods
 #' @export
 print.summary.pefa <- function(x, digits = 3, ...) {
-  mode <- if (isTRUE(x$bifactor)) " group factors (+ 1 general)" else ""
+  mode <- if (isTRUE(x$settings$bifactor))
+    " group factors (+ 1 general)" else ""
   cat(sprintf("PEFA sweep summary: K = %d:%d%s; sustain = %d\n",
-              x$window[["Kmin"]], x$window[["Kmax"]], mode, x$sustain))
+              x$window[["Kmin"]], x$window[["Kmax"]], mode,
+              x$settings$sustain))
   .print_pefa_rules(x)
 
   cat("\nCandidates:\n")
   candidates <- x$sweep
-  if (isTRUE(x$bifactor)) {
+  if (isTRUE(x$settings$bifactor)) {
     candidates <- cbind(
       K = candidates$K, K_total = candidates$K + 1L,
       candidates[, setdiff(names(candidates), "K"), drop = FALSE]
@@ -537,6 +561,14 @@ print.summary.pefa <- function(x, digits = 3, ...) {
     !is.na(selected) & candidates$K == selected, "*", ""
   )
   print(candidates, row.names = FALSE)
+
+  cat("\nSS loadings (colSums(Lam^2)",
+      if (isTRUE(x$settings$bifactor)) "; general column first",
+      "):\n", sep = "")
+  for (nm in names(x$ssl)) {
+    cat(sprintf("  K=%s: %s\n", nm,
+                paste(sprintf("%.2f", x$ssl[[nm]]), collapse = " ")))
+  }
 
   if (nrow(x$transitions)) {
     cat("\nTransitions:\n")
@@ -560,6 +592,8 @@ plot.pefa <- function(x, type = c("objective", "gain", "fit"),
   selected <- x$selected_K[["primary"]]
   col1 <- "#1f77b4"
   col2 <- "#d62728"
+  factor_xlab <- if (isTRUE(x$settings$bifactor))
+    "Number of group factors (K)" else "Number of factors (K)"
 
   padded_range <- function(values, top = 0.20) {
     values <- values[is.finite(values)]
@@ -579,7 +613,7 @@ plot.pefa <- function(x, type = c("objective", "gain", "fit"),
     on.exit(par(op))
     plot(K, d$ELBO, type = "b", pch = 16, col = col1,
          ylim = padded_range(d$ELBO), xaxt = "n",
-         xlab = "Number of factors (K)",
+         xlab = factor_xlab,
          ylab = "ELBO (higher is better)", main = "PEFA criteria", ...)
     axis(1, at = K)
     mark_selected()
@@ -596,17 +630,17 @@ plot.pefa <- function(x, type = c("objective", "gain", "fit"),
     gains <- x$transitions[[transition_col]]
     thresholds <- numeric(0)
     if (criterion == "elbo" && length(gains) && all(is.finite(gains)))
-      thresholds <- unname(x$cuts / 100 * max(gains))
+      thresholds <- unname(x$settings$cuts / 100 * max(gains))
     y_values <- c(gains, thresholds, 0)
     if (nrow(x$transitions)) {
       plot(x$transitions$K_to, gains, type = "b", pch = 16, col = col1,
            xlim = range(K), ylim = padded_range(y_values), xaxt = "n",
-           xlab = "Number of factors (K)", ylab = "Marginal gain",
+           xlab = factor_xlab, ylab = "Marginal gain",
            main = paste(toupper(criterion), "gain sweep"), ...)
     } else {
       plot(K, rep(NA_real_, length(K)), type = "n",
            xlim = range(K), ylim = padded_range(y_values), xaxt = "n",
-           xlab = "Number of factors (K)", ylab = "Marginal gain",
+           xlab = factor_xlab, ylab = "Marginal gain",
            main = paste(toupper(criterion), "gain sweep"), ...)
     }
     axis(1, at = K)
@@ -620,7 +654,8 @@ plot.pefa <- function(x, type = c("objective", "gain", "fit"),
     pch <- 16
     cols <- col1
     if (length(thresholds)) {
-      labels <- c(labels, sprintf("%s = %g", names(x$cuts), thresholds))
+      labels <- c(labels,
+                  sprintf("%s = %g", names(x$settings$cuts), thresholds))
       lty <- c(lty, rep(3, length(thresholds)))
       pch <- c(pch, rep(NA, length(thresholds)))
       cols <- c(cols, rep("grey40", length(thresholds)))
@@ -633,7 +668,7 @@ plot.pefa <- function(x, type = c("objective", "gain", "fit"),
     on.exit(par(op))
     plot(K, d$RMSEA, type = "b", pch = 16, col = col1,
          ylim = padded_range(c(d$RMSEA, d$SRMR)), xaxt = "n",
-         xlab = "Number of factors (K)", ylab = "Index (lower is better)",
+         xlab = factor_xlab, ylab = "Index (lower is better)",
          main = "Absolute misfit", ...)
     axis(1, at = K)
     lines(K, d$SRMR, type = "b", pch = 17, lty = 2, col = col2)
@@ -643,7 +678,7 @@ plot.pefa <- function(x, type = c("objective", "gain", "fit"),
 
     plot(K, d$CFI, type = "b", pch = 16, col = col1,
          ylim = padded_range(c(d$CFI, d$TLI)), xaxt = "n",
-         xlab = "Number of factors (K)", ylab = "Index (higher is better)",
+         xlab = factor_xlab, ylab = "Index (higher is better)",
          main = "Incremental fit")
     axis(1, at = K)
     lines(K, d$TLI, type = "b", pch = 17, lty = 2, col = col2)

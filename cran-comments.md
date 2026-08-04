@@ -18,11 +18,14 @@ with fit statistics, factor-number selection, and two data simulators.
 
 ## R CMD check results
 
-Status: 1 NOTE -- the check environment did not have pandoc on its PATH, so
-`README.md`/`NEWS.md` went unchecked; this is environmental, not a package
-issue. There were no ERRORs or WARNINGs. Compiled installation, examples,
-tests, Rd validation, vignette rebuilding, and PDF-manual generation all
-passed.
+Status: 2 NOTEs, 0 ERRORs, 0 WARNINGs.
+
+* The sandbox could not verify the current time.
+* The optional package `V8` was unavailable, so HTML-manual math rendering was
+  not checked.
+
+Compiled installation, examples, all tests, Rd validation, vignette rebuilding,
+and indexed PDF-manual generation passed.
 
 ## Notes for the reviewer
 

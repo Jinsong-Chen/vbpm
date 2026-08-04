@@ -179,26 +179,25 @@ test_that("pefa selects a factor number within the window", {
   expect_true(all(r$sweep$converged))
   expect_s3_class(r, "pefa")
   expect_false(inherits(r, "vbpm_sweep"))
-  expect_identical(r$window, c(Kmin = 2L, Kmax = 4L, K0 = 2L))
   expect_named(r$sweep, c("K", "ELBO", "AIC", "BIC", "RMSEA", "SRMR",
-                          "CFI", "TLI", "t", "iter", "secs", "converged",
-                          "loading", "pip"))
+                          "CFI", "TLI", "t", "iter", "secs", "converged"))
   ## Gains are edge quantities: they live in $transitions, not $sweep.
   expect_false(any(grepl("_gain", names(r$sweep))))
   expect_named(r$transitions,
                c("K_from", "K_to", "ELBO_gain", "BIC_gain", "rmsd",
-                 "rmsd_max", "phi_min", "ari", "pip_sum", "pip_product",
-                 "max_unmatched_loading"))
+                 "rmsd_max", "phi_min", "ari", "pip_rmsd", "collision",
+                 "unmatched_max"))
   expect_identical(nrow(r$transitions), nrow(r$sweep) - 1L)
-  expect_true(all(vapply(r$sweep$loading, is.matrix, logical(1))))
-  expect_true(all(vapply(r$sweep$pip, is.matrix, logical(1))))
+  expect_true(all(vapply(r$loadings, is.matrix, logical(1))))
+  expect_true(all(vapply(r$pips, is.matrix, logical(1))))
 
   s <- summary(r)
   expect_s3_class(s, "summary.pefa")
   expect_identical(s$selected_K, r$selected_K)
   expect_identical(s$boundary, r$boundary)
-  expect_identical(s$cuts, c(primary = 10))
-  expect_false(any(c("loading", "pip") %in% names(s$sweep)))
+  expect_identical(s$settings$cuts, c(primary = 10))
+  expect_named(s$sweep, c("K", "ELBO", "AIC", "BIC", "RMSEA", "SRMR",
+                          "CFI", "TLI", "t", "iter", "secs", "converged"))
   expect_true(s$boundary[["primary"]] %in%
                 c("lower", "interior", "upper", "single", "none"))
   expect_output(print(r), "PEFA sweep")
@@ -291,15 +290,19 @@ test_that("pefa bifactor sweep counts group factors without storing K_total", {
   Q0 <- d$Q[, 1:2, drop = FALSE]
   r  <- pefa(Q0, d$Y, Kmin = 2, Kmax = 3, bifactor = TRUE, v0 = .001,
              max_it = 500, verbose = FALSE)
-  expect_true(isTRUE(r$bifactor))
+  expect_true(isTRUE(r$settings$bifactor))
   expect_identical(r$sweep$K, 2:3)
   expect_false("K_total" %in% names(r$sweep))
-  expect_identical(vapply(r$sweep$loading, ncol, integer(1)), 3:4)
-  expect_identical(vapply(r$sweep$pip, ncol, integer(1)), 3:4)
-  expect_true(all(is.na(r$transitions[c(
-    "rmsd", "rmsd_max", "phi_min", "ari", "pip_sum", "pip_product",
-    "max_unmatched_loading"
-  )])))
+  expected_dims <- stats::setNames(3:4, c("2", "3"))
+  expect_identical(vapply(r$loadings, ncol, integer(1)), expected_dims)
+  expect_identical(vapply(r$pips, ncol, integer(1)), expected_dims)
+  expect_type(r$transitions$collision, "logical")
+  if (all(r$sweep$converged)) {
+    expect_true(any(is.finite(unlist(r$transitions[c(
+      "rmsd", "rmsd_max", "phi_min", "ari", "pip_rmsd",
+      "unmatched_max"
+    )], use.names = FALSE))))
+  }
   expect_output(print(r), "group factors [(][+] 1 general")
   expect_output(print(summary(r)), "K_total")
 })
@@ -331,6 +334,6 @@ test_that("the fit object stores each quantity exactly once", {
   expect_null(r[["fit", exact = TRUE]])
   expect_null(r[["selected_fit", exact = TRUE]])
   expect_null(r[["fits", exact = TRUE]])
-  expect_true(all(vapply(r$sweep$loading, is.matrix, logical(1))))
-  expect_true(all(vapply(r$sweep$pip, is.matrix, logical(1))))
+  expect_true(all(vapply(r$loadings, is.matrix, logical(1))))
+  expect_true(all(vapply(r$pips, is.matrix, logical(1))))
 })
