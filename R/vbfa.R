@@ -174,8 +174,14 @@ logC_igw <- function(xi, Lam, P) {
 #' Multidisciplinary Journal*, 32(3), 437-449.
 #' \doi{10.1080/10705511.2024.2432612}
 #'
+#' Jin, Y., Chen, J., Yan, Z., & Zhang, Y. (2026). Sparse residual estimation
+#' in partially confirmatory factor analysis. *PsyArXiv preprint*.
+#' \doi{10.31234/osf.io/dehtv_v2} --- the warm-started `v0` path and the
+#' `ld = TRUE` sparse-residual (local dependence) branch.
+#'
 #' Rockova, V., & George, E. I. (2018). The spike-and-slab LASSO.
 #' *Journal of the American Statistical Association*, 113(521), 431-444.
+#' \doi{10.1080/01621459.2016.1260469}
 #'
 #' @examples
 #' ## partially confirmatory: two anchors per factor, the rest exploratory

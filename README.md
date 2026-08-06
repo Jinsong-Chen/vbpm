@@ -18,8 +18,9 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
 - **`vbfa()`** — the factor-analysis estimator.
   - Spike-and-slab regularization of unspecified loadings.
   - **Dynamic exploration**: pass `v0` a decreasing vector for a warm-started
-    regularization path (Ročková & George, 2018); a scalar `v0` is a single
-    fixed spike. `v0 = 0.001` reproduces the fixed-spike estimator exactly.
+    regularization path (Ročková & George, 2018; Jin, Chen, Yan, & Zhang,
+    2026); a scalar `v0` is a single fixed spike. `v0 = 0.001` reproduces the
+    fixed-spike estimator exactly.
   - **Bifactor**: `bifactor = TRUE` fits one general factor plus `K`
     orthogonal group factors, with `Q` supplying only the group design --
     so `K` counts group factors, comparable to an oblique `K`-factor
@@ -28,7 +29,8 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
     for plain orthogonal models (or hand-built bifactor designs).
   - **Local dependence**: set `ld = TRUE` to estimate a sparse residual
     precision by a graphical spike-and-slab prior (QUIC) — fully exploratory
-    by default, or restricted by a residual design matrix `Qe`.
+    by default, or restricted by a residual design matrix `Qe`
+    (Jin, Chen, Yan, & Zhang, 2026).
 - **`vbmimic()`** — the MIMIC estimator.
   - Spike-and-slab regularization of **both** the measurement design (`Q_A`,
     items on factors) and the structural design (`Q_B`, factors on covariates).
@@ -189,6 +191,10 @@ round(fit$B, 2)                      # which covariates predict which factors
   approximation for partially confirmatory factor analysis. *Structural
   Equation Modeling*, 32(3), 437–449.
   <https://doi.org/10.1080/10705511.2024.2432612>
+- Warm-started regularization path and sparse residual/local-dependence
+  estimation: Jin, Y., Chen, J., Yan, Z., & Zhang, Y. (2026). Sparse residual
+  estimation in partially confirmatory factor analysis. *PsyArXiv preprint*.
+  <https://doi.org/10.31234/osf.io/dehtv_v2>
 - MIMIC: Jin, Y., & Chen, J. (2025). Regularized variational Bayesian
   approximations for variable selection in extended multiple-indicators
   multiple-causes models. *Multivariate Behavioral Research*.

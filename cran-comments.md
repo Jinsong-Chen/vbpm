@@ -20,14 +20,22 @@ with fit statistics, factor-number selection, and two data simulators.
 
 Status: 2 NOTEs, 0 ERRORs, 0 WARNINGs.
 
-* The sandbox could not verify the current time.
-* The optional package `V8` was unavailable, so HTML-manual math rendering was
-  not checked.
+* "CRAN incoming feasibility ... New submission" -- this is a first
+  submission; the incoming check reported nothing else.
+* "Files 'README.md' or 'NEWS.md' cannot be checked without 'pandoc'" --
+  pandoc was not on the checking shell's PATH; environmental only.
 
-Compiled installation, examples, all tests, Rd validation, vignette rebuilding,
-and indexed PDF-manual generation passed.
+Compiled installation, examples, all tests, Rd validation, vignette
+rebuilding, and indexed PDF-manual generation passed.
 
 ## Notes for the reviewer
+
+* **Possibly mis-spelled words in DESCRIPTION.** `vbfa` and `vbmimic` are the
+  package's estimator names; `QUIC` is the sparse inverse-covariance
+  algorithm; `MIMIC` is the standard multiple-indicators multiple-causes
+  acronym. All method references in the Description carry DOIs, including
+  the PsyArXiv preprint <doi:10.31234/osf.io/dehtv_v2> for the warm-started
+  regularization path and the local-dependence branch.
 
 * **Compiled code.** `src/` contains a QUIC (quadratic approximation for sparse
   inverse covariance) solver used only by the optional local-dependence branch,

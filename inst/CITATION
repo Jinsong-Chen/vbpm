@@ -1,4 +1,4 @@
-citHeader("To cite vbpm in publications, please cite the package and the paper for the estimator you used (Jin & Chen 2025 SEM for vbfa; Jin & Chen 2025 MBR for vbmimic; Chen & Jin 2026 for fit_stats/pefa):")
+citHeader("To cite vbpm in publications, please cite the package and the paper for the estimator you used (Jin & Chen 2025 SEM for vbfa; Jin, Chen, Yan & Zhang 2026 for the warm-started path and local dependence; Jin & Chen 2025 MBR for vbmimic; Chen & Jin 2026 for fit_stats/pefa):")
 
 bibentry(
   bibtype = "Manual",
@@ -19,6 +19,16 @@ bibentry(
   number  = "3",
   pages   = "437--449",
   doi     = "10.1080/10705511.2024.2432612"
+)
+
+bibentry(
+  bibtype = "Article",
+  title   = "Sparse residual estimation in partially confirmatory factor analysis",
+  author  = c(person("Yi", "Jin"), person("Jinsong", "Chen"),
+              person("Zi", "Yan"), person("Ying", "Zhang")),
+  journal = "PsyArXiv preprint",
+  year    = "2026",
+  doi     = "10.31234/osf.io/dehtv_v2"
 )
 
 bibentry(

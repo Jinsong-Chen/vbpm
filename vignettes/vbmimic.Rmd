@@ -154,8 +154,10 @@ vbmimic(Y, Xm, Q_A, Q_B)
 * Jin, Y., & Chen, J. (2025). Regularized variational Bayesian approximations
   for variable selection in extended multiple-indicators multiple-causes
   models. *Multivariate Behavioral Research*.
+  https://doi.org/10.1080/00273171.2025.2483253
 * Chen, J. (2021). A generalized partially confirmatory factor analysis
   framework with mixed Bayesian Lasso methods. *Multivariate Behavioral
   Research*, 57(6), 879–894. https://doi.org/10.1080/00273171.2021.1925520
 * Ročková, V., & George, E. I. (2018). The spike-and-slab LASSO. *Journal of
   the American Statistical Association*, 113(521), 431–444.
+  https://doi.org/10.1080/01621459.2016.1260469

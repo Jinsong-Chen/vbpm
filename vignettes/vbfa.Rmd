@@ -82,8 +82,8 @@ table(truth = sim$MLA != 0, active = active)
 Two properties worth knowing. The estimator is **deterministic** — fixed
 initialization, no random numbers — so there is no seed to set and two runs are
 bit-identical. And the default `v0` is a decreasing *vector*, a warm-started
-regularization path; a scalar `v0 = 0.001` reproduces the fixed-spike estimator
-of Jin & Chen (2025) exactly. A third option is a gentler, longer, log-spaced
+regularization path (Jin, Chen, Yan, & Zhang, 2026); a scalar `v0 = 0.001`
+reproduces the fixed-spike estimator of Jin & Chen (2025) exactly. A third option is a gentler, longer, log-spaced
 path, useful when a harder model fails to converge. All three run to
 convergence below, on the same (smaller, for speed) data, with the total
 iteration count, ELBO, and the largest loading discrepancy against the default
@@ -161,7 +161,8 @@ covered in `vignette("pefa")`; bifactor and higher-order models are covered in
 ## Local dependence
 
 Correlated residuals (e.g. testlets, shared stems) are handled by a *graphical*
-spike-and-slab prior on the residual precision, solved by QUIC. Turn it on with
+spike-and-slab prior on the residual precision, solved by QUIC
+(Jin, Chen, Yan, & Zhang, 2026). Turn it on with
 `ld = TRUE`; by default the search is fully exploratory, or restrict it with a
 `J x J` design `Qe` using the same `-1/0/1` codes.
 
@@ -381,15 +382,22 @@ inclusion probabilities, is on the package roadmap.)
 
 * Chen, J., Guo, Z., Zhang, L., & Pan, J. (2021). A partially confirmatory
   approach to scale development with the Bayesian Lasso. *Psychological
-  Methods*, 26(2), 210–235.
+  Methods*, 26(2), 210–235. https://doi.org/10.1037/met0000293
 * Chen, J. (2021). A generalized partially confirmatory factor analysis
   framework with mixed Bayesian Lasso methods. *Multivariate Behavioral
   Research*, 57(6), 879–894. https://doi.org/10.1080/00273171.2021.1925520
 * Chen, J. (2023). Fully and partially exploratory factor analysis with
   bi-level Bayesian regularization. *Behavior Research Methods*, 55(4),
-  2125–2142.
+  2125–2142. https://doi.org/10.3758/s13428-022-01884-7
 * Jin, Y., & Chen, J. (2025). Regularized variational approximation for
   partially confirmatory factor analysis. *Structural Equation Modeling*,
-  32(3), 437–449.
+  32(3), 437–449. https://doi.org/10.1080/10705511.2024.2432612
+* Jin, Y., Chen, J., Yan, Z., & Zhang, Y. (2026). Sparse residual estimation
+  in partially confirmatory factor analysis. *PsyArXiv preprint*.
+  https://doi.org/10.31234/osf.io/dehtv_v2
 * Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
-  Bayesian variable selection. *arXiv:2607.07159*.
+  Bayesian variable selection: Fit assessment and factor-number selection in
+  partially exploratory factor analysis. *arXiv preprint* arXiv:2607.07159.
+* Ročková, V., & George, E. I. (2018). The spike-and-slab LASSO. *Journal of
+  the American Statistical Association*, 113(521), 431–444.
+  https://doi.org/10.1080/01621459.2016.1260469
