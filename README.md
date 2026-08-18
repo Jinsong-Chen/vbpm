@@ -37,7 +37,7 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
   - Supports the same warm-started `v0` path. The defaults reproduce the
     published estimator exactly.
   - The ELBO is not yet available for this model, so `fit_stats()` returns a
-    clearly marked limited result and `pefa()` does not accept `vbmimic` fits.
+    clearly marked limited result and `pefa()` sweeps `vbfa()` candidates only.
 - **`fit_stats()`** — SEM-like fit statistics (RMSEA, SRMR, CFI, TLI, AIC, BIC)
   plus the model's objective. An S3 generic over fitted models: it builds the
   implied covariance from the residual covariance, so it is correct for
@@ -49,38 +49,41 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
   proportionality CVs, approximate higher-order parameters (second-order
   loadings per group factor), and testlet/special effect sizes
   (Zhang & Chen, 2024, Eq. 16).
-- **`pefa()`** — sweep the number of factors over a fixed window and return an
-  **evidence object**. It selects no factor count, applies no threshold, vetoes
-  no comparison, and grades nothing; every quantity a downstream count rule,
-  persistence rule, threshold, horizon, or collision policy needs is present,
-  and composing them into a conclusion is yours. Three tables: `$sweep` has one
-  row per candidate (ELBO, nominal/hard/soft parameter counts, hard and soft
-  AIC/BIC, RMSEA/SRMR/CFI/TLI, and five independent component status–reason
-  pairs); `$transitions` has one row per adjacent pair with raw and
-  percent-of-largest gains on all five criterion paths; `$persistence` has one
-  row per *ordered* pair at every horizon, carrying congruence, pooled and
-  maximum aligned RMSD, ARI, PIP RMSD, unmatched-column size, collision
-  location and multiplicity, eligibility counts, and endpoint-convergence
-  facts. Candidate matrices live in K-named `$loadings` and `$pips` lists
-  (`result$loadings[["4"]]`), and `$provenance` carries SHA-256 identities for
-  the standardized data, `Q0`, settings, and the evidence payload.
-  Convergence is *recorded*, never used to suppress a number that is defined:
-  a candidate that stopped at `max_it` keeps its matrices and its structural
-  comparisons, flagged through `from_fit_ok`/`to_fit_ok`.
-- **`select_K_elbow()`** — the only packaged factor-count calculator, and one
-  `pefa()` never invokes. Applies a user-supplied sustained-drop rule to any
-  larger-is-better criterion path, returning `NA_integer_` rather than a
-  boundary consolation value when nothing qualifies.
-- **`persistence()`**, **`ssl()`** — pivot one structural metric into a
-  horizon triangle, and read per-candidate sums of squared loadings.
-  Compact `print()`, `summary()`, and `plot()` methods complete the set; none
-  of them announces a selected count, because none is chosen.
-- **`verify_pefa()`** — the integrity checker for a stored evidence object. It
-  rebuilds `$transitions` and `$persistence` from the retained primitives with
-  the installed package, recomputes the `Q0`, settings, evidence, and lineage
-  fingerprints, and optionally re-derives the standardized-data hash from the
-  original `Y`. It returns `invisible(TRUE)` or names the component that failed;
-  it never mutates the object, hands back rebuilt evidence, or makes a decision.
+- **`pefa()`** — fit one partially exploratory model for every `K` in a fixed
+  consecutive window and report what was measured. It selects no factor count
+  and carries no cut, threshold, persistence horizon, collision policy, or
+  stopping rule; composing the numbers into a conclusion is yours. Three
+  tables:
+  - `$sweep` — one row per candidate: `K`, `ELBO`, `AIC`, `BIC`,
+    `RMSEA`, `SRMR`, `CFI`, `TLI`, `t`, `iter`, `converged`.
+  - `$transitions` — one row per *adjacent* pair: percent-of-largest-positive
+    ELBO and BIC gains, plus the seven structural facts `phi_min`, `rmsd`,
+    `rmsd_max`, `ari`, `pip_rmsd`, `unmatched_ssl`, `collision`.
+  - `$persistence` — three upper-triangular matrices, `phi` (holding
+    `phi_min`), `rmsd` (holding `rmsd_max`), and a logical `collision` mask,
+    covering *every* ordered pair. Read them directly as
+    `x$persistence$phi`; there is no accessor, because selecting a stored
+    triangle would only be a synonym for `$`.
+
+  Columns correspond by **minimum sign-aligned squared distance**: each source
+  column takes the target minimizing the squared length of `a - s b`, with
+  `s = 1` when `a'b >= 0` and `-1` otherwise — Equation 17 of Chen (2023) made
+  invariant to whole-column reflection. Backbone columns pair by position, each
+  exploratory column then chooses independently, and congruence only breaks
+  exact ties. The assignment is deliberately not one-to-one: when two columns
+  choose the same target that reuse is a **collision**, reported as evidence
+  and never repaired into a forced matching. Every ordered pair is compared
+  directly from its two endpoints, never chained through the candidates
+  between them. Candidate matrices live in K-named `$loadings` and `$pips`
+  lists (`result$loadings[["4"]]`). Convergence is *recorded*, never used to
+  suppress a number that is defined: a candidate that stopped at `max_it`
+  keeps its matrices and all of its comparisons.
+- **`ssl()`** — per-candidate sums of squared loadings, `colSums(Lam^2)`, on
+  the same scale as `unmatched_ssl`. It screens nothing and enters no
+  correspondence rule; it is what distinguishes a low `phi_min` caused by a
+  near-empty column from one caused by structure actually moving. Compact
+  `print()`, `summary()`, and `plot()` methods complete the set; none of them
+  announces a selected count, because none is chosen.
 - **`sim_fa()`** and **`sim_lvm()`** — two complementary data generators.
   `sim_fa()` is driven by the loading *pattern* (items per factor, alternating
   cross-loadings, minor factors) and can generate **higher-order/testlet**
@@ -132,8 +135,8 @@ Then:
 ```r
 library(vbpm)
 vignette("vbfa")         # start here
-vignette("pefa")         # candidate fit evidence and criterion-path readings
-vignette("bifactor")     # bifactor structures and structural-persistence evidence
+vignette("pefa")         # the factor-count sweep and its three tables
+vignette("bifactor")     # bifactor structures, AO/AZ backbones, and sweeps
 vignette("vbmimic")      # covariates predicting the factors
 citation("vbpm")
 ```
@@ -160,9 +163,9 @@ idx <- fit_stats(fit)                # nominal hard-selected count by default
 
 Fits are ordinary named lists with a shared `vbpm_fit` class attached — fields
 such as `fit$Lam`, `fit$pi`, and `fit$Phi` remain public API. Focused vignettes
-cover `vbfa`, the `pefa()` evidence object and the count readings a user can
-compose from it, bifactor/higher-order/testlet structures together with
-all-pairs structural persistence, and `vbmimic`.
+cover `vbfa`, one `pefa()` sweep walked table by table under overextraction,
+bifactor/higher-order/testlet structures with AO and AZ backbones, and
+`vbmimic`.
 
 MIMIC, with covariates predicting the factors:
 
@@ -235,15 +238,19 @@ As of 0.9.0:
   a feature. Simulating them is supported (`cati`/`noc` in `sim_fa()`,
   `ilvl` in `sim_lvm()`); estimating from them is not.
 - **Bifactor `pefa()` sweeps are a research extension.** Their `K` counts group
-  factors, and the all-pairs persistence evidence removes the labelled general
-  column before applying exactly the same loading/PIP matcher used by an
-  ordinary oblique sweep. General and group columns can nevertheless
-  redistribute common variance as `K` changes, so a study that needs both modes
-  should run them on the same data, backbone, and window rather than assume
-  that either route must agree. The `bifactor` vignette does not run that
-  two-mode comparison: it builds ordinary oblique evidence under two backbones
-  (anchor-only and anchor-zero), reads it under several explicit decision
-  profiles, and shows the later matched-model step as an unexecuted template.
+  factors, and every comparison removes the labelled general column before
+  applying exactly the loading/PIP correspondence an ordinary oblique sweep
+  uses. General and group columns can nevertheless redistribute common variance
+  as `K` changes, so a study that needs both modes should run them on the same
+  data, backbone, and window rather than assume that either route must agree.
+  The `bifactor` vignette shows one such pair of sweeps, where the bifactor
+  criterion path and persistence triangle separate the candidates far less than
+  the ordinary ones do. That is a property of that example, not a general
+  ranking of the two modes.
+- **No calibrated thresholds.** Nothing in the package tells you how large a
+  congruence, how small an RMSD, or how steep a gain has to be. The vignettes
+  show readings composed in local code and label them as such; none of those
+  cuts has been validated against an error rate here.
 - **No DIF paths in `vbmimic()`.** Covariates predict the *factors*
   (`Q_B`, i.e. impact); there are no direct covariate-to-item paths, so the
   model cannot currently express or detect differential item functioning.

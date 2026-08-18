@@ -1,90 +1,150 @@
 # vbpm 0.9.0
 
-First CRAN release. `pefa()` becomes an **evidence-only** function: it selects
-no factor count, applies no threshold, vetoes no comparison, and grades
-nothing. This completes an arc running through 0.8.0 (removed the `stable`
-verdict), 0.8.1 (removed absolute-fit gating), and 0.8.2 (removed automated
-raw/BIC selection). **Every stability number changes**, because the matcher
-changed. 0.8.3 is withdrawn and was never released to CRAN.
+First CRAN release. `pefa()` is now a **measurement-only** factor-count sweep:
+it fits every `K` in a fixed consecutive window, reports candidate and
+between-candidate quantities, and chooses nothing. This completes an arc
+running through 0.8.0 (removed the `stable` verdict), 0.8.1 (removed
+absolute-fit gating), and 0.8.2 (removed automated raw/BIC selection). 0.8.3
+was withdrawn and never reached CRAN.
 
-## Removed from `pefa()`
+**Every structural number in a `pefa()` object changes**, because the
+column-correspondence rule changed. Congruence, pooled and maximum RMSD, ARI,
+PIP RMSD, unmatched-column size, and the collision flag are not comparable
+across 0.8.x and 0.9.0, and neither is any threshold calibrated on them.
 
-* `cuts`, `sustain`, `$selected_K`, and `$boundary` are gone, along with the
-  boundary vocabulary and its console advice. Anything that turned evidence
-  into a verdict by choosing a criterion, cut, metric, threshold, horizon,
-  collision policy, or layer mapping has left the package.
-* `select_K_elbow()` survives as an optional criterion-generic calculator that
-  `pefa()` never invokes. Its defaults are now `delta = 20, sustain = 1`, it
-  uses complete look-ahead with strict inequality, and it returns
-  `NA_integer_` when no candidate qualifies. The old `K[1]`/`K[length(K)]`
-  fallbacks are deleted: a boundary value is no longer returned as a
-  consolation result.
+## Breaking removals
 
-## The matcher
+The following existed in 0.8.3 and are gone. Removing them is intentional
+pre-1.0 breakage, not a deprecation cycle.
 
-* Columns are now **pairwise sign-aligned**, `s(a,b) = sign(a'b)`, on every
-  column including the backbone. Previously each matrix was oriented to a
-  non-negative column mean, under which a totally reflected anchored factor
-  scored as though nothing had changed.
-* Assignment is independent **maximum absolute congruence** over eligible
-  targets, with ties broken by smaller aligned RMSD and then smaller target
-  index. Collisions are permitted, detected, and reported — never prevented.
-* The scored pair set is the position-matched backbone **union** the assigned
-  exploratory pairs, so a `k = K0` edge is a valid backbone-only comparison
-  instead of an empty index set.
+* `select_K_elbow()` is removed, together with `pefa()`'s `cuts`, `sustain`,
+  `stability_eps`, `$selected_K`, and `$boundary`, and the boundary vocabulary
+  and console advice that went with them. A count rule is now ordinary analysis
+  code over the stored path, and it must say which variant it is:
 
-## New: `$persistence`, and structural evidence at every horizon
+  ```r
+  ## 20% cut on the ELBO path, full look-ahead, no boundary fallback.
+  g <- x$transitions$ELBO_gain_pct
+  ok <- vapply(seq_along(g), function(i) all(g[i:length(g)] < 20), logical(1))
+  if (any(ok)) x$transitions$K_from[which(ok)[1]] else NA_integer_
+  ```
 
-* `$transitions` is now criterion-only. Structural comparison moves to
-  `$persistence`, one row per *ordered* pair `k < l` at every horizon, each
-  computed directly from its two endpoints and never by chaining adjacent
-  assignments. `persistence(x, metric)` pivots one metric into a horizon
-  triangle with markers for collisions, reduced pair sets, and nonconverged
-  endpoints.
-* `unmatched_ssl` (maximum unmatched column sum of squared loadings) replaces
-  `unmatched_max`; `n_pairs`, `collision_targets`, `collision_multiplicities`,
-  `source_ineligible_n`, and `target_eligible_n` are new.
-* Raw gains are joined by `*_gain_pct` on all five criterion paths, and the
-  soft/effective paths `AIC_S`/`BIC_S` and counts `t_nom`/`t`/`t_S` are
-  retained on `$sweep`.
+  A capped-look-ahead variant and a variant with a boundary fallback give
+  different answers on the same path; `vbpm` no longer supplies either, so the
+  analysis names the one it used.
+* Soft criteria and their counts (`t_S`, `AIC_S`, `BIC_S`) and the nominal
+  count `t_nom` are no longer retained on `$sweep`. `t` is the effective hard
+  parameter count at the resolved `tau`, rank-adjusted when
+  `rank_adjust = TRUE`. An analysis that needs a soft criterion must refit;
+  `fit_stats()` still returns all of them for a single fit.
+* The per-candidate and per-pair status/reason taxonomy is removed. A fit
+  error, malformed candidate, or nonfinite loading, PIP, `ELBO`, `AIC`, `BIC`,
+  or `t` now aborts the whole call with an error naming the affected `K`, and
+  no partial object is returned. `RMSEA`, `SRMR`, `CFI`, and `TLI` stay
+  descriptive and may be `NA` without error.
+* Eligibility machinery is removed: there is no salience screen, no
+  `stability_eps`, no source/target eligibility count, no reduced-pair flag,
+  and no target capacity policy. Every column participates in every
+  comparison, so a comparison always holds exactly `K_from` scored pairs and
+  no pair-count field is needed.
 
-## Convergence is recorded, not enforced
+## The correspondence rule
 
-* A candidate that stopped at `max_it` keeps its returned matrices and **all**
-  of its structural comparisons. `fit_status` no longer propagates into
-  `pair_status`; each pair carries `from_fit_ok`/`to_fit_ok` instead, and a
-  profile requiring converged endpoints writes that condition itself. Blanking
-  a defined number is irreversible from the object, whereas discarding a
-  retained one is one comparison away.
-* Each candidate carries five independent component status–reason pairs (fit,
-  loading, PIP, ELBO, statistics) from a fixed codebook. No component is
-  erased because another is unavailable. `pefa()` emits at most one aggregate
-  warning per call, naming reason codes rather than raw condition text.
-* `pair_status` is `"unavailable"` only for `malformed_loading`. Backbone
-  degeneracy, collisions, ineligible sources, and scarce targets are all
-  reported as facts in their own columns without blanking a metric.
+* Columns now correspond by **minimum sign-aligned squared distance**: with
+  `s = 1` when `a'b >= 0` and `-1` otherwise, each source column takes the
+  target minimizing the squared length of `a - s b`. That is Equation 17 of
+  Chen (2023) made invariant to whole-column reflection, and it is
+  magnitude-sensitive on purpose. Absolute Tucker congruence is now only an
+  exact-tie breaker and a reported shape diagnostic; a finite congruence
+  outranks an undefined one, and the smaller target index settles anything
+  still tied. No tolerance widens a near-tie into a tie.
+* Backbone columns pair by position; each exploratory source then chooses
+  independently. Reuse of a target is a **collision**, recorded as a logical
+  fact and never repaired into a forced one-to-one assignment. A collision
+  blanks no otherwise defined measurement.
+* Comparisons are computed directly from their two endpoint matrices for every
+  ordered pair, never chained through the candidates in between.
+* Zero-norm columns participate: their aligned distance is defined and their
+  congruence is not, so `phi_min` becomes `NA_real_` rather than silently
+  dropping the column.
+
+## The returned object
+
+* A `"pefa"` object now has exactly `sweep`, `transitions`, `persistence`,
+  `loadings`, `pips`, `Q0`, and `settings`, and its class is exactly `"pefa"`.
+* `$sweep` is `K`, `ELBO`, `AIC`, `BIC`, `RMSEA`, `SRMR`, `CFI`, `TLI`, `t`,
+  `iter`, `converged` — one row per candidate.
+* `$transitions` is one row per *adjacent* pair: `K_from`, `K_to`,
+  `ELBO_gain_pct`, `BIC_gain_pct`, and the seven structural facts `phi_min`,
+  `rmsd`, `rmsd_max`, `ari`, `pip_rmsd`, `unmatched_ssl`, `collision`. Raw
+  gains are no longer duplicated here; the raw criteria are in `$sweep`. Each
+  percentage divides by the largest positive gain on its own path, or is
+  `NA_real_` when that path has none.
+* `$persistence` is now three upper-triangular matrices over the fitted `K`
+  values, named exactly `phi`, `rmsd`, and `collision`, covering every ordered
+  pair. `phi` holds `phi_min` and `rmsd` holds `rmsd_max` — not the pooled
+  `$transitions$rmsd`. They are read directly as `x$persistence$phi`. No
+  accessor function is provided: selecting a stored triangle would be a synonym
+  for `$`, and a two-metric accessor would arbitrarily omit the collision mask.
+* `$settings` holds only resolved fit-generating and fit-statistic controls:
+  `bifactor`, `general`, `v0`, `max_it`, `convChk`, `tolVal`, `tau`,
+  `rank_adjust`, `rank_max_J`. No analysis rule, no threshold, no `verbose`.
+* There is no `$provenance` component and no hashing anywhere in the package.
+  `pefa()` computes no schema, engine, data, `Q0`, settings, evidence, or
+  lineage fingerprint, stores no build identity, and makes no cross-version
+  object-reuse promise. The package version and session used for an analysis
+  belong in that analysis's own run record. The `digest` dependency is dropped.
+* There is no checkpoint, resume, optional save, interrupt handler, or
+  partial-sweep return path, and no window-extension API. A wider window means
+  rerunning `pefa()` over the whole wider window.
+
+## Convergence and warnings
+
+* A well-formed candidate that stopped at `max_it` is retained with
+  `converged = FALSE` and keeps every matrix and every comparison it takes part
+  in. `pefa()` issues at most one aggregate warning per call, naming all
+  affected `K` values. Convergence never blanks a defined number and never
+  removes a candidate from the path.
+
+## Exports and methods
+
+* The PEFA surface is exactly `pefa()`, `ssl()`, and the `print()`,
+  `summary()`, and `plot()` methods.
+* `ssl()` is `colSums(Lam^2)` per candidate, returned as a character-K-keyed
+  list of double vectors, with the general column first in bifactor mode. It
+  screens nothing and enters no correspondence rule. It is the companion to
+  `phi_min`, which is a weakest-link statistic over every column: a near-empty
+  column matches the smallest-norm target, contributes an arbitrary congruence,
+  and often raises `collision`, and `ssl()` is what tells that case apart from
+  structure actually moving.
+* `summary()` returns exactly `window`, `sweep`, `transitions`, `persistence`,
+  `ssl`, `settings`, and `nonconverged_K`. Its print method shows `phi` before
+  `rmsd` and suffixes a persistence value with `*` where the parallel collision
+  cell is `TRUE`; that is display formatting only and never touches the stored
+  matrices.
+* `plot()` keeps the descriptive `objective`, `gain`, and `fit` views. Soft
+  criteria, threshold lines, and selection markers are gone, and a
+  one-candidate gain view is an empty panel rather than an error.
 
 ## Other
 
-* New `$provenance` with SHA-256 identities for the standardized data, `Q0`,
-  the resolved settings, and the evidence payload, plus lineage fields for the
-  managed window extension planned in 0.9.1. Hashes exclude `$sweep$secs` and
-  the serialization header, so they track the scientific payload rather than
-  machine speed or the installed R version. Adds `digest` to Imports.
-* New exported accessors `persistence()` and `ssl()`. `summary()$ssl` now
-  calls `ssl()`, so there is one definition.
-* `stability_eps` must be strictly positive; at zero a zero-norm column would
-  clear the screen and produce an undefined congruence.
-* `v0`, `convChk`, and `tolVal` become explicit `pefa()` arguments, and `...`
-  is removed: every control that changes a returned number is recorded in
+* `pefa()` imposes no upper bound on `K` relative to `J`. The Ledermann bound
+  orients the choice of `Kmax` but is derived for an unrestricted model and
+  does not constrain a regularized partially confirmatory candidate. Past it,
+  expect nonconvergence and `NA` fit indices — `RMSEA` and `TLI` are undefined
+  at non-positive degrees of freedom — and read both as evidence about the
+  window.
+* `v0`, `convChk`, and `tolVal` are explicit `pefa()` arguments and `...` is
+  gone: every control that changes a returned number is recorded in
   `$settings`.
 * Fully exploratory sweeps (`K0 = 0`) are supported.
-* AO (anchor-only) and AZ (anchor-zero) replace LPC/BPC throughout the
-  documentation and vignettes. `vignette("pefa")` now covers fit and count
-  evidence only; `vignette("bifactor")` covers structure, persistence, and
-  decision profiles.
-* Ships `inst/extdata/vbpm_r8_fixture.rds`, a BLAS-stable integration fixture
-  that re-runs only the matcher and table builders.
+* AO (anchor-only) and AZ (anchor-zero) are the vocabulary used throughout the
+  current documentation and vignettes. Earlier terminology survives only in the
+  historical entries below, which are unchanged.
+* `vignette("pefa")` now walks one sweep table by table on a deliberate
+  overextraction example; `vignette("bifactor")` covers bifactor structures, AO
+  versus AZ backbones, a Step-2 comparison derived from the Step-1 result, and
+  an ordinary-versus-bifactor sweep illustration.
 
 # vbpm 0.8.3
 

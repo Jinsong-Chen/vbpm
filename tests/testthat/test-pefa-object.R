@@ -1,805 +1,859 @@
-## The 0.9.0 evidence object: its exact shape, the three tables, the component
-## status codebook, the one-warning rule, and the bifactor group-block offset.
-## Fits are deliberately tiny and use a single spike (v0 = .001), and every
-## table-level fact that can be checked without fitting is checked on a
-## hand-built sweep instead.
+## The 0.9.0 pefa() object contract: the seven top-level components, the three
+## derived tables, the failure and validation rules, and the public surface
+## that survived the lean redesign (technical note section 6, plan 9.2/9.3).
+##
+## Fits are deliberately tiny -- J = 8, N = 150, a single v0 -- because nothing
+## here depends on estimation quality, only on shape, type and bookkeeping.
 
-.pefa_toy <- function(N = 60, J = 9, seed = 3) {
+.mk <- function(N = 150, K = 2, ipf = 4, seed = 11) {
   set.seed(seed)
-  K <- 3L
-  group <- rep(seq_len(K), each = J / K)
-  loading <- matrix(0, J, K)
-  loading[cbind(seq_len(J), group)] <- .8
-  scores <- matrix(rnorm(N * K), N, K)
-  Y <- scores %*% t(loading) +
-    matrix(rnorm(N * J, sd = sqrt(1 - .64)), N, J)
-  Q0 <- matrix(-1L, J, 2)
-  for (k in 1:2) {
-    anchor <- which(group == k)[1:2]
-    Q0[anchor, ] <- 0L
-    Q0[anchor, k] <- 1L
+  J <- K * ipf
+  grp <- rep(seq_len(K), each = ipf)
+  Lam <- matrix(0, J, K)
+  Lam[cbind(seq_len(J), grp)] <- .75
+  Phi <- matrix(.3, K, K)
+  diag(Phi) <- 1
+  psi <- pmax(1 - rowSums((Lam %*% chol(Phi))^2), .25)
+  eta <- matrix(rnorm(N * K), N, K) %*% chol(Phi)
+  Y <- eta %*% t(Lam) + matrix(rnorm(N * J), N, J) %*% diag(sqrt(psi))
+  Q0 <- matrix(-1L, J, K)
+  for (k in seq_len(K)) {
+    a <- which(grp == k)[1:2]
+    Q0[a, ] <- 0L
+    Q0[a, k] <- 1L
   }
-  list(Y = Y, Q0 = Q0)
+  list(Y = Y, Q0 = Q0, J = as.integer(J), K0 = as.integer(K))
 }
 
-.toy <- .pefa_toy()
-## One healthy converged sweep, reused by the shape tests below.
-.healthy <- pefa(.toy$Q0, .toy$Y, 2, 4, v0 = .001, max_it = 800,
-                 verbose = FALSE)
-
-.sweep_names <- c(
-  "K", "ELBO", "t_nom", "t", "t_S", "AIC", "BIC", "AIC_S", "BIC_S",
-  "RMSEA", "SRMR", "CFI", "TLI", "iter", "secs", "converged",
-  "backbone_ssl_min", "fit_status", "fit_reason", "loading_status",
-  "loading_reason", "pip_status", "pip_reason", "elbo_status", "elbo_reason",
-  "stats_status", "stats_reason"
-)
-.transition_names <- c(
-  "K_from", "K_to", "ELBO_gain", "AIC_gain", "BIC_gain", "AIC_S_gain",
-  "BIC_S_gain", "ELBO_gain_pct", "AIC_gain_pct", "BIC_gain_pct",
-  "AIC_S_gain_pct", "BIC_S_gain_pct"
-)
-.persistence_names <- c(
-  "K_from", "K_to", "r", "n_pairs", "phi_min", "rmsd", "rmsd_max", "ari",
-  "pip_rmsd", "unmatched_n", "unmatched_ssl", "collision", "n_collisions",
-  "collision_targets", "collision_multiplicities", "source_ineligible_n",
-  "target_eligible_n", "backbone_degenerate", "from_fit_ok", "to_fit_ok",
-  "pair_status", "pair_reason"
-)
-
-## A sweep skeleton for the table builders, which read only these columns.
-.stub_sweep <- function(Ks, converged = TRUE, loading = "ok", pip = "ok") {
-  data.frame(K = as.integer(Ks),
-             converged = rep_len(converged, length(Ks)),
-             loading_status = rep_len(loading, length(Ks)),
-             pip_status = rep_len(pip, length(Ks)),
-             stringsAsFactors = FALSE)
-}
-.keyed <- function(mats, Ks) stats::setNames(mats, as.character(Ks))
-.unit <- function(i, J = 6) {
-  v <- numeric(J)
-  v[i] <- 1
-  v
+.fit3 <- function(d = .mk()) {
+  pefa(d$Q0, d$Y, 2, 4, v0 = .001, max_it = 400, verbose = FALSE)
 }
 
-test_that("pefa returns exactly the 0.9.0 evidence object", {
-  expect_identical(
-    names(formals(pefa)),
-    c("Q0", "Y", "Kmin", "Kmax", "bifactor", "general", "v0", "max_it",
-      "convChk", "tolVal", "tau", "stability_eps", "rank_adjust",
-      "rank_max_J", "verbose")
-  )
-  expect_false(any(c("cuts", "sustain", "...") %in% names(formals(pefa))))
+## The regularization mask pefa() rebuilds for candidate K from the stored
+## backbone.  Reassembly and the direct-comparison checks both need it.
+.reg_of <- function(Q0, K) {
+  J <- nrow(Q0)
+  K0 <- ncol(Q0)
+  Q <- if (K > K0) cbind(Q0, matrix(-1L, J, K - K0)) else Q0
+  matrix(Q == -1L, J, K)
+}
 
-  expect_identical(class(.healthy), "pefa")
-  expect_identical(names(.healthy), c("sweep", "transitions", "persistence",
-                                      "loadings", "pips", "Q0", "settings",
-                                      "provenance"))
-  for (gone in c("selected_K", "boundary", "call", "window", "gain_status",
-                 "fits", "ssl", "selection", "selected_fit")) {
-    expect_false(gone %in% names(.healthy))
+## Group-block view: bifactor candidates carry a leading general column that
+## every between-candidate comparison removes first.
+.grp <- function(m, bifactor) if (bifactor) m[, -1L, drop = FALSE] else m
+
+.recompare <- function(x, K_from, K_to) {
+  bif <- isTRUE(x$settings$bifactor)
+  a <- as.character(K_from)
+  b <- as.character(K_to)
+  vbpm:::.pefa_compare_pair(
+    lam_from = .grp(x$loadings[[a]], bif), lam_to = .grp(x$loadings[[b]], bif),
+    pip_from = .grp(x$pips[[a]], bif), pip_to = .grp(x$pips[[b]], bif),
+    reg_from = .reg_of(x$Q0, K_from), reg_to = .reg_of(x$Q0, K_to),
+    K0 = ncol(x$Q0))
+}
+
+.fact_names <- c("phi_min", "rmsd", "rmsd_max", "ari", "pip_rmsd",
+                 "unmatched_ssl", "collision")
+
+## One synthetic pair result, so the derived-view builders can be exercised on
+## values chosen by hand rather than produced by a fit.
+.hand_fact <- function(phi_min, rmsd, rmsd_max, ari, pip_rmsd, unmatched_ssl,
+                       collision) {
+  list(phi_min = phi_min, rmsd = rmsd, rmsd_max = rmsd_max, ari = ari,
+       pip_rmsd = pip_rmsd, unmatched_ssl = unmatched_ssl,
+       collision = collision)
+}
+
+
+# ---- top-level shape --------------------------------------------------
+
+test_that("the object holds exactly the seven documented components", {
+  r <- .fit3()
+  expect_identical(names(r),
+                   c("sweep", "transitions", "persistence", "loadings",
+                     "pips", "Q0", "settings"))
+  expect_identical(class(r), "pefa")
+  expect_type(r, "list")
+  expect_length(r, 7L)
+})
+
+test_that("every component removed in 0.9.0 is absent", {
+  r <- .fit3()
+  gone <- c("provenance", "selected_K", "boundary", "profile", "evidence",
+            "checkpoint", "resume", "lineage", "hashes", "hash", "build_id",
+            "fit", "fits", "selected_fit", "status", "reason", "n_pairs",
+            "stability_eps", "pair_detail", "pairs", "decisions")
+  for (nm in gone) expect_null(r[[nm, exact = TRUE]])
+
+  ## Neither a soft criterion nor a status taxonomy survives in any table.
+  expect_false(any(c("t_S", "AIC_S", "BIC_S", "status", "reason") %in%
+                     names(r$sweep)))
+  expect_false(any(c("status", "reason", "n_pairs", "assignment",
+                     "collision_location", "unmatched_n") %in%
+                     names(r$transitions)))
+  ## No speculative sweep superclass.
+  expect_false(inherits(r, "vbpm_sweep"))
+})
+
+test_that("$settings holds exactly the resolved fit controls, in order", {
+  d <- .mk()
+  r <- .fit3(d)
+  s <- r$settings
+  expect_identical(names(s),
+                   c("bifactor", "general", "v0", "max_it", "convChk",
+                     "tolVal", "tau", "rank_adjust", "rank_max_J"))
+  expect_identical(s$bifactor, FALSE)
+  expect_null(s$general)
+  expect_identical(s$v0, 0.001)
+  expect_identical(s$max_it, 400L)
+  expect_identical(s$convChk, FALSE)
+  expect_identical(s$tolVal, 1e-4)
+  expect_identical(s$tau, 0.5)
+  expect_identical(s$rank_adjust, FALSE)
+  expect_identical(s$rank_max_J, 100L)
+  ## Unnamed scalars, and no analysis policy or verbosity value.
+  expect_null(names(s$bifactor))
+  expect_null(names(s$v0))
+  expect_false(any(c("verbose", "cuts", "sustain", "delta", "eps",
+                     "stability_eps") %in% names(s)))
+
+  ## Bifactor mode resolves `general` to a length-J integer design.
+  rb <- pefa(d$Q0, d$Y, 2, 3, bifactor = TRUE, v0 = .001, max_it = 300,
+             verbose = FALSE)
+  expect_identical(rb$settings$bifactor, TRUE)
+  expect_identical(rb$settings$general, rep(1L, d$J))
+})
+
+test_that("$Q0, $loadings and $pips are the documented candidate primitives", {
+  d <- .mk()
+  r <- .fit3(d)
+  expect_true(is.matrix(r$Q0))
+  expect_identical(dim(r$Q0), c(d$J, 2L))
+  expect_type(r$Q0, "integer")
+  expect_true(all(r$Q0 %in% c(-1L, 0L, 1L)))
+  expect_identical(colnames(r$Q0), c("F1", "F2"))
+
+  keys <- as.character(2:4)
+  expect_identical(names(r$loadings), keys)
+  expect_identical(names(r$pips), keys)
+  for (k in keys) {
+    L <- r$loadings[[k]]
+    P <- r$pips[[k]]
+    expect_true(is.matrix(L) && is.double(L))
+    expect_true(is.matrix(P) && is.double(P))
+    expect_identical(dim(L), c(d$J, as.integer(k)))
+    expect_identical(dim(P), dim(L))
+    expect_identical(dimnames(P), dimnames(L))
+    expect_identical(rownames(L), rownames(r$Q0))
+    expect_true(all(is.finite(L)))
+    expect_true(all(is.finite(P)) && all(P >= 0) && all(P <= 1))
   }
-  expect_identical(names(.healthy$loadings), as.character(.healthy$sweep$K))
-  expect_identical(names(.healthy$pips), names(.healthy$loadings))
-  expect_identical(dim(.healthy$Q0), c(ncol(.toy$Y), 2L))
-  expect_identical(typeof(.healthy$Q0), "integer")
-  for (key in names(.healthy$loadings)) {
-    expect_identical(dim(.healthy$loadings[[key]]),
-                     c(ncol(.toy$Y), as.integer(key)))
-    expect_identical(dimnames(.healthy$pips[[key]]),
-                     dimnames(.healthy$loadings[[key]]))
+  ## Backbone names lead the factor dimnames; exploratory columns continue it.
+  expect_identical(colnames(r$loadings[["4"]]), c("F1", "F2", "F3", "F4"))
+})
+
+
+# ---- $sweep -----------------------------------------------------------
+
+test_that("$sweep has exactly the documented columns and types", {
+  r <- .fit3()
+  expect_s3_class(r$sweep, "data.frame")
+  expect_identical(names(r$sweep),
+                   c("K", "ELBO", "AIC", "BIC", "RMSEA", "SRMR", "CFI", "TLI",
+                     "t", "iter", "converged"))
+  expect_identical(nrow(r$sweep), 3L)
+  expect_identical(r$sweep$K, 2:4)
+  expect_type(r$sweep$K, "integer")
+  expect_type(r$sweep$iter, "integer")
+  expect_type(r$sweep$converged, "logical")
+  for (nm in c("ELBO", "AIC", "BIC", "RMSEA", "SRMR", "CFI", "TLI", "t")) {
+    expect_type(r$sweep[[nm]], "double")
+  }
+  ## Required candidate facts are finite; t is a whole nonnegative count that
+  ## is nonetheless stored as a double.
+  expect_true(all(is.finite(r$sweep$ELBO)))
+  expect_true(all(is.finite(r$sweep$AIC)))
+  expect_true(all(is.finite(r$sweep$BIC)))
+  expect_true(all(is.finite(r$sweep$t)))
+  expect_true(all(r$sweep$t >= 0))
+  expect_identical(r$sweep$t, round(r$sweep$t))
+  expect_false(anyNA(r$sweep$converged))
+  expect_identical(rownames(r$sweep), as.character(1:3))
+})
+
+
+# ---- $transitions -----------------------------------------------------
+
+test_that("$transitions has exactly the documented columns and types", {
+  r <- .fit3()
+  tr <- r$transitions
+  expect_s3_class(tr, "data.frame")
+  expect_identical(names(tr),
+                   c("K_from", "K_to", "ELBO_gain_pct", "BIC_gain_pct",
+                     .fact_names))
+  expect_identical(ncol(tr), 11L)
+  expect_identical(nrow(tr), nrow(r$sweep) - 1L)
+  expect_identical(tr$K_from, 2:3)
+  expect_identical(tr$K_to, 3:4)
+  expect_type(tr$K_from, "integer")
+  expect_type(tr$K_to, "integer")
+  expect_type(tr$collision, "logical")
+  for (nm in c("ELBO_gain_pct", "BIC_gain_pct",
+               setdiff(.fact_names, "collision"))) {
+    expect_type(tr[[nm]], "double")
   }
 })
 
-test_that("the three tables keep their documented columns and types", {
-  expect_named(.healthy$sweep, .sweep_names)
-  expect_named(.healthy$transitions, .transition_names)
-  expect_named(.healthy$persistence, .persistence_names)
-
-  healthy_types <- vapply(.healthy$persistence, typeof, "")
-  expect_identical(
-    healthy_types,
-    vapply(vbpm:::.pefa_empty_persistence(), typeof, "")
-  )
-
-  ## An all-unavailable table keeps the same signature: pair_reason stays
-  ## character rather than collapsing to logical NA.
-  Ks <- 2:3
-  loadings <- .keyed(list(cbind(.unit(1), .unit(2)),
-                          cbind(.unit(1), .unit(2), .unit(3))), Ks)
-  pips <- .keyed(list(matrix(.5, 6, 2), matrix(.5, 6, 3)), Ks)
-  unavailable <- vbpm:::.pefa_persistence_table(
-    .stub_sweep(Ks, loading = "malformed_loading"), loadings, pips,
-    matrix(-1L, 6, 1), K0 = 1, stability_eps = 0.1, bifactor = FALSE
-  )
-  expect_identical(vapply(unavailable, typeof, ""), healthy_types)
-  expect_identical(unavailable$pair_status, "unavailable")
-  expect_identical(unavailable$pair_reason, "malformed_loading")
-
-  ## A one-candidate sweep returns typed zero-row companion tables.
-  single <- pefa(.toy$Q0, .toy$Y, 2, 2, v0 = .001, max_it = 400,
-                 verbose = FALSE)
-  expect_identical(nrow(single$transitions), 0L)
-  expect_identical(nrow(single$persistence), 0L)
-  expect_named(single$transitions, .transition_names)
-  expect_named(single$persistence, .persistence_names)
-  expect_identical(vapply(single$persistence, typeof, ""), healthy_types)
-  expect_identical(vapply(single$transitions, typeof, ""),
-                   vapply(.healthy$transitions, typeof, ""))
-})
-
-test_that("persistence holds every ordered pair, ordered, with r", {
-  z <- .healthy$persistence
-  W <- nrow(.healthy$sweep)
-  expect_identical(nrow(z), as.integer(W * (W - 1L) / 2L))
-  expect_identical(z$K_from, c(2L, 2L, 3L))
-  expect_identical(z$K_to, c(3L, 4L, 4L))
-  expect_identical(z$r, z$K_to - z$K_from)
-  expect_false(is.unsorted(z$K_from))
-  for (k in unique(z$K_from)) {
-    expect_false(is.unsorted(z$K_to[z$K_from == k]))
+test_that("a one-candidate window keeps the typed zero-row schema", {
+  d <- .mk()
+  r <- pefa(d$Q0, d$Y, 2, 2, v0 = .001, max_it = 300, verbose = FALSE)
+  expect_identical(nrow(r$sweep), 1L)
+  tr <- r$transitions
+  expect_identical(nrow(tr), 0L)
+  expect_identical(names(tr),
+                   c("K_from", "K_to", "ELBO_gain_pct", "BIC_gain_pct",
+                     .fact_names))
+  expect_type(tr$K_from, "integer")
+  expect_type(tr$K_to, "integer")
+  expect_type(tr$collision, "logical")
+  for (nm in c("ELBO_gain_pct", "BIC_gain_pct",
+               setdiff(.fact_names, "collision"))) {
+    expect_type(tr[[nm]], "double")
   }
-  expect_identical(nrow(.healthy$transitions), W - 1L)
+  ## The persistence triangles degenerate to a single typed NA cell.
+  expect_identical(dim(r$persistence$phi), c(1L, 1L))
+  expect_identical(r$persistence$phi[1L, 1L], NA_real_)
+  expect_identical(r$persistence$collision[1L, 1L], NA)
 })
 
-test_that("an r >= 2 edge is the direct endpoint comparison", {
-  ## Source column u2 picks the blend w in K = 3, and w in turn picks u3 in
-  ## K = 4 -- so a composed assignment would score u2 against u3 (phi = 0),
-  ## while the direct comparison scores it against u2 (phi = 1).
-  w <- 0.6 * .unit(2) + 0.8 * .unit(3)
-  L2 <- cbind(.unit(1), .unit(2))
-  L3 <- cbind(.unit(1), w, .unit(4))
-  L4 <- cbind(.unit(1), .unit(2), .unit(3), .unit(5))
+
+# ---- $persistence -----------------------------------------------------
+
+test_that("$persistence is three plain upper-triangular K-keyed matrices", {
+  r <- .fit3()
+  p <- r$persistence
+  expect_type(p, "list")
+  expect_identical(names(p), c("phi", "rmsd", "collision"))
+  keys <- as.character(2:4)
+  for (nm in names(p)) {
+    m <- p[[nm]]
+    expect_true(is.matrix(m))
+    expect_identical(dim(m), c(3L, 3L))
+    expect_identical(dimnames(m), list(keys, keys))
+    ## Ordinary matrices only: no custom class, no smuggled attribute.
+    expect_identical(names(attributes(m)), c("dim", "dimnames"))
+    expect_identical(class(m), c("matrix", "array"))
+    ## Diagonal and lower triangle are typed NA.
+    expect_true(all(is.na(m[!upper.tri(m)])))
+    expect_true(all(!is.na(m[upper.tri(m)])))
+  }
+  expect_type(p$phi, "double")
+  expect_type(p$rmsd, "double")
+  expect_type(p$collision, "logical")
+  expect_identical(p$phi[2L, 1L], NA_real_)
+  expect_identical(p$collision[3L, 3L], NA)
+})
+
+test_that("every adjacent persistence cell is its transition field", {
+  r <- .fit3()
+  tr <- r$transitions
+  p <- r$persistence
+  for (i in seq_len(nrow(tr))) {
+    a <- as.character(tr$K_from[i])
+    b <- as.character(tr$K_to[i])
+    expect_identical(p$phi[a, b], tr$phi_min[i])
+    ## The mapping is rmsd_max, NOT the pooled $transitions$rmsd.
+    expect_identical(p$rmsd[a, b], tr$rmsd_max[i])
+    expect_identical(p$collision[a, b], tr$collision[i])
+  }
+  ## The two RMSD definitions really do differ on this sweep, so the check
+  ## above could not have passed by accident.
+  expect_true(any(tr$rmsd != tr$rmsd_max))
+  expect_false(isTRUE(all.equal(p$rmsd["2", "3"], tr$rmsd[1L])))
+})
+
+test_that("the derived views read one shared pair result, keyed correctly", {
+  ## Hand-chosen facts with rmsd and rmsd_max deliberately unequal, so a
+  ## crossed mapping cannot survive.
   Ks <- 2:4
-  table <- vbpm:::.pefa_persistence_table(
-    .stub_sweep(Ks), .keyed(list(L2, L3, L4), Ks),
-    .keyed(list(matrix(.5, 6, 2), matrix(.5, 6, 3), matrix(.5, 6, 4)), Ks),
-    matrix(-1L, 6, 1), K0 = 1, stability_eps = 0.1, bifactor = FALSE
+  facts <- list(
+    "2-3" = .hand_fact(0.91, 0.11, 0.21, 0.31, 0.41, 0.51, FALSE),
+    "3-4" = .hand_fact(0.92, 0.12, 0.22, 0.32, 0.42, 0.52, TRUE),
+    "2-4" = .hand_fact(0.93, 0.13, 0.23, 0.33, 0.43, 0.53, TRUE)
   )
-  direct <- table[table$K_from == 2L & table$K_to == 4L, ]
-  expect_identical(direct$r, 2L)
-  expect_equal(direct$phi_min, 1, tolerance = 1e-12)
-  expect_equal(direct$rmsd_max, 0, tolerance = 1e-12)
+  sweep <- data.frame(K = Ks, ELBO = c(-100, -50, -60), BIC = c(300, 280, 290))
 
-  ## The two adjacent legs, and hence their composition, disagree with it.
-  expect_equal(table$phi_min[table$K_from == 2L & table$K_to == 3L], 0.6,
-               tolerance = 1e-12)
-  expect_equal(table$phi_min[table$K_from == 3L & table$K_to == 4L], 0,
-               tolerance = 1e-12)
+  tr <- vbpm:::.pefa_transitions(sweep, facts)
+  expect_identical(tr$K_from, 2:3)
+  expect_identical(tr$phi_min, c(0.91, 0.92))
+  expect_identical(tr$rmsd, c(0.11, 0.12))
+  expect_identical(tr$rmsd_max, c(0.21, 0.22))
+  expect_identical(tr$ari, c(0.31, 0.32))
+  expect_identical(tr$pip_rmsd, c(0.41, 0.42))
+  expect_identical(tr$unmatched_ssl, c(0.51, 0.52))
+  expect_identical(tr$collision, c(FALSE, TRUE))
+
+  p <- vbpm:::.pefa_persistence(Ks, facts)
+  expect_identical(p$phi["2", "3"], 0.91)
+  expect_identical(p$phi["2", "4"], 0.93)
+  expect_identical(p$rmsd["2", "3"], 0.21)      # rmsd_max, not 0.11
+  expect_identical(p$rmsd["3", "4"], 0.22)
+  expect_identical(p$rmsd["2", "4"], 0.23)
+  ## A collision on a non-adjacent pair reaches the mask on its own cell.
+  expect_identical(p$collision["2", "4"], TRUE)
+  expect_identical(p$collision["2", "3"], FALSE)
 })
 
-test_that("gains carry the documented orientation and percent guards", {
-  sweep <- data.frame(K = 2:5,
-                      ELBO = c(0, 100, 120, 125),
-                      AIC = c(500, 400, 390, 388),
-                      BIC = c(600, 500, 495, 494),
-                      AIC_S = c(510, 405, 400, 399),
-                      BIC_S = c(610, 505, 503, 502))
-  tr <- vbpm:::.pefa_transitions_table(sweep)
-  expect_named(tr, .transition_names)
-  ## ELBO larger-is-better; every IC gain is from - to, so positive favors
-  ## the larger candidate on all five paths.
-  expect_equal(tr$ELBO_gain, c(100, 20, 5))
-  expect_equal(tr$AIC_gain, c(100, 10, 2))
-  expect_equal(tr$BIC_gain, c(100, 5, 1))
-  expect_equal(tr$AIC_S_gain, c(105, 5, 1))
-  expect_equal(tr$BIC_S_gain, c(105, 2, 1))
-  expect_equal(tr$ELBO_gain_pct, c(100, 20, 5))
-  expect_equal(tr$BIC_gain_pct, c(100, 5, 1))
-
-  ## One nonfinite candidate blanks only the edges it touches.
-  broken <- sweep
-  broken$ELBO <- c(0, 100, NA, 125)
-  tr_broken <- vbpm:::.pefa_transitions_table(broken)
-  expect_equal(tr_broken$ELBO_gain, c(100, NA, NA))
-  expect_equal(tr_broken$ELBO_gain_pct, c(100, NA, NA))
-  expect_equal(tr_broken$AIC_gain_pct, c(100, 10, 2))
-
-  ## Delta_max <= 0 leaves the raw gains and drops the percentages.
-  falling <- sweep
-  falling$ELBO <- c(0, -10, -20, -30)
-  tr_falling <- vbpm:::.pefa_transitions_table(falling)
-  expect_equal(tr_falling$ELBO_gain, c(-10, -10, -10))
-  expect_true(all(is.na(tr_falling$ELBO_gain_pct)))
-  expect_equal(tr_falling$AIC_gain_pct, c(100, 10, 2))
-})
-
-test_that("an all-nonfinite gain path is NA and emits no warning", {
-  sweep <- data.frame(K = 2:5,
-                      ELBO = rep(NA_real_, 4),
-                      AIC = c(500, 400, 390, 388),
-                      BIC = c(600, 500, 495, 494),
-                      AIC_S = c(510, 405, 400, 399),
-                      BIC_S = c(610, 505, 503, 502))
-  ## max(numeric(0)) would return -Inf and warn; the guard must prevent both.
-  expect_silent(tr <- vbpm:::.pefa_transitions_table(sweep))
-  emitted <- character(0)
-  withCallingHandlers(
-    vbpm:::.pefa_transitions_table(sweep),
-    warning = function(w) {
-      emitted <<- c(emitted, conditionMessage(w))
-      invokeRestart("muffleWarning")
+test_that("all-pairs cells are direct endpoint comparisons", {
+  r <- .fit3()
+  Ks <- r$sweep$K
+  for (i in seq_along(Ks)) {
+    for (j in seq_along(Ks)) {
+      if (i >= j) next
+      f <- .recompare(r, Ks[i], Ks[j])
+      a <- as.character(Ks[i])
+      b <- as.character(Ks[j])
+      expect_identical(r$persistence$phi[a, b], f$phi_min)
+      expect_identical(r$persistence$rmsd[a, b], f$rmsd_max)
+      expect_identical(r$persistence$collision[a, b], f$collision)
     }
-  )
-  expect_length(emitted, 0L)
-  expect_identical(tr$ELBO_gain, rep(NA_real_, 3))
-  expect_identical(tr$ELBO_gain_pct, rep(NA_real_, 3))
-  expect_identical(typeof(tr$ELBO_gain_pct), "double")
-  expect_false(any(is.infinite(tr$ELBO_gain_pct)))
-  expect_equal(tr$AIC_gain_pct, c(100, 10, 2))
-})
-
-test_that("gain percentages survive gains near the largest double", {
-  xmax <- .Machine$double.xmax
-  ## Each AIC gain is IC_from - IC_to, so these four finite criterion values
-  ## produce gains of xmax, xmax / 2, and -xmax.
-  sweep <- data.frame(K = 2:5,
-                      ELBO = c(0, 100, 120, 125),
-                      AIC = c(xmax, 0, -xmax / 2, xmax / 2),
-                      BIC = c(600, 500, 495, 494),
-                      AIC_S = c(510, 405, 400, 399),
-                      BIC_S = c(610, 505, 503, 502))
-  tr <- vbpm:::.pefa_transitions_table(sweep)
-  expect_equal(tr$AIC_gain, c(xmax, xmax / 2, -xmax))
-  ## 100 * gain overflows to Inf before the division and would blank all
-  ## three cells; 100 * (gain / gain_max) keeps every ratio representable.
-  expect_equal(tr$AIC_gain_pct, c(100, 50, -100))
-  expect_false(any(is.na(tr$AIC_gain_pct)))
-  expect_false(any(is.infinite(tr$AIC_gain_pct)))
-  ## The other paths are untouched by the extreme one.
-  expect_equal(tr$BIC_gain_pct, c(100, 5, 1))
-
-  ## Percentages are scale-free: any positive rescaling of the gain vector
-  ## leaves them alone, at either end of the representable range.
-  expect_equal(vbpm:::.pefa_gain_pct(c(xmax, xmax / 2, -xmax)),
-               c(100, 50, -100))
-  for (s in c(1e-300, 1e-3, 1, 7, 1e300)) {
-    expect_equal(vbpm:::.pefa_gain_pct(c(1, 0.5, -1) * s),
-                 c(100, 50, -100))
   }
 })
 
-test_that("component statuses are independent", {
-  dn <- list(paste0("item_", 1:4), c("F1", "F2"))
-  stats_ok <- stats::setNames(
-    c(10, 9, 8.5, 100, 110, 101, 111, .05, .04, .98, .97),
-    c("t_nom", "t", "t_S", "AIC", "BIC", "AIC_S", "BIC_S",
-      "RMSEA", "SRMR", "CFI", "TLI")
-  )
-  fit <- list(flag = 1, Lam = matrix(0.5, 4, 2), pi = matrix(0.4, 4, 2),
-              ELBO = -100, iter = 12)
+test_that("a chained composition would give a different all-pairs answer", {
+  ## Three synthetic candidates in which composing the adjacent assignments
+  ## disagrees with the direct one: the single K = 1 source matches column 1
+  ## of the K = 2 candidate, that column matches column 2 of the K = 3
+  ## candidate, but the source itself matches column 1 of the K = 3 candidate.
+  L <- list("1" = cbind(c(1, 0, 0)),
+            "2" = cbind(c(1, 1, 0), c(0, 0, 1)),
+            "3" = cbind(c(1, 0, 0), c(1, 1, 0), c(0, 0, 1)))
+  P <- lapply(L, function(m) matrix(0.5, nrow(m), ncol(m)))
+  Q0 <- matrix(0L, 3L, 0L)
+  cmp <- function(a, b) {
+    vbpm:::.pefa_compare_pair(L[[a]], L[[b]], P[[a]], P[[b]],
+                              .reg_of(Q0, as.integer(a)),
+                              .reg_of(Q0, as.integer(b)), 0L)
+  }
+  facts <- list("1-2" = cmp("1", "2"), "2-3" = cmp("2", "3"),
+                "1-3" = cmp("1", "3"))
+  p <- vbpm:::.pefa_persistence(1:3, facts)
 
-  healthy <- vbpm:::.pefa_candidate(fit, stats_ok, 2L, dn, 1L, FALSE, 0.5)$row
-  expect_identical(healthy$converged, TRUE)
-  expect_identical(
-    unlist(healthy[c("fit_status", "loading_status", "pip_status",
-                     "elbo_status", "stats_status")], use.names = FALSE),
-    rep("ok", 5)
-  )
-  expect_identical(healthy$K, 2L)
-  expect_identical(healthy$iter, 12L)
-  expect_identical(typeof(healthy$secs), "double")
-
-  ## Nonconvergence plus an invalid PIP: two unavailable components, three
-  ## untouched, and the finite loading matrix stored as returned.
-  combined_fit <- fit
-  combined_fit$flag <- 0
-  combined_fit$pi <- matrix(1.5, 4, 2)
-  combined <- vbpm:::.pefa_candidate(combined_fit, stats_ok, 2L, dn, 1L,
-                                     FALSE, 0.5)
-  expect_identical(combined$row$converged, FALSE)
-  expect_identical(combined$row$fit_status, "unavailable")
-  expect_identical(combined$row$fit_reason, "nonconverged")
-  expect_identical(combined$row$pip_status, "unavailable")
-  expect_identical(combined$row$pip_reason, "out_of_range_pip")
-  expect_identical(combined$row$loading_status, "ok")
-  expect_identical(combined$row$elbo_status, "ok")
-  expect_identical(combined$row$stats_status, "ok")
-  expect_identical(combined$row$ELBO, -100)
-  expect_identical(combined$loading, matrix(0.5, 4, 2, dimnames = dn))
-  expect_true(all(is.na(combined$pip)))
-  expect_identical(dim(combined$pip), c(4L, 2L))
-
-  ## A fit error gives every component a controlled reason and expected-shape
-  ## typed-NA matrices, with converged = NA rather than FALSE.
-  err <- tryCatch(stop("boom"), error = identity)
-  failed <- vbpm:::.pefa_candidate(err, err, 2L, dn, 1L, FALSE, 0.5)
-  expect_identical(failed$row$converged, NA)
-  expect_identical(failed$row$fit_reason, "fit_error")
-  expect_identical(
-    unlist(failed$row[c("loading_reason", "pip_reason", "elbo_reason",
-                        "stats_reason")], use.names = FALSE),
-    rep("upstream_fit_error", 4)
-  )
-  expect_identical(dimnames(failed$loading), dn)
-  expect_true(all(is.na(failed$loading)))
-  expect_identical(failed$row$backbone_ssl_min, NA_real_)
-  expect_identical(failed$row$iter, NA_integer_)
-
-  ## A missing convergence flag is malformed_fit, and stays NA.
-  flagless <- fit
-  flagless$flag <- NULL
-  malformed <- vbpm:::.pefa_candidate(flagless, stats_ok, 2L, dn, 1L,
-                                      FALSE, 0.5)$row
-  expect_identical(malformed$converged, NA)
-  expect_identical(malformed$fit_reason, "malformed_fit")
-  expect_identical(malformed$loading_status, "ok")
-
-  ## A malformed loading leaves the criteria alone and blanks the backbone SSL.
-  wrong_shape <- fit
-  wrong_shape$Lam <- matrix(0.5, 3, 2)
-  shaped <- vbpm:::.pefa_candidate(wrong_shape, stats_ok, 2L, dn, 1L,
-                                   FALSE, 0.5)$row
-  expect_identical(shaped$loading_reason, "malformed_loading")
-  expect_identical(shaped$backbone_ssl_min, NA_real_)
-  expect_identical(shaped$pip_status, "ok")
-  expect_identical(shaped$AIC, 100)
-
-  ## A nonfinite cell is normalized in place after the schema passes.
-  spoiled <- fit
-  spoiled$Lam[1, 1] <- Inf
-  nonfinite <- vbpm:::.pefa_candidate(spoiled, stats_ok, 2L, dn, 1L,
-                                      FALSE, 0.5)
-  expect_identical(nonfinite$row$loading_reason, "nonfinite_loading")
-  expect_identical(dim(nonfinite$loading), c(4L, 2L))
-  expect_true(is.na(nonfinite$loading[1, 1]))
-  expect_identical(nonfinite$loading[2, 1], 0.5)
-
-  ## Legitimate descriptive NAs coexist with stats_status "ok"; an invalid
-  ## criterion does not.
-  descriptive <- stats_ok
-  descriptive[["RMSEA"]] <- NA_real_
-  descriptive[["TLI"]] <- NaN
-  soft <- vbpm:::.pefa_candidate(fit, descriptive, 2L, dn, 1L, FALSE, 0.5)$row
-  expect_identical(soft$stats_status, "ok")
-  expect_identical(soft$stats_reason, NA_character_)
-  expect_identical(soft$RMSEA, NA_real_)
-  expect_identical(soft$TLI, NA_real_)
-
-  criterion <- stats_ok
-  criterion[["BIC"]] <- Inf
-  hard <- vbpm:::.pefa_candidate(fit, criterion, 2L, dn, 1L, FALSE, 0.5)$row
-  expect_identical(hard$stats_status, "unavailable")
-  expect_identical(hard$stats_reason, "invalid_criterion_stats")
-  expect_identical(hard$BIC, NA_real_)
-  expect_identical(hard$AIC, 100)          # the valid scalars survive
-  expect_identical(hard$elbo_status, "ok")
-  expect_identical(hard$loading_status, "ok")
+  ## Direct: an exact copy of the source, so the weakest-column RMSD is 0.
+  expect_identical(p$rmsd["1", "3"], 0)
+  ## Chained would have gone through the K = 2 column and landed on the
+  ## K = 3 column whose distance is sqrt(1/3).
+  expect_equal(facts[["1-2"]]$rmsd_max, sqrt(1 / 3))
+  expect_gt(facts[["1-2"]]$rmsd_max, p$rmsd["1", "3"])
 })
 
-test_that("a nonconverged endpoint keeps every defined metric", {
-  warnings <- character(0)
-  object <- withCallingHandlers(
-    pefa(.toy$Q0, .toy$Y, 2, 3, v0 = .001, max_it = 3, verbose = FALSE),
-    warning = function(w) {
-      warnings <<- c(warnings, conditionMessage(w))
-      invokeRestart("muffleWarning")
+
+# ---- gains ------------------------------------------------------------
+
+test_that("gains are oriented toward K_to and scaled by their own maximum", {
+  Ks <- 2:5
+  facts <- stats::setNames(
+    rep(list(.hand_fact(1, 0, 0, 1, 0, 0, FALSE)), 3L),
+    c("2-3", "3-4", "4-5"))
+  sweep <- data.frame(K = Ks,
+                      ELBO = c(-100, -50, -60, -40),
+                      BIC = c(300, 280, 290, 285))
+  tr <- vbpm:::.pefa_transitions(sweep, facts)
+
+  ## ELBO gain is ELBO_to - ELBO_from: 50, -10, 20, largest positive 50.
+  expect_identical(tr$ELBO_gain_pct, c(100, -20, 40))
+  ## BIC gain is BIC_from - BIC_to: 20, -10, 5, largest positive 20.
+  expect_identical(tr$BIC_gain_pct, c(100, -50, 25))
+})
+
+test_that("a path with no positive gain is entirely NA", {
+  Ks <- 2:4
+  facts <- stats::setNames(
+    rep(list(.hand_fact(1, 0, 0, 1, 0, 0, FALSE)), 2L), c("2-3", "3-4"))
+  sweep <- data.frame(K = Ks, ELBO = c(-100, -150, -200),
+                      BIC = c(300, 280, 260))
+  tr <- vbpm:::.pefa_transitions(sweep, facts)
+  expect_identical(tr$ELBO_gain_pct, c(NA_real_, NA_real_))
+  ## The BIC path is unaffected: normalization is per path.
+  expect_identical(tr$BIC_gain_pct, c(100, 100))
+
+  ## A real all-nonpositive sweep reaches the same place.
+  r <- .fit3()
+  expect_true(all(diff(r$sweep$ELBO) < 0))
+  expect_true(all(is.na(r$transitions$ELBO_gain_pct)))
+  expect_true(all(is.na(r$transitions$BIC_gain_pct)))
+})
+
+test_that("a nonrepresentable adjacent difference is a controlled error", {
+  facts <- list("2-3" = .hand_fact(1, 0, 0, 1, 0, 0, FALSE))
+  sweep <- data.frame(K = 2:3, ELBO = c(-1e308, 1e308), BIC = c(1, 2))
+  expect_error(vbpm:::.pefa_transitions(sweep, facts), "must be finite")
+  sweep2 <- data.frame(K = 2:3, ELBO = c(1, 2), BIC = c(-1e308, 1e308))
+  expect_error(vbpm:::.pefa_transitions(sweep2, facts), "must be finite")
+})
+
+
+# ---- reassembly -------------------------------------------------------
+
+test_that("both derived views rebuild from the five source components", {
+  r <- .fit3()
+  local_mocked_bindings(
+    vbfa = function(...) {
+      stop("vbfa() must not be called when rebuilding a derived view.")
+    },
+    .package = "vbpm")
+
+  Ks <- r$sweep$K
+  K0 <- ncol(r$Q0)
+  bif <- isTRUE(r$settings$bifactor)
+  facts <- list()
+  for (i in seq_along(Ks)) {
+    for (j in seq_along(Ks)) {
+      if (i >= j) next
+      a <- as.character(Ks[i])
+      b <- as.character(Ks[j])
+      facts[[paste(Ks[i], Ks[j], sep = "-")]] <- vbpm:::.pefa_compare_pair(
+        lam_from = .grp(r$loadings[[a]], bif),
+        lam_to = .grp(r$loadings[[b]], bif),
+        pip_from = .grp(r$pips[[a]], bif), pip_to = .grp(r$pips[[b]], bif),
+        reg_from = .reg_of(r$Q0, Ks[i]), reg_to = .reg_of(r$Q0, Ks[j]),
+        K0 = K0)
     }
-  )
-
-  ## The fit component records the nonconvergence; nothing else is erased.
-  expect_identical(object$sweep$converged, c(FALSE, FALSE))
-  expect_identical(object$sweep$fit_status, rep("unavailable", 2))
-  expect_identical(object$sweep$fit_reason, rep("nonconverged", 2))
-  expect_identical(object$sweep$loading_status, rep("ok", 2))
-  expect_identical(object$sweep$pip_status, rep("ok", 2))
-  expect_identical(object$sweep$elbo_status, rep("ok", 2))
-  expect_identical(object$sweep$stats_status, rep("ok", 2))
-  expect_true(all(is.finite(object$sweep$ELBO)))
-  expect_true(all(is.finite(object$sweep$backbone_ssl_min)))
-  for (key in names(object$loadings)) {
-    expect_true(all(is.finite(object$loadings[[key]])))
-    expect_true(all(is.finite(object$pips[[key]])))
   }
-
-  ## The pair is available and fully measured, with the fact recorded.
-  z <- object$persistence
-  expect_identical(nrow(z), 1L)
-  expect_identical(z$pair_status, "available")
-  expect_identical(z$pair_reason, NA_character_)
-  expect_identical(z$from_fit_ok, FALSE)
-  expect_identical(z$to_fit_ok, FALSE)
-  expect_identical(z$n_pairs, 2L)
-  for (metric in c("phi_min", "rmsd", "rmsd_max", "ari", "pip_rmsd",
-                   "unmatched_ssl")) {
-    expect_true(is.finite(z[[metric]]),
-                info = paste("metric", metric, "was blanked"))
-  }
-  expect_false(is.na(z$collision))
-  expect_identical(z$n_collisions, 0L)
-
-  ## The matcher agrees with a direct call on the stored matrices, so nothing
-  ## was suppressed on the way into the table.
-  direct <- vbpm:::.pefa_pair_facts(
-    object$loadings[["2"]], object$loadings[["3"]],
-    object$pips[["2"]], object$pips[["3"]],
-    matrix(object$Q0 == -1L, nrow(object$Q0), 2L),
-    cbind(matrix(object$Q0 == -1L, nrow(object$Q0), 2L),
-          matrix(TRUE, nrow(object$Q0), 1L)),
-    K0 = 2L, stability_eps = object$settings$stability_eps,
-    loading_ok_from = TRUE, loading_ok_to = TRUE,
-    pip_ok_from = TRUE, pip_ok_to = TRUE
-  )
-  expect_equal(z$phi_min, direct$phi_min, tolerance = 1e-12)
-  expect_equal(z$rmsd, direct$rmsd, tolerance = 1e-12)
-  expect_equal(z$pip_rmsd, direct$pip_rmsd, tolerance = 1e-12)
-
-  ## Exactly one aggregate warning, naming the affected K values by code.
-  expect_length(warnings, 1L)
-  expect_match(warnings, "nonconverged")
-  expect_match(warnings, "K = 2, 3")
-
-  ## The triangle keeps the value and flags the endpoint.
-  triangle <- persistence(object, "phi_min")
-  expect_true(is.finite(triangle["2", "3"]))
-  expect_false(attr(triangle, "fit_ok")["2", "3"])
+  expect_identical(vbpm:::.pefa_transitions(r$sweep, facts), r$transitions)
+  expect_identical(vbpm:::.pefa_persistence(Ks, facts), r$persistence)
 })
 
-test_that("a converged sweep is silent and warns at most once", {
-  expect_silent(pefa(.toy$Q0, .toy$Y, 2, 3, v0 = .001, max_it = 800,
-                     verbose = FALSE))
-  expect_identical(.healthy$sweep$converged, rep(TRUE, 3))
-  expect_identical(.healthy$sweep$fit_status, rep("ok", 3))
 
-  ## Three nonconverged candidates warn once, not three times: the
-  ## per-candidate MFVB iteration-limit warning stays muffled.
-  warnings <- character(0)
-  withCallingHandlers(
-    pefa(.toy$Q0, .toy$Y, 2, 4, v0 = .001, max_it = 3, verbose = FALSE),
+# ---- failure contract -------------------------------------------------
+
+test_that("a nonfinite required criterion aborts the call naming the K", {
+  d <- .mk()
+  real <- vbpm::fit_stats
+  for (broken in c("AIC", "BIC", "t")) {
+    local({
+      field <- broken
+      local_mocked_bindings(
+        fit_stats = function(object, ...) {
+          out <- real(object, ...)
+          if (ncol(object$Lam) == 3L) out[[field]] <- Inf
+          out
+        },
+        .package = "vbpm")
+      expect_error(pefa(d$Q0, d$Y, 2, 3, v0 = .001, max_it = 200,
+                        verbose = FALSE),
+                   "PEFA candidate K = 3: AIC, BIC, or t is nonfinite")
+    })
+  }
+})
+
+test_that("a nonfinite ELBO aborts the call naming the K", {
+  d <- .mk()
+  real <- vbpm::vbfa
+  local_mocked_bindings(
+    vbfa = function(...) {
+      f <- real(...)
+      if (ncol(f$Lam) == 3L) f$ELBO <- NaN
+      f
+    },
+    .package = "vbpm")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, v0 = .001, max_it = 200,
+                    verbose = FALSE),
+               "PEFA candidate K = 3: ELBO is not one finite real number")
+})
+
+test_that("a malformed candidate matrix aborts the call naming the K", {
+  ## fit_stats() is stubbed out here so the loading matrix itself is the only
+  ## thing that can fail: the point is the candidate-normalization check, not
+  ## how a fit statistic reacts to a broken matrix.
+  d <- .mk()
+  real <- vbpm::vbfa
+  local_mocked_bindings(
+    vbfa = function(...) {
+      f <- real(...)
+      if (ncol(f$Lam) == 3L) f$Lam[1L, 1L] <- Inf
+      f
+    },
+    fit_stats = function(...) {
+      c(AIC = 1, BIC = 2, t = 3, RMSEA = 0, SRMR = 0, CFI = 1, TLI = 1)
+    },
+    .package = "vbpm")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, v0 = .001, max_it = 200,
+                    verbose = FALSE),
+               "PEFA candidate K = 3: the loading matrix has nonfinite")
+})
+
+test_that("a dimensionally inconsistent candidate matrix names its K", {
+  d <- .mk()
+  real <- vbpm::vbfa
+  local_mocked_bindings(
+    vbfa = function(...) {
+      f <- real(...)
+      if (ncol(f$Lam) == 2L) f$Lam <- f$Lam[, 1L, drop = FALSE]
+      f
+    },
+    fit_stats = function(...) {
+      c(AIC = 1, BIC = 2, t = 3, RMSEA = 0, SRMR = 0, CFI = 1, TLI = 1)
+    },
+    .package = "vbpm")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, v0 = .001, max_it = 200,
+                    verbose = FALSE),
+               "PEFA candidate K = 2: the loading matrix is 8 by 1")
+})
+
+test_that("a PIP outside [0, 1] aborts the call naming the K", {
+  d <- .mk()
+  real <- vbpm::vbfa
+  local_mocked_bindings(
+    vbfa = function(...) {
+      f <- real(...)
+      if (ncol(f$Lam) == 2L) f$pi[1L, 1L] <- 1.5
+      f
+    },
+    .package = "vbpm")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, v0 = .001, max_it = 200,
+                    verbose = FALSE),
+               "PEFA candidate K = 2: the PIP matrix has values outside")
+})
+
+test_that("a vbfa() failure aborts the call naming the K", {
+  d <- .mk()
+  local_mocked_bindings(
+    vbfa = function(Y, Q, ...) {
+      if (ncol(Q) == 3L) stop("synthetic engine failure")
+      stop("unexpected K")
+    },
+    .package = "vbpm")
+  expect_error(pefa(d$Q0, d$Y, 3, 3, v0 = .001, max_it = 200,
+                    verbose = FALSE),
+               "PEFA candidate K = 3: vbfa\\(\\) failed: synthetic engine")
+})
+
+test_that("descriptive indices may be NA without erroring", {
+  d <- .mk()
+  real <- vbpm::fit_stats
+  local_mocked_bindings(
+    fit_stats = function(object, ...) {
+      out <- real(object, ...)
+      out[["RMSEA"]] <- NaN
+      out[["TLI"]] <- NA_real_
+      out
+    },
+    .package = "vbpm")
+  r <- pefa(d$Q0, d$Y, 2, 3, v0 = .001, max_it = 200, verbose = FALSE)
+  ## NaN and NA alike are normalized to the documented NA_real_ flavor.
+  expect_identical(r$sweep$RMSEA, rep(NA_real_, 2L))
+  expect_identical(r$sweep$TLI, rep(NA_real_, 2L))
+  expect_false(any(is.nan(r$sweep$RMSEA)))
+  expect_true(all(is.finite(r$sweep$SRMR)))
+  expect_true(all(is.finite(r$sweep$AIC)))
+})
+
+test_that("nonconverged candidates are retained under one aggregate warning", {
+  d <- .mk()
+  seen <- character(0)
+  r <- withCallingHandlers(
+    pefa(d$Q0, d$Y, 2, 3, v0 = .001, max_it = 3, verbose = FALSE),
     warning = function(w) {
-      warnings <<- c(warnings, conditionMessage(w))
+      seen <<- c(seen, conditionMessage(w))
       invokeRestart("muffleWarning")
-    }
-  )
-  expect_length(warnings, 1L)
-  expect_false(any(grepl("MFVB", warnings, fixed = TRUE)))
+    })
+  ## Exactly one warning for the whole call, naming every affected K, and the
+  ## per-candidate iteration-limit warnings are muffled.
+  expect_length(seen, 1L)
+  expect_match(seen, "did not converge at K = 2, 3")
+  ## The candidates themselves survive with their numbers intact.
+  expect_s3_class(r, "pefa")
+  expect_identical(r$sweep$converged, c(FALSE, FALSE))
+  expect_true(all(is.finite(r$sweep$ELBO)))
+  expect_true(all(is.finite(r$sweep$BIC)))
+  expect_identical(nrow(r$transitions), 1L)
+  expect_identical(summary(r)$nonconverged_K, 2:3)
+  expect_output(print(r), "nonconverged K: 2, 3")
 })
 
-test_that("settings records all ten controls and omits verbose", {
-  expect_identical(
-    names(.healthy$settings),
-    c("bifactor", "general", "v0", "max_it", "convChk", "tolVal", "tau",
-      "stability_eps", "rank_adjust", "rank_max_J")
-  )
-  expect_length(.healthy$settings, 10L)
-  expect_false("verbose" %in% names(.healthy$settings))
-  ## Every other formal of pefa() except the data arguments is recorded.
-  recorded <- c(names(.healthy$settings), "Q0", "Y", "Kmin", "Kmax",
-                "verbose")
-  expect_true(all(names(formals(pefa)) %in% recorded))
-  expect_identical(.healthy$settings$stability_eps, 0.1)
-  expect_identical(.healthy$settings$v0, 0.001)
-  expect_identical(.healthy$settings$max_it, 800L)
-  expect_false(.healthy$settings$bifactor)
-  ## K0 is recoverable from the object rather than stored twice.
-  expect_identical(ncol(.healthy$Q0), 2L)
+
+# ---- argument validation ----------------------------------------------
+
+test_that("the K window is validated before anything is fitted", {
+  d <- .mk()
+  expect_error(pefa(d$Q0, d$Y, 4, 2, verbose = FALSE), "non-decreasing")
+  whole <- "must be a single whole number"
+  expect_error(pefa(d$Q0, d$Y, 2.5, 4, verbose = FALSE),
+               paste("Kmin", whole))
+  expect_error(pefa(d$Q0, d$Y, 2, 3.5, verbose = FALSE),
+               paste("Kmax", whole))
+  expect_error(pefa(d$Q0, d$Y, Inf, 4, verbose = FALSE),
+               paste("Kmin", whole))
+  expect_error(pefa(d$Q0, d$Y, NA_integer_, 4, verbose = FALSE), "Kmin")
+  expect_error(pefa(d$Q0, d$Y, NaN, 4, verbose = FALSE), "Kmin")
+  expect_error(pefa(d$Q0, d$Y, 2 + 0i, 4, verbose = FALSE), "Kmin")
+  expect_error(pefa(d$Q0, d$Y, "2", 4, verbose = FALSE), "Kmin")
+  expect_error(pefa(d$Q0, d$Y, c(2, 3), 4, verbose = FALSE), "Kmin")
+  expect_error(pefa(d$Q0, d$Y, 0, 4, verbose = FALSE), "Kmin")
+  expect_error(pefa(d$Q0, d$Y, 2, 2^31, verbose = FALSE), "Kmax")
+  ## The window must reach the backbone.
+  expect_error(pefa(d$Q0, d$Y, 1, 3, verbose = FALSE),
+               "must reach the backbone")
 })
 
-test_that("pefa validates the window and the stability screen", {
-  Q0 <- .toy$Q0
-  Y <- .toy$Y
-  for (bad in list(0, -1, Inf, NA_real_, c(0.1, 0.2), "0.1")) {
-    expect_error(
-      pefa(Q0, Y, 2, 2, stability_eps = bad, verbose = FALSE),
-      "stability_eps"
-    )
+test_that("Q0 is validated", {
+  d <- .mk()
+  bad <- d$Q0
+  bad[1L, 1L] <- 2L
+  expect_error(pefa(bad, d$Y, 2, 3, verbose = FALSE), "-1, 0, or 1")
+  bad2 <- d$Q0
+  bad2[1L, 1L] <- NA_integer_
+  expect_error(pefa(bad2, d$Y, 2, 3, verbose = FALSE), "missing values")
+  expect_error(pefa(d$Q0[-1L, , drop = FALSE], d$Y, 2, 3, verbose = FALSE),
+               "nrow\\(Q0\\) must equal ncol\\(Y\\)")
+  ## Supplied item names must agree with the data rather than silently win.
+  named <- d$Q0
+  rownames(named) <- paste0("z", seq_len(nrow(named)))
+  expect_error(pefa(named, d$Y, 2, 3, verbose = FALSE), "rownames\\(Q0\\)")
+})
+
+test_that("Y is validated", {
+  d <- .mk()
+  bad <- d$Y
+  bad[1L, 1L] <- Inf
+  expect_error(pefa(d$Q0, bad, 2, 3, verbose = FALSE), "not NaN or infinite")
+  bad[1L, 1L] <- NaN
+  expect_error(pefa(d$Q0, bad, 2, 3, verbose = FALSE), "not NaN or infinite")
+  chr <- matrix(as.character(d$Y), nrow(d$Y), ncol(d$Y))
+  expect_error(pefa(d$Q0, chr, 2, 3, verbose = FALSE),
+               "nonempty numeric N by J matrix")
+  ## An all-missing item is rejected downstream, and the K is still named.
+  gap <- d$Y
+  gap[, 1L] <- NA
+  expect_error(pefa(d$Q0, gap, 2, 2, v0 = .001, verbose = FALSE),
+               "PEFA candidate K = 2")
+})
+
+test_that("the remaining fit controls are validated", {
+  d <- .mk()
+  expect_error(pefa(d$Q0, d$Y, 2, 3, tau = 1.5, verbose = FALSE), "tau")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, tau = NA_real_, verbose = FALSE), "tau")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, tolVal = -1, verbose = FALSE), "tolVal")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, v0 = 0, verbose = FALSE), "v0")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, v0 = numeric(0), verbose = FALSE), "v0")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, v0 = c(.01, NA), verbose = FALSE), "v0")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, max_it = 0, verbose = FALSE), "max_it")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, rank_max_J = -1, verbose = FALSE),
+               "rank_max_J")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, convChk = NA, verbose = FALSE),
+               "convChk must be TRUE or FALSE")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, verbose = "yes"),
+               "verbose must be TRUE or FALSE")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, bifactor = TRUE, general = 2,
+                    verbose = FALSE), "-1, 0, or 1")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, bifactor = TRUE, general = 0,
+                    verbose = FALSE), "at least one general loading")
+  expect_error(pefa(d$Q0, d$Y, 2, 3, bifactor = TRUE,
+                    general = rep(1L, 3L), verbose = FALSE), "length-J")
+})
+
+
+# ---- public surface ---------------------------------------------------
+
+test_that("the formal surface matches the technical note exactly", {
+  f <- formals(pefa)
+  expect_identical(names(f)[1:4], c("Q0", "Y", "Kmin", "Kmax"))
+  expect_identical(names(f),
+                   c("Q0", "Y", "Kmin", "Kmax", "bifactor", "general", "v0",
+                     "max_it", "convChk", "tolVal", "tau", "rank_adjust",
+                     "rank_max_J", "verbose"))
+  expect_identical(f$bifactor, FALSE)
+  expect_identical(eval(f$general), 1)
+  expect_identical(eval(f$v0), c(.01, .005, .002, .001))
+  expect_identical(eval(f$max_it), 10000)
+  expect_identical(f$convChk, FALSE)
+  expect_identical(eval(f$tolVal), 1e-4)
+  expect_identical(eval(f$tau), .50)
+  expect_identical(f$rank_adjust, FALSE)
+  expect_identical(eval(f$rank_max_J), 100)
+  expect_identical(f$verbose, TRUE)
+
+  ## No selector, cut, stability, checkpoint, save or dots argument survives.
+  expect_false(any(c("...", "cuts", "sustain", "delta", "stability_eps",
+                     "checkpoint", "resume", "save", "file", "select",
+                     "ld", "Qe", "orthogonal") %in% names(f)))
+})
+
+test_that("every removed API is gone from the namespace and the exports", {
+  ns <- asNamespace("vbpm")
+  removed <- c("select_K_elbow", "verify_pefa", "pair_detail", "extend_pefa",
+               "persistence", "persistence.pefa", "pefa_provenance",
+               "pefa_evidence")
+  for (nm in removed) {
+    expect_false(exists(nm, envir = ns, inherits = FALSE),
+                 label = paste0("namespace object ", nm))
+    expect_false(nm %in% getNamespaceExports("vbpm"),
+                 label = paste0("export ", nm))
   }
-  expect_error(pefa(Q0, Y, 0, 2, verbose = FALSE), "Kmin")
-  expect_error(pefa(Q0, Y, 2.5, 3, verbose = FALSE), "Kmin")
-  expect_error(pefa(Q0, Y, 3, 2, verbose = FALSE), "must be non-decreasing")
-  expect_error(pefa(Q0, Y, 1, 3, verbose = FALSE),
-               "at least the backbone size")
-  ## A fully exploratory backbone still starts at K = 1, never at zero.
-  expect_error(
-    pefa(matrix(integer(0), ncol(Y), 0), Y, 0, 2, verbose = FALSE),
-    "Kmin"
-  )
-})
-
-## Runs `expr`, returning the error message (or the value) plus every warning
-## the call emitted, so a test can assert "controlled error and no warning".
-.quiet_error <- function(expr) {
-  emitted <- character(0)
-  value <- withCallingHandlers(
-    tryCatch(expr, error = conditionMessage),
-    warning = function(w) {
-      emitted <<- c(emitted, conditionMessage(w))
-      invokeRestart("muffleWarning")
-    }
-  )
-  list(message = value, warnings = emitted)
-}
-
-test_that("integer-backed formals are range-checked before coercion", {
-  Q0 <- .toy$Q0
-  Y <- .toy$Y
-  ## as.integer(3e10) is NA_integer_ plus a coercion warning, which would
-  ## turn an argument mistake into a silent failed-fit evidence object.
-  big <- 3e10
-  oversized <- list(
-    Kmin = function() pefa(Q0, Y, big, big + 1, verbose = FALSE),
-    Kmax = function() pefa(Q0, Y, 2, big, verbose = FALSE),
-    max_it = function() pefa(Q0, Y, 2, 2, max_it = big, verbose = FALSE),
-    rank_max_J = function() pefa(Q0, Y, 2, 2, rank_max_J = big,
-                                 verbose = FALSE)
-  )
-  for (nm in names(oversized)) {
-    got <- .quiet_error(oversized[[nm]]())
-    expect_true(is.character(got$message), info = nm)
-    expect_match(got$message, nm, fixed = TRUE)
-    expect_match(got$message, "whole number in", fixed = TRUE)
-    expect_length(got$warnings, 0L)
+  ## The exported surface is exactly the delivered one.
+  expect_identical(sort(getNamespaceExports("vbpm")),
+                   sort(c("fit_stats", "pefa", "sim_fa", "sim_lvm",
+                          "special_effects", "ssl", "vbfa", "vbmimic")))
+  ## The retired matcher/provenance internals are gone too.
+  for (nm in c(".pefa_pair_facts", ".pefa_aligned_rmsd", ".pefa_provenance",
+               ".pefa_verify", ".pefa_hash", ".pefa_status")) {
+    expect_false(exists(nm, envir = ns, inherits = FALSE), label = nm)
   }
+})
 
-  ## Complex values are rejected outright rather than coerced.
-  complexes <- list(
-    Kmin = function() pefa(Q0, Y, complex(real = 2), 3, verbose = FALSE),
-    Kmax = function() pefa(Q0, Y, 2, complex(real = 3), verbose = FALSE),
-    max_it = function() pefa(Q0, Y, 2, 2, verbose = FALSE,
-                             max_it = complex(real = 400, imaginary = 1)),
-    rank_max_J = function() pefa(Q0, Y, 2, 2, verbose = FALSE,
-                                 rank_max_J = complex(real = 100))
-  )
-  for (nm in names(complexes)) {
-    got <- .quiet_error(complexes[[nm]]())
-    expect_true(is.character(got$message), info = nm)
-    expect_match(got$message, nm, fixed = TRUE)
-    expect_length(got$warnings, 0L)
+test_that("ssl() is exactly colSums(L^2) and never screens", {
+  d <- .mk()
+  r <- .fit3(d)
+  s <- ssl(r)
+  expect_type(s, "list")
+  expect_identical(names(s), names(r$loadings))
+  for (k in names(s)) {
+    expect_type(s[[k]], "double")
+    expect_identical(s[[k]], colSums(r$loadings[[k]]^2))
+    expect_identical(names(s[[k]]), colnames(r$loadings[[k]]))
   }
+  ## Bifactor keeps the general column first and reports K + 1 entries.
+  rb <- pefa(d$Q0, d$Y, 2, 3, bifactor = TRUE, v0 = .001, max_it = 300,
+             verbose = FALSE)
+  sb <- ssl(rb)
+  expect_identical(lengths(sb), c("2" = 3L, "3" = 4L))
+  expect_identical(names(sb[["3"]]), c("G", "F1", "F2", "F3"))
+  expect_identical(sb[["3"]], colSums(rb$loadings[["3"]]^2))
 
-  ## The range check is inclusive, so the largest representable integer is
-  ## still a legal setting and reaches $settings unchanged.
-  at_max <- pefa(Q0, Y, 2, 2, v0 = .001, max_it = 400,
-                 rank_max_J = .Machine$integer.max, verbose = FALSE)
-  expect_identical(at_max$settings$rank_max_J, .Machine$integer.max)
+  expect_error(ssl(unclass(r)), "must be a \"pefa\" object")
 })
 
-test_that("rank_max_J normalizes so 100 and 100L hash identically", {
-  expect_identical(.healthy$settings$rank_max_J, 100L)
-  expect_identical(typeof(.healthy$settings$rank_max_J), "integer")
-  expect_null(names(.healthy$settings$rank_max_J))
 
-  ## The default 100 is a double; 100L must not fork the provenance.
-  typed <- pefa(.toy$Q0, .toy$Y, 2, 4, v0 = .001, max_it = 800,
-                rank_max_J = 100L, verbose = FALSE)
-  expect_identical(typed$settings, .healthy$settings)
-  expect_identical(typed$provenance$settings_sha256,
-                   .healthy$provenance$settings_sha256)
-  expect_identical(typed$provenance$evidence_sha256,
-                   .healthy$provenance$evidence_sha256)
-  expect_identical(typed$provenance$lineage_sha256,
-                   .healthy$provenance$lineage_sha256)
+# ---- covered fitting cases --------------------------------------------
 
-  ## Names on a stored control are input decoration, not evidence: they must
-  ## not move any hash either.
-  named <- pefa(.toy$Q0, .toy$Y, 2, 4, v0 = c(spike = .001),
-                max_it = c(it = 800), convChk = c(cc = FALSE),
-                tolVal = c(tv = 1e-4), tau = c(th = 0.5),
-                stability_eps = c(se = 0.10), bifactor = c(bf = FALSE),
-                rank_adjust = c(ra = FALSE), rank_max_J = c(cap = 100),
-                verbose = FALSE)
-  expect_identical(vapply(named$settings[-2L], function(v) is.null(names(v)),
-                          logical(1)),
-                   stats::setNames(rep(TRUE, 9L),
-                                   names(named$settings)[-2L]))
-  expect_identical(named$settings, .healthy$settings)
-  expect_identical(named$provenance$settings_sha256,
-                   .healthy$provenance$settings_sha256)
-  expect_identical(named$provenance$evidence_sha256,
-                   .healthy$provenance$evidence_sha256)
+test_that("a fully exploratory window (K0 = 0) sweeps and compares", {
+  d <- .mk()
+  r <- pefa(matrix(0L, d$J, 0L), d$Y, 1, 3, v0 = .001, max_it = 300,
+            verbose = FALSE)
+  expect_identical(dim(r$Q0), c(d$J, 0L))
+  expect_identical(r$sweep$K, 1:3)
+  expect_identical(nrow(r$transitions), 2L)
+  expect_true(all(is.finite(r$transitions$rmsd)))
+  ## With no backbone every source column is exploratory, so a positive
+  ## ELBO gain exists and the percentage path is populated.
+  expect_true(any(is.finite(r$transitions$ELBO_gain_pct)))
+  expect_identical(max(r$transitions$ELBO_gain_pct), 100)
+  ## Every all-pairs cell is still a direct comparison.
+  expect_identical(r$persistence$phi["1", "3"], .recompare(r, 1, 3)$phi_min)
 })
 
-test_that("backbone_ssl_min tracks ssl() in both modes", {
-  K0 <- ncol(.healthy$Q0)
-  expected <- vapply(ssl(.healthy), function(v) min(v[seq_len(K0)]),
-                     numeric(1))
-  expect_equal(.healthy$sweep$backbone_ssl_min, unname(expected),
-               tolerance = 1e-12)
-
-  bifactor <- pefa(.toy$Q0, .toy$Y, 2, 3, bifactor = TRUE, v0 = .001,
-                   max_it = 400, verbose = FALSE)
-  ## Stored columns 2:(K0 + 1), never the general column.
-  expected_bf <- vapply(ssl(bifactor), function(v) min(v[seq_len(K0) + 1L]),
-                        numeric(1))
-  expect_equal(bifactor$sweep$backbone_ssl_min, unname(expected_bf),
-               tolerance = 1e-12)
-
-  ## A general column smaller than every backbone column separates the two
-  ## offsets, so a leak would be visible.
-  lam <- cbind(c(0.1, 0, 0), c(1, 0, 0), c(0, 2, 0))
-  expect_identical(
-    vbpm:::.pefa_backbone_ssl_min(lam, K0 = 2L, bifactor = TRUE,
-                                  loading_ok = TRUE),
-    1
-  )
-  expect_equal(
-    vbpm:::.pefa_backbone_ssl_min(lam, K0 = 2L, bifactor = FALSE,
-                                  loading_ok = TRUE),
-    0.01, tolerance = 1e-12
-  )
-  expect_identical(
-    vbpm:::.pefa_backbone_ssl_min(lam, K0 = 2L, bifactor = TRUE,
-                                  loading_ok = FALSE),
-    NA_real_
-  )
-
-  ## K0 = 0 has no backbone to measure.
-  free <- pefa(matrix(integer(0), ncol(.toy$Y), 0), .toy$Y, 1, 1, v0 = .001,
-               max_it = 400, verbose = FALSE)
-  expect_identical(free$sweep$backbone_ssl_min, NA_real_)
-  expect_identical(dim(free$Q0), c(ncol(.toy$Y), 0L))
+test_that("a backbone-only source window is a legal edge", {
+  ## Kmin == K0, so the K = 2 candidate has no exploratory source column and
+  ## every pair leaving it is pure position matching.
+  d <- .mk()
+  r <- .fit3(d)
+  expect_identical(ncol(r$Q0), 2L)
+  expect_identical(min(r$sweep$K), 2L)
+  expect_false(r$transitions$collision[1L])
+  expect_true(is.finite(r$transitions$unmatched_ssl[1L]))
 })
 
-test_that("bifactor stores K + 1 columns and matches the group block", {
-  object <- pefa(.toy$Q0, .toy$Y, 2, 3, bifactor = TRUE, v0 = .001,
-                 max_it = 400, verbose = FALSE)
-  expect_true(object$settings$bifactor)
-  expect_identical(object$sweep$K, 2:3)
-  expect_identical(unname(vapply(object$loadings, ncol, integer(1))), 3:4)
-  expect_identical(unname(vapply(object$pips, ncol, integer(1))), 3:4)
-  expect_identical(colnames(object$loadings[["3"]]),
-                   c("G", "F1", "F2", "F3"))
-  expect_identical(unname(lengths(ssl(object))), c(3L, 4L))
-  ## The matcher works on the group block, so a k = K0 edge scores K0 pairs.
-  expect_identical(object$persistence$n_pairs, 2L)
-  expect_identical(object$persistence$pair_status, "available")
-  expect_true(is.finite(object$persistence$phi_min))
+test_that("a bifactor sweep strips the general column without storing less", {
+  d <- .mk()
+  r <- pefa(d$Q0, d$Y, 2, 4, bifactor = TRUE, v0 = .001, max_it = 300,
+            verbose = FALSE)
+  expect_identical(r$sweep$K, 2:4)
+  ## K counts group factors; the stored matrices keep the general column.
+  expect_identical(vapply(r$loadings, ncol, integer(1)),
+                   c("2" = 3L, "3" = 4L, "4" = 5L))
+  expect_identical(vapply(r$pips, ncol, integer(1)),
+                   c("2" = 3L, "3" = 4L, "4" = 5L))
+  expect_identical(colnames(r$loadings[["3"]]), c("G", "F1", "F2", "F3"))
+  ## Comparisons operate on the group block only, which is what makes them
+  ## the same measurement as an ordinary sweep's.
+  expect_identical(r$transitions$phi_min[1L], .recompare(r, 2, 3)$phi_min)
+  expect_identical(r$persistence$rmsd["2", "4"], .recompare(r, 2, 4)$rmsd_max)
+  ## Stripping is done on a copy: the stored matrices still have K + 1 columns.
+  expect_identical(ncol(r$loadings[["4"]]), 5L)
 })
 
-test_that("bifactor collision targets are group-block indices", {
-  ## The reused target sits at group position 2, i.e. stored position 3.
-  general <- rep(0.5, 6)
-  stored_from <- cbind(general, .unit(1), .unit(2), .unit(2))
-  stored_to <- cbind(general, .unit(1), .unit(2), .unit(5), .unit(6))
-  Ks <- 3:4
-  table <- vbpm:::.pefa_persistence_table(
-    .stub_sweep(Ks), .keyed(list(stored_from, stored_to), Ks),
-    .keyed(list(matrix(.5, 6, 4), matrix(.5, 6, 5)), Ks),
-    matrix(-1L, 6, 1), K0 = 1, stability_eps = 0.1, bifactor = TRUE
-  )
-  expect_identical(table$collision, TRUE)
-  expect_identical(table$n_collisions, 1L)
-  expect_identical(table$collision_targets, "2")   # never "3"
-  expect_identical(table$collision_multiplicities, "2")
-  expect_identical(table$n_pairs, 3L)
-  expect_identical(table$unmatched_n, 2L)
-})
 
-test_that("bifactor validation runs on the stored K + 1 matrix", {
-  ## The candidate checker is handed the stored dimnames, general column
-  ## included, so a group-block-sized matrix is malformed rather than valid.
-  dn <- list(paste0("item_", 1:4), c("G", "F1", "F2"))
-  stats_ok <- stats::setNames(
-    c(10, 9, 8.5, 100, 110, 101, 111, .05, .04, .98, .97),
-    c("t_nom", "t", "t_S", "AIC", "BIC", "AIC_S", "BIC_S",
-      "RMSEA", "SRMR", "CFI", "TLI")
-  )
-  stored <- list(flag = 1, Lam = cbind(c(.3, .3, .3, .3), c(1, 1, 0, 0),
-                                       c(0, 0, 2, 2)),
-                 pi = matrix(0.4, 4, 3), ELBO = -100, iter = 7)
-  ok <- vbpm:::.pefa_candidate(stored, stats_ok, 2L, dn, 2L, TRUE, 0.1)
-  expect_identical(ok$row$loading_status, "ok")
-  expect_identical(dimnames(ok$loading), dn)
-  ## Backbone SSL skips the general column: min(2, 8), not min(0.36, 2).
-  expect_equal(ok$row$backbone_ssl_min, 2, tolerance = 1e-12)
+# ---- display methods --------------------------------------------------
 
-  group_only <- stored
-  group_only$Lam <- stored$Lam[, -1L, drop = FALSE]
-  stripped <- vbpm:::.pefa_candidate(group_only, stats_ok, 2L, dn, 2L, TRUE,
-                                     0.1)
-  expect_identical(stripped$row$loading_status, "unavailable")
-  expect_identical(stripped$row$loading_reason, "malformed_loading")
-  expect_identical(dim(stripped$loading), c(4L, 3L))
-})
+test_that("print, summary and print.summary read only stored fields", {
+  d <- .mk()
+  r <- .fit3(d)
+  expect_output(print(r), "PEFA sweep \\(ordinary\\): K = 2:4, K0 = 2")
+  expect_output(print(r), "sweep 3 x 11 \\| transitions 2 x 11")
+  expect_output(print(r), "all candidates converged")
+  invisible(capture.output(shown <- withVisible(print(r))))
+  expect_false(shown$visible)
 
-test_that("an unavailable pair still carries its endpoint facts", {
-  Ks <- 2:3
-  loadings <- .keyed(list(cbind(.unit(1), .unit(2)),
-                          cbind(.unit(1), .unit(2), .unit(3))), Ks)
-  pips <- .keyed(list(matrix(.5, 6, 2), matrix(.5, 6, 3)), Ks)
-  sweep <- .stub_sweep(Ks, converged = c(FALSE, TRUE))
-  sweep$loading_status <- c("malformed_loading", "ok")
-  row <- vbpm:::.pefa_persistence_table(
-    sweep, loadings, pips, matrix(-1L, 6, 1), K0 = 1, stability_eps = 0.1,
-    bifactor = FALSE
-  )
-  expect_identical(row$pair_status, "unavailable")
-  expect_identical(row$pair_reason, "malformed_loading")
-  ## Convergence does not depend on the loadings, so it is still reported.
-  expect_identical(row$from_fit_ok, FALSE)
-  expect_identical(row$to_fit_ok, TRUE)
-  ## The target endpoint survived, so its eligibility count is available.
-  expect_identical(row$target_eligible_n, 2L)
-  expect_identical(row$source_ineligible_n, NA_integer_)
-  expect_identical(row$K_from, 2L)
-  expect_identical(row$r, 1L)
-})
-
-test_that("a decision profile composes from the stored facts alone", {
-  ## Four edges: a nonconverged one, a collided one, one that fails the
-  ## congruence gate, and a clean one.  The package grades none of them.
-  z <- data.frame(
-    K_from = c(3L, 3L, 3L, 3L), K_to = 4:7,
-    phi_min = c(0.95, 0.93, 0.70, 0.97),
-    collision = c(FALSE, TRUE, FALSE, FALSE),
-    source_ineligible_n = rep(0L, 4L), target_eligible_n = rep(1L, 4L),
-    from_fit_ok = rep(TRUE, 4L), to_fit_ok = c(FALSE, TRUE, TRUE, TRUE),
-    pair_status = rep("available", 4L),
-    stringsAsFactors = FALSE
-  )
-  K0 <- 2L
-  phi_star <- 0.90
-
-  profile <- function(z, endpoint_fit_policy, collision_veto) {
-    endpoint_admissible <- switch(
-      endpoint_fit_policy,
-      require_converged = (z$from_fit_ok %in% TRUE) & (z$to_fit_ok %in% TRUE),
-      allow_completed = !is.na(z$from_fit_ok) & !is.na(z$to_fit_ok)
-    )
-    known <- z$pair_status == "available" & is.finite(z$phi_min) &
-      endpoint_admissible & !is.na(z$source_ineligible_n) &
-      !is.na(z$target_eligible_n) & !is.na(z$collision)
-    pass <- rep(NA, nrow(z))
-    pass[known] <- z$source_ineligible_n[known] == 0L &
-      z$target_eligible_n[known] >= (z$K_from[known] - K0) &
-      (!collision_veto | !z$collision[known]) &
-      z$phi_min[known] >= phi_star
-    pass
-  }
-
-  expect_identical(profile(z, "require_converged", TRUE),
-                   c(NA, FALSE, FALSE, TRUE))
-  ## Only the endpoint policy changes: the nonconverged edge is now read from
-  ## its retained metric.
-  expect_identical(profile(z, "allow_completed", TRUE),
-                   c(TRUE, FALSE, FALSE, TRUE))
-  ## Only the collision policy changes: the collided edge is now evaluated.
-  expect_identical(profile(z, "require_converged", FALSE),
-                   c(NA, TRUE, FALSE, TRUE))
-
-  ## An unavailable row and an available row with an NA metric are both
-  ## unknown; a met-input condition failure is FALSE.
-  z2 <- rbind(z, z[1L, ], z[1L, ])
-  z2$to_fit_ok[5:6] <- TRUE
-  z2$pair_status[5L] <- "unavailable"
-  z2$phi_min[5L] <- NA_real_
-  z2$phi_min[6L] <- NA_real_
-  states <- profile(z2, "require_converged", TRUE)
-  expect_identical(states[5:6], c(NA, NA))
-  ## One failed required edge resolves the source as false even beside an NA;
-  ## with no failure and at least one NA it stays unknown.
-  resolve <- function(v) if (any(v %in% FALSE)) FALSE else if (anyNA(v)) NA
-    else TRUE
-  expect_identical(resolve(states), FALSE)
-  expect_identical(resolve(states[c(1L, 4L)]), NA)
-  expect_identical(resolve(states[4L]), TRUE)
-})
-
-test_that("print and summary announce no selected count", {
-  printed <- capture.output(print(.healthy))
-  expect_match(paste(printed, collapse = "\n"), "No factor count is selected")
-  expect_match(paste(printed, collapse = "\n"), "select_K_elbow")
-  expect_false(any(grepl("selected_K|boundary", printed)))
-  expect_match(paste(printed, collapse = "\n"), "persistence 3 x 22")
-
-  s <- summary(.healthy)
+  s <- summary(r)
   expect_s3_class(s, "summary.pefa")
+  expect_identical(names(s),
+                   c("window", "sweep", "transitions", "persistence", "ssl",
+                     "settings", "nonconverged_K"))
   expect_identical(s$window, c(Kmin = 2L, Kmax = 4L, K0 = 2L))
-  expect_identical(s$persistence, .healthy$persistence)
-  shown <- capture.output(print(s))
-  expect_match(paste(shown, collapse = "\n"), "Candidates")
-  expect_match(paste(shown, collapse = "\n"), "SS loadings")
-  ## The persistence table is deferred to a row/column count.
-  expect_match(paste(shown, collapse = "\n"),
-               "Persistence: 3 ordered pairs x 22 fields")
-  expect_false(any(grepl("pair_status", shown)))
+  expect_identical(s$sweep, r$sweep)
+  expect_identical(s$transitions, r$transitions)
+  expect_identical(s$persistence, r$persistence)
+  expect_identical(s$ssl, ssl(r))
+  expect_identical(s$settings, r$settings)
+  expect_identical(s$nonconverged_K, integer(0))
 
-  grDevices::pdf(NULL)
-  on.exit(grDevices::dev.off(), add = TRUE)
-  expect_invisible(plot(.healthy, type = "gain", criterion = "bic_s"))
-  expect_invisible(plot(.healthy, type = "gain", criterion = "aic",
-                        pct = TRUE))
-  expect_invisible(plot(.healthy, type = "objective", criterion = "elbo"))
-  expect_invisible(plot(.healthy, type = "fit"))
-  expect_error(plot(.healthy, type = "gain", pct = NA), "pct")
+  out <- paste(capture.output(print(s)), collapse = "\n")
+  expect_match(out, "Candidates:")
+  expect_match(out, "SS loadings")
+  expect_match(out, "Transitions:")
+  expect_match(out, "Persistence")
+  ## phi is displayed before rmsd.
+  expect_lt(regexpr("phi \\(phi_min\\)", out),
+            regexpr("rmsd \\(rmsd_max\\)", out))
+  ## No method claims a count or a threshold.
+  expect_false(grepl("selected|recommend|threshold|cut", out,
+                     ignore.case = TRUE))
+})
+
+test_that("a collided persistence cell is marked for display only", {
+  r <- .fit3()
+  marked <- r
+  marked$persistence$collision["2", "3"] <- TRUE
+  out <- paste(capture.output(print(summary(marked))), collapse = "\n")
+  expect_match(out, "\\*")
+  expect_match(out, "target reuse")
+  ## The stored triangles keep their storage modes: the marker is text only.
+  expect_type(marked$persistence$phi, "double")
+  expect_type(marked$persistence$collision, "logical")
+  expect_identical(marked$persistence$phi, r$persistence$phi)
+
+  ## With no collision anywhere the legend line is not printed.
+  clean <- paste(capture.output(print(summary(r))), collapse = "\n")
+  expect_false(grepl("target reuse", clean))
+})
+
+test_that("the compact displays run on bifactor and one-candidate objects", {
+  d <- .mk()
+  rb <- pefa(d$Q0, d$Y, 2, 3, bifactor = TRUE, v0 = .001, max_it = 300,
+             verbose = FALSE)
+  expect_output(print(rb), "bifactor")
+  expect_output(print(rb), "group factors \\(\\+1 general\\)")
+  expect_output(print(summary(rb)), "SS loadings .*general column first")
+
+  r1 <- pefa(d$Q0, d$Y, 2, 2, v0 = .001, max_it = 300, verbose = FALSE)
+  expect_output(print(r1), "sweep 1 x 11 \\| transitions 0 x 11")
+  expect_output(print(summary(r1)), "single candidate")
+
+  tmp <- tempfile(fileext = ".png")
+  grDevices::png(tmp, width = 500, height = 400)
+  on.exit({
+    grDevices::dev.off()
+    unlink(tmp)
+  }, add = TRUE)
+  ## A one-candidate gain view is an empty panel rather than an error.
+  expect_silent(plot(r1, type = "gain", criterion = "ELBO"))
+  expect_silent(plot(rb, type = "objective", criterion = "BIC"))
+  expect_silent(plot(rb, type = "gain", criterion = "BIC", pct = TRUE))
+  expect_silent(plot(rb, type = "fit"))
+  ## The gain view has no AIC path, and no removed criterion is accepted.
+  expect_error(plot(rb, type = "gain", criterion = "AIC"), "unavailable")
+  expect_error(plot(rb, type = "gain", criterion = "BIC_S"), "unavailable")
+  expect_error(plot(rb, type = "stability"), "arg")
 })

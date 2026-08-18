@@ -1,8 +1,8 @@
 ---
-title: "Structural Persistence Before the Bifactor Decision"
+title: "Bifactor Structures and PEFA Sweeps"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Structural Persistence Before the Bifactor Decision}
+  %\VignetteIndexEntry{Bifactor Structures and PEFA Sweeps}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -12,14 +12,13 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(vbpm)
 ```
 
-This vignette introduces bifactor, higher-order, and testlet structures, then
-shows how structural evidence from an ordinary PEFA sweep can be converted into
-different, explicit decision profiles before a bifactor comparison. The
-package returns the evidence object; it does not select a profile, threshold,
-horizon, collision policy, factor count, or layer. Fit assessment and count-only
-readings are treated in `vignette("pefa")`.
+This vignette covers the bifactor side of `vbpm`: what a bifactor model is,
+how a `pefa()` sweep is read when the factor count is uncertain, and how a
+later oblique-versus-bifactor comparison is built out of the sweep that
+preceded it. The sweep object itself is walked in `vignette("pefa")`; nothing
+here re-explains its tables.
 
-## 1. Three related structures
+## Three related structures
 
 Suppose `J` items fall into `K` clusters.
 
@@ -27,10 +26,10 @@ Suppose `J` items fall into `K` clusters.
 factors correlate through $\Phi$.
 
 **Orthogonal bifactor.** Every item loads on a general factor and on one group
-factor; the general and group factors are mutually orthogonal.
+factor; general and group factors are mutually orthogonal.
 
-**Higher-order.** Items load on first-order factors, which in turn load on a
-second-order factor. The Schmid-Leiman representation is the orthogonal
+**Higher-order.** Items load on first-order factors, which load in turn on a
+second-order factor. Its Schmid-Leiman representation is the orthogonal
 bifactor with
 
 $$
@@ -39,26 +38,24 @@ b^{gen}_j=\lambda_j\gamma_k,
 b^{grp}_j=\lambda_j\sqrt{1-\gamma_k^2}
 $$
 
-for item $j$ in cluster $k$. Consequently
-$|b^{grp}_j|/|b^{gen}_j|$ is constant within a cluster under exact
-higher-order proportionality. Testlet or method factors use the same
-general-plus-special-factor geometry under a different substantive reading.
+for item $j$ in cluster $k$, so $|b^{grp}_j|/|b^{gen}_j|$ is constant within a
+cluster under exact higher-order proportionality. Testlet and method factors
+use the same general-plus-special geometry under a different substantive
+reading.
 
-Each individual cross-cluster covariance block is rank one under both a general
-factor and correlated group factors, so one block alone cannot distinguish
-them. Across four or more clusters, however, the joint block scales obey
-multiplicative (tetrad-type) restrictions under a single general or higher-order
-dimension and can differ from unrestricted factor correlations. Within-cluster
-evidence, anchors, residual assumptions, and persistence of the group-loading
-structure therefore remain consequential rather than uniquely decisive.
+In `vbfa()` and `pefa()`, `bifactor = TRUE` makes `K` the number of **group**
+factors: the design matrix supplies only the group block and the general column
+is added internally, so a fitted matrix has `K + 1` columns. Every
+between-candidate comparison a sweep performs removes that general column
+first and works on the `K` group columns, which is what makes an ordinary and a
+bifactor sweep of the same data structurally comparable.
 
-## 2. Fit and summarize a bifactor directly
+## A bifactor population and two backbones
 
-`vbfa(Y, Q, bifactor = TRUE)` treats the columns of `Q` as group factors and
-adds a fully specified general column internally. Thus `K` counts group
-factors, while the fitted loading matrix has `K + 1` columns.
+Three clusters of six items, each item loading on a general factor and on its
+own group factor.
 
-```{r bifactor-simulate}
+```{r population}
 K <- 3
 ipf <- 6
 J <- K * ipf
@@ -72,64 +69,21 @@ for (k in seq_len(K)) {
 }
 while (max(rowSums(mla^2)) > .9) mla <- round(mla * .97, 3)
 
-sim_bi <- sim_fa(N = 1000, mla = mla, phi = 0, rseed = 1)
-Y <- scale(sim_bi$dat, center = TRUE, scale = TRUE)
+sim <- sim_fa(N = 800, mla = mla, phi = 0, rseed = 1)
+Y <- sim$dat
 ```
 
-```{r bifactor-fit}
-Q_direct <- matrix(-1L, J, K)
-for (k in seq_len(K)) {
-  anchors <- which(cluster == k)[1:2]
-  Q_direct[anchors, ] <- 0L
-  Q_direct[anchors, k] <- 1L
-}
+Two anchors per backbone factor, expressed as the two designs `vbpm`
+documentation uses throughout.
 
-fit_bi <- vbfa(
-  Y, Q_direct, bifactor = TRUE,
-  v0 = c(.01, .005, .002, .001), max_it = 5000,
-  convChk = FALSE, tolVal = 1e-4
-)
-fit_bi$Phi
-round(fit_stats(
-  fit_bi, Y = Y, Q = fit_bi$Q, tau = .50,
-  rank_adjust = TRUE, rank_max_J = 100
-), 3)
-```
+* **AO (anchor-only)** specifies each anchor's intended cell as `1` and leaves
+  that anchor's cells on the *other* backbone columns unspecified (`-1`).
+* **AZ (anchor-zero)** additionally fixes those cross-backbone anchor cells to
+  `0`.
 
-`special_effects()` summarizes fitted within-cluster ratios, approximate
-higher-order parameters, and group/testlet effect sizes. These are descriptive
-summaries rather than a structure-selection test.
-
-```{r higher-order}
-gamma_true <- c(.80, .70, .60)
-sim_ho <- sim_fa(
-  N = 3000, K = K, ipf = ipf, lam = .8,
-  gamma = gamma_true, rseed = 11
-)
-fit_ho <- vbfa(sim_ho$dat, Q_direct, bifactor = TRUE)
-effects <- special_effects(fit_ho)
-effects$mean_cv
-effects$groups[, c("group", "mean_ratio", "cv", "gamma", "D")]
-```
-
-## 3. Construct one Step-1 evidence object
-
-When both the first-order count and an added general dimension are uncertain,
-Step 1 uses ordinary oblique PEFA. It asks whether cluster-level loading
-patterns persist across candidate counts; it does not fit a general factor.
-
-Use the same anchors in two backbones. Anchor-only (AO) leaves each anchor's
-cross-backbone cells unspecified. Anchor-zero (AZ) fixes those cells to zero.
-Both branches use the same sample and the same fixed window. With source counts
-`2:3` and maximum illustrative horizon three, candidates through six provide all
-required direct targets.
-
-```{r step1-evidence}
+```{r backbones}
 Q0_AO <- matrix(-1L, J, 2)
-for (k in 1:2) {
-  anchors <- which(cluster == k)[1:2]
-  Q0_AO[anchors, k] <- 1L
-}
+for (k in 1:2) Q0_AO[which(cluster == k)[1:2], k] <- 1L
 
 Q0_AZ <- Q0_AO
 for (k in 1:2) {
@@ -138,479 +92,167 @@ for (k in 1:2) {
   Q0_AZ[anchors, k] <- 1L
 }
 
-sweep_AO <- pefa(
-  Q0_AO, Y, Kmin = 2, Kmax = 6,
-  v0 = .001, max_it = 10000, convChk = FALSE, tolVal = 1e-4,
-  tau = .50, stability_eps = .10,
-  rank_adjust = TRUE, rank_max_J = 100, verbose = FALSE
-)
-sweep_AZ <- pefa(
-  Q0_AZ, Y, Kmin = 2, Kmax = 6,
-  v0 = .001, max_it = 10000, convChk = FALSE, tolVal = 1e-4,
-  tau = .50, stability_eps = .10,
-  rank_adjust = TRUE, rank_max_J = 100, verbose = FALSE
-)
-
-evidence_object <- list(AO = sweep_AO, AZ = sweep_AZ)
+Q0_show <- cbind(Q0_AO[1:8, ], Q0_AZ[1:8, ])
+colnames(Q0_show) <- c("AO_1", "AO_2", "AZ_1", "AZ_2")
+Q0_show
 ```
 
-Each branch also carries immutable `$provenance` identifying the evidence
-schema/engine and hashing its standardized data, Q0, settings, scientific
-payload, and lineage declaration. This engine-data fingerprint is distinct from any external hash of the
-matrix passed to `pefa()`; retain both when the outer analysis defines one.
-Decision profiles are deliberately absent from that package record.
+AZ is the stronger claim: it asserts that an anchor of cluster 1 has no loading
+on backbone factor 2. AO only asserts where the anchor *does* load. Both
+backbones cover two of the three clusters, so the third has to be found by the
+sweep.
 
-The all-pairs table contains one direct comparison for every `K_from < K_to`.
-Changing horizon or threshold therefore requires no refit and no chained match.
+## Step 1: ordinary oblique sweeps
 
-```{r persistence-evidence}
-sweep_AO$persistence
-persistence(sweep_AO, "phi_min")
-persistence(sweep_AO, "rmsd_max")
-persistence(sweep_AO, "unmatched_ssl")
-persistence(sweep_AO, "n_collisions")
-ssl(sweep_AO)
+```{r step1}
+AO <- pefa(Q0_AO, Y, Kmin = 2, Kmax = 5, v0 = .001, verbose = FALSE)
+AZ <- pefa(Q0_AZ, Y, Kmin = 2, Kmax = 5, v0 = .001, verbose = FALSE)
+
+AO$sweep[, c("K", "ELBO", "AIC", "BIC", "SRMR", "CFI")]
+AZ$sweep[, c("K", "ELBO", "AIC", "BIC", "SRMR", "CFI")]
 ```
 
-A collision marker `*` says that two source columns selected the same target;
-`~` marks a reduced scored-pair set, `!` a nonconverged endpoint, and `?` an
-unavailable selected metric. None of the four appears above, and the table says
-why: `collision` is `FALSE` on every row, `n_pairs` equals `K_from` on every
-row, `from_fit_ok` and `to_fit_ok` are `TRUE` everywhere, and no selected metric
-is `NA`. The legend line is printed only for markers that actually occur, so a
-clean triangle prints none. `n_pairs` gives the exact scored-pair count behind
-the matched-pair summaries. `unmatched_ssl` is on the same column-SSL scale as
-`ssl()`, so it can be read against the retained candidate columns -- the single
-column left unmatched by the `4 -> 5` comparison is the smallest column of the
-five-factor candidate in `ssl(sweep_AO)[["5"]]`, an order of magnitude below
-that candidate's largest column. None of these facts is a package verdict. The
-decision profile below states how they enter an edge.
-
-## 4. Apply several decision profiles
-
-A decision profile records every judgement needed to turn the same evidence
-object into a count reading and a profile-indexed L1/L2/L3 result. The following
-values are pedagogical. They are not `vbpm` defaults or universal R8 cutoffs.
-The source hash is left `NA` only because this installed-vignette illustration
-is not a sealed research registry; a production registry must populate it.
-
-Six decision families can move independently: the backbone specification, the
-count criterion, the endpoint-fit policy, the structural metric and its gate,
-the horizon, and the collision policy. One baseline profile plus one variant per
-family is therefore enough to show what each family controls, and `varied_family`
-names the single field each row moves relative to `illustrative_phi`. The cut
-and sustain values are deliberately held fixed at the helper defaults here:
-their sensitivity belongs to the count vignette, and `bifactor.Rmd` does not
-inherit a PEFA-fit primary count rule.
-
-```{r profile-table}
-decision_profiles <- data.frame(
-  profile_id = c(
-    "illustrative_phi", "az_phi", "bic_gain_phi", "allow_completed_endpoints",
-    "ao_rmsd", "longer_horizon", "flag_collision"
-  ),
-  varied_family = c(
-    "baseline", "specification", "count criterion", "endpoint fit policy",
-    "structural metric", "horizon", "collision policy"
-  ),
-  profile_role = "illustration",
-  profile_source_id = "vbpm_bifactor_vignette",
-  profile_source_version = "0.9.0",
-  profile_source_sha256 = NA_character_,
-  specification = c("AO", "AZ", "AO", "AO", "AO", "AO", "AO"),
-  criterion = c("elbo", "elbo", "bic", "elbo", "elbo", "elbo", "elbo"),
-  count_rule = "gain",
-  count_rule_semantics_id = "vbpm_0.9_gain_full_lookahead_na",
-  candidate_path_policy_id = "complete_consecutive_all_ok",
-  endpoint_fit_policy = c(
-    "require_converged", "require_converged", "require_converged",
-    "allow_completed", "require_converged", "require_converged",
-    "require_converged"
-  ),
-  delta = 20,
-  sustain = 1,
-  metric = c(
-    "phi_min", "phi_min", "phi_min", "phi_min", "rmsd_max", "phi_min",
-    "phi_min"
-  ),
-  metric_direction = c(
-    "at_least", "at_least", "at_least", "at_least", "at_most", "at_least",
-    "at_least"
-  ),
-  threshold = c(.85, .85, .85, .85, .20, .85, .85),
-  horizon_r = c(2L, 2L, 2L, 2L, 2L, 3L, 2L),
-  source_set_id = "demo_2_3",
-  collision_policy = c(
-    "veto", "veto", "veto", "veto", "veto", "veto", "flag"
-  ),
-  source_eligibility_policy = "require_all",
-  target_capacity_policy = "require_distinct_capacity",
-  layer_rule_id = "richest_persistent",
-  assessment_step2 = c(TRUE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE),
-  stringsAsFactors = FALSE
-)
-decision_profiles
+```{r step1-transitions}
+AO$transitions[, c("K_from", "K_to", "ELBO_gain_pct", "BIC_gain_pct",
+                   "phi_min", "rmsd_max", "unmatched_ssl", "collision")]
+AZ$transitions[, c("K_from", "K_to", "ELBO_gain_pct", "BIC_gain_pct",
+                   "phi_min", "rmsd_max", "unmatched_ssl", "collision")]
 ```
 
-The helper below is vignette code, not a package classifier. It makes the
-direction of every decision visible: congruence must be at least its threshold,
-RMSD must be no greater than its threshold, and a collision is rejected only
-under a `"veto"` profile.
+Both backbones put their only positive gain on the `2 -> 3` step and both put
+`unmatched_ssl` near 2.6-2.9 there, which is a full column's worth against the
+`ssl()` values below. After that they part company slightly. AO's BIC is
+minimized at `K = 3` (35196.8) and its later ELBO gains are -6.9% and -8.8%.
+AZ's BIC is minimized at `K = 4` (35209.3, against 35227.0 at `K = 3`), and its
+`3 -> 4` ELBO gain is -0.5%, close enough to zero that a stricter reading of
+the same path would hesitate there.
 
-```{r profile-helper}
-assess_profile <- function(evidence_object, profile,
-                           source_sets = list(demo_2_3 = 2:3)) {
-  stopifnot(
-    profile$count_rule == "gain",
-    profile$count_rule_semantics_id == "vbpm_0.9_gain_full_lookahead_na",
-    profile$candidate_path_policy_id == "complete_consecutive_all_ok",
-    profile$endpoint_fit_policy %in% c("require_converged", "allow_completed"),
-    profile$source_eligibility_policy == "require_all",
-    profile$target_capacity_policy == "require_distinct_capacity",
-    profile$layer_rule_id == "richest_persistent"
-  )
-  source_set <- source_sets[[profile$source_set_id]]
-  if (is.null(source_set)) stop("Unknown source_set_id.")
-  x <- evidence_object[[profile$specification]]
-  K_path <- as.integer(x$sweep$K)
-  score <- switch(
-    profile$criterion,
-    elbo = x$sweep$ELBO,
-    aic = -x$sweep$AIC,
-    bic = -x$sweep$BIC
-  )
-  component_ok <- switch(
-    profile$criterion,
-    elbo = x$sweep$elbo_status == "ok",
-    aic = x$sweep$stats_status == "ok",
-    bic = x$sweep$stats_status == "ok"
-  )
-  path_ok <- identical(K_path, seq.int(min(K_path), max(K_path))) &&
-    all(x$sweep$fit_status == "ok" & component_ok & is.finite(score))
-  Khat <- if (path_ok) {
-    select_K_elbow(
-      K_path, score,
-      delta = profile$delta,
-      sustain = profile$sustain
-    )
-  } else {
-    NA_integer_
-  }
-
-  z <- x$persistence
-  metric_value <- z[[profile$metric]]
-  z$metric_pass <- switch(
-    profile$metric_direction,
-    at_least = metric_value >= profile$threshold,
-    at_most = metric_value <= profile$threshold,
-    stop("Unsupported metric_direction.")
-  )
-  endpoint_admissible <- switch(
-    profile$endpoint_fit_policy,
-    require_converged =
-      (z$from_fit_ok %in% TRUE) & (z$to_fit_ok %in% TRUE),
-    allow_completed = !is.na(z$from_fit_ok) & !is.na(z$to_fit_ok),
-    stop("Unsupported endpoint_fit_policy.")
-  )
-  edge_known <-
-    z$pair_status %in% "available" &
-    is.finite(metric_value) &
-    endpoint_admissible &
-    !is.na(z$source_ineligible_n) &
-    !is.na(z$target_eligible_n) &
-    !is.na(z$collision)
-  z$edge_pass <- rep(NA, nrow(z))
-  z$edge_pass[edge_known] <-
-    z$source_ineligible_n[edge_known] == 0L &
-    z$target_eligible_n[edge_known] >=
-      (z$K_from[edge_known] - ncol(x$Q0)) &
-    z$metric_pass[edge_known] &
-    (profile$collision_policy == "flag" | !z$collision[edge_known])
-
-  P <- setNames(rep(NA, length(source_set)), as.character(source_set))
-  required_rows <- integer()
-  for (k in source_set) {
-    needed_idx <- which(z$K_from == k &
-                          z$K_to %in% (k + seq_len(profile$horizon_r)))
-    needed <- z[needed_idx, , drop = FALSE]
-    if (nrow(needed) != profile$horizon_r) next
-    required_rows <- c(required_rows, needed_idx)
-    if (any(needed$edge_pass %in% FALSE)) P[as.character(k)] <- FALSE
-    else if (all(needed$edge_pass %in% TRUE)) P[as.character(k)] <- TRUE
-  }
-
-  stable <- as.integer(names(P)[P %in% TRUE])
-  Kp <- if (length(stable)) max(stable) else NA_integer_
-  higher_unknown <- if (is.na(Kp)) any(is.na(P)) else
-    any(is.na(P[names(P) %in% as.character(source_set[source_set > Kp])]))
-
-  layer <- if (all(P %in% FALSE)) {
-    "L3"
-  } else if (length(stable) && !higher_unknown) {
-    if (!path_ok) NA_character_ else if (!is.na(Khat) && Khat == Kp) "L1" else "L2"
-  } else {
-    NA_character_
-  }
-
-  req <- sort(unique(required_rows))
-  required_edge_state <- if (length(req)) paste0(
-    z$K_from[req], "->", z$K_to[req], ":",
-    ifelse(is.na(z$edge_pass[req]), "?", as.integer(z$edge_pass[req])),
-    collapse = ","
-  ) else ""
-
-  data.frame(
-    profile_id = profile$profile_id,
-    specification = profile$specification,
-    Khat = Khat,
-    Kp = Kp,
-    layer = layer,
-    required_edge_state = required_edge_state,
-    persistence_state = paste0(
-      names(P), ":", ifelse(is.na(P), "?", as.integer(P)), collapse = ","
-    ),
-    stable_set = if (length(stable)) paste(stable, collapse = ",") else "",
-    required_collided_edge_n = if (!length(req) || anyNA(z$collision[req]))
-      NA_integer_ else as.integer(sum(z$collision[req])),
-    required_collision_target_n = if (!length(req) || anyNA(z$n_collisions[req]))
-      NA_integer_ else as.integer(sum(z$n_collisions[req])),
-    analysis_status = if (is.na(layer)) "technically_unresolved" else "complete"
-  )
-}
+```{r step1-persistence}
+round(AO$persistence$phi, 3)
+round(AZ$persistence$phi, 3)
+ssl(AO)[c("3", "4")]
+ssl(AZ)[c("3", "4")]
 ```
 
-```{r profile-results}
-profile_results <- do.call(
-  rbind,
-  lapply(seq_len(nrow(decision_profiles)), function(i) {
-    assess_profile(evidence_object, decision_profiles[i, , drop = FALSE])
-  })
-)
-varying <- c(
-  "profile_id", "varied_family", "specification", "criterion",
-  "endpoint_fit_policy", "metric", "metric_direction", "threshold",
-  "horizon_r", "collision_policy"
-)
-cbind(decision_profiles[, varying], profile_results[, c(
-  "Khat", "Kp", "persistence_state", "stable_set", "layer",
-  "required_edge_state", "required_collided_edge_n",
-  "required_collision_target_n", "analysis_status"
-)])
+Persistence separates the two backbones more than the criteria do. AO's
+three-factor columns survive into `K = 4` and `K = 5` at 0.988 and 0.987; AZ's
+survive at 0.935 and 0.922, and its `4 -> 5` cell falls to 0.834. In both
+backbones the fourth column is small --- `ssl()` puts it at 0.36 (AO) and 0.38
+(AZ) against three columns above 2.2 --- so the four-factor candidate is the
+three-factor one plus a thin extra column, not a different structure.
+
+```{r step1-reading}
+## Analysis-side reading, not a package rule. Variant: full look-ahead with no
+## fallback -- the smallest K_from whose own and every later adjacent ELBO gain
+## is under 20% of the largest positive gain, NA_integer_ when none qualifies.
+vapply(list(AO = AO, AZ = AZ), function(x) {
+  g <- x$transitions$ELBO_gain_pct
+  below <- vapply(seq_along(g), function(i) all(g[i:length(g)] < 20),
+                  logical(1))
+  if (any(below)) x$transitions$K_from[which(below)[1]] else NA_integer_
+}, integer(1))
 ```
 
-Only the varying profile fields are reprinted beside the results; the constant
-registry fields are in `decision_profiles` above.
+Both deliver three. That agreement is a fact about this sample and window; the
+AZ BIC minimum at four is in the same evidence and disagrees, and no part of
+`pefa()` arbitrates between them.
 
-**On this dataset every profile agrees.** All seven deliver `Khat = 3`,
-`Kp = 3`, and layer `L1`, with every required edge passing. That is the honest
-finding, and it is a property of this sample and window rather than a package
-guarantee or evidence that the six decision families are interchangeable. A
-well-separated three-cluster population read through a two-column backbone
-simply leaves little room for the declared values to disagree: the smallest
-congruence any of these profiles requires is 0.88 against a 0.85 gate, the
-largest aligned RMSD any of them requires is 0.17 against a 0.20 gate, no
-candidate failed to converge in either backbone, and no edge any of them
-requires carries a collision. Agreement here says the reading is robust for
-this evidence; it says nothing about a thinner or more ambiguous dataset, where
-the same seven profiles can separate.
+## Step 2: a comparison derived from Step 1
 
-`Khat` is `NA_integer_` whenever the declared count rule delivers nothing --
-either because no complete strict crossing exists or because the criterion path
-was not usable end to end. The vignette adds no usable/absent/unusable category
-on top of that: whether the path itself was usable is read directly from
-`$sweep`'s `fit_status`, `elbo_status`, and `stats_status` columns.
+Step 1 delivers a count and a loading matrix. Step 2 has to be built out of
+*that* result, not out of a design written down independently. Take the AO
+candidate at the delivered count, keep the backbone anchors as anchors, and
+assign every remaining item to the column carrying its largest absolute
+loading as a regularized cell.
 
-Under `require_converged`, a nonconverged endpoint yields `?`;
-`allow_completed` may evaluate the retained finite metric only when both
-endpoints have known completion facts. A fit error or malformed convergence
-flag remains `?` under either policy. Neither branch is exercised here, because
-all five candidates converged in both backbones. L1 means the two readings
-agree under that profile; L2 means a persistent structure exists but count
-evidence disagrees or is absent; L3 means no source count persists under that
-profile. The layer is therefore `profile_id`-indexed, not an intrinsic label of
-the dataset.
+```{r step2-design}
+Kp <- 3
+Lam <- AO$loadings[[as.character(Kp)]]
+anchor <- which(AO$Q0 == 1L, arr.ind = TRUE)
 
-Horizons are deliberately local. At source count `k`, horizons one to three ask
-whether the same core survives one, two, or three added columns; the R8 note
-sets its own band against a five-column major target, and the band here is the
-`2:6` window fitted above. This is a bounded local-to-moderate overextraction
-band for a given design, not a universal complexity scale: mild overextraction
-may preserve the major core beside a surplus column, but added columns can also
-split or destabilize it. Underextraction cannot contain every major direction.
-The `$persistence` table already carries every horizon the window supports, so
-a profile selects one rather than the package choosing for it.
+Q2 <- matrix(0L, J, Kp)
+Q2[anchor] <- 1L
+free <- setdiff(seq_len(J), anchor[, "row"])
+Q2[cbind(free, max.col(abs(Lam[free, , drop = FALSE]),
+                       ties.method = "first"))] <- -1L
 
-### Where the agreement would break
-
-The declared threshold and horizon are profile values, not measurements. Sweeping
-both over a declared grid -- with everything else at the baseline -- shows where
-this evidence stops supporting one reading. This is a sensitivity display, not a
-menu: the profile table above is the analysis, and a threshold is chosen before
-the layer is read, never after.
-
-```{r threshold-sensitivity}
-grid_profiles <- do.call(rbind, lapply(c(.80, .85, .90, .95), function(th) {
-  do.call(rbind, lapply(1:3, function(r) {
-    prof <- decision_profiles[1, , drop = FALSE]
-    prof$threshold <- th
-    prof$horizon_r <- as.integer(r)
-    out <- assess_profile(evidence_object, prof)
-    data.frame(threshold = th, horizon_r = r,
-               reading = paste0(out$Kp, "/", out$layer))
-  }))
-}))
-matrix(
-  grid_profiles$reading, nrow = 4, byrow = TRUE,
-  dimnames = list(threshold = c(".80", ".85", ".90", ".95"),
-                  horizon_r = c("1", "2", "3"))
-)
+table(cluster, support = max.col(Q2 != 0L, ties.method = "first"))
 ```
 
-Each cell is the delivered `Kp` and its layer. The reading is stable across most
-of the grid and then changes twice: a long horizon combined with a demanding
-congruence gate first drops the delivered count, then leaves no source count
-persistent at all. Nothing about the data changed between those cells.
+The derived support reproduces the three generating clusters exactly. Now fit
+the same design twice --- once oblique, once bifactor --- and compare.
 
-For confirmatory work, declare the profile before interpreting its layer. For
-exploratory work, show the relevant profile comparison rather than selecting
-the row that produces the preferred conclusion. A profile outside the operating
-conditions studied in a supporting simulation is possible, but its error rate
-is not thereby validated.
+```{r step2-fit}
+f_obl <- vbfa(Y, Q2, v0 = .001)
+f_bif <- vbfa(Y, Q2, bifactor = TRUE, v0 = .001)
 
-## 5. Step 2 is conditional on a declared delivery
-
-Only an L1/L2 profile supplies a count for the later oblique-versus-bifactor
-comparison. L3 and technically unresolved profiles deliver no structure. The
-comparison must use the selected branch's candidate at its actual delivered
-count; it must not substitute another branch, count, or known population design.
-
-The R8 workflow uses two paired design families at a declared delivered count:
-
-1. a loading-derived disjoint-support `Q_hard`, fit as strict oblique and strict
-   bifactor models; and
-2. the original branch-preserving `Q_flex`, fit as a flexible oblique model and
-   the **general-plus-sparse-groups sensitivity**.
-
-**The chunk below is an unexecuted template (`eval = FALSE`).** It exists to
-show one thing: how a profile that declares an L1/L2 delivery turns
-`chosen$specification` and `chosen$Kp` into the `Q` matrices the four arms are
-fitted with. It is not run here and it produces no result in this vignette, so
-nothing in the surrounding text is evidence about oblique versus bifactor
-structure on this dataset, and the package checks that build this vignette do
-not verify an unevaluated comparison. Reading a bifactor conclusion off Step 1
-would also invert the workflow: Step 1 delivers a count, Step 2 is a separate
-fit that the reader must run on their own data and report in full.
-
-```{r step2, eval=FALSE}
-assessment_id <- decision_profiles$profile_id[decision_profiles$assessment_step2]
-stopifnot(length(assessment_id) == 1L)
-chosen <- profile_results[
-  profile_results$profile_id == assessment_id &
-    profile_results$layer %in% c("L1", "L2"),
-]
-stopifnot(nrow(chosen) == 1L)
-
-x <- evidence_object[[chosen$specification]]
-Kp <- chosen$Kp
-Lam <- x$loadings[[as.character(Kp)]]
-cand <- x$sweep[x$sweep$K == Kp, , drop = FALSE]
-stopifnot(
-  nrow(cand) == 1L,
-  cand$fit_status == "ok",
-  cand$loading_status == "ok",
-  is.matrix(Lam), nrow(Lam) == nrow(x$Q0), ncol(Lam) == Kp,
-  all(is.finite(Lam))
-)
-K0 <- ncol(x$Q0)
-Q_flex <- if (Kp == K0) x$Q0 else
-  cbind(x$Q0, matrix(-1L, nrow(x$Q0), Kp - K0))
-
-# Deterministic disjoint support: each item is assigned to its largest absolute
-# loading, with the smaller factor index resolving exact ties. Preserve the Q0
-# anchors; choose two distinct markers for every exploratory factor from its
-# assigned items. A profile is Step-2 unavailable if this is impossible.
-anchor_index <- which(x$Q0 == 1L, arr.ind = TRUE)
-stopifnot(all(rowSums(x$Q0 == 1L) <= 1L))
-anchor_rows <- unique(anchor_index[, "row"])
-nonanchor_rows <- setdiff(seq_len(nrow(Lam)), anchor_rows)
-
-Q_hard <- matrix(0L, nrow(Lam), Kp)
-Q_hard[anchor_index] <- 1L
-support <- max.col(abs(Lam[nonanchor_rows, , drop = FALSE]), ties.method = "first")
-Q_hard[cbind(nonanchor_rows, support)] <- -1L
-
-marker_rows <- vector("list", Kp)
-for (h in seq_len(Kp)) {
-  if (h <= K0) {
-    marker_rows[[h]] <- anchor_index[anchor_index[, "col"] == h, "row"]
-  } else {
-    assigned <- which(Q_hard[, h] == -1L)
-    if (length(assigned) < 2L)
-      stop("Step 2 unavailable: an exploratory factor lacks two markers.")
-    ord <- order(-abs(Lam[assigned, h]), assigned)
-    marker_rows[[h]] <- assigned[ord[1:2]]
-    Q_hard[marker_rows[[h]], h] <- 1L
-  }
-}
-stopifnot(all(lengths(marker_rows) == 2L))
-stopifnot(all(rowSums(Q_hard != 0L) == 1L))
-
-arm_controls <- list(
-  v0 = c(.01, .005, .002, .001), max_it = 5000,
-  ld = FALSE, Qe = NULL, ld_control = list(),
-  convChk = FALSE, tolVal = 1e-4
-)
-fits <- list(
-  strict_oblique = do.call(
-    vbfa, c(list(Y = Y, Q = Q_hard, bifactor = FALSE, orthogonal = FALSE),
-            arm_controls)
-  ),
-  strict_bifactor = do.call(
-    vbfa, c(list(Y = Y, Q = Q_hard, bifactor = TRUE, orthogonal = TRUE,
-                 general = 1), arm_controls)
-  ),
-  flexible_oblique = do.call(
-    vbfa, c(list(Y = Y, Q = Q_flex, bifactor = FALSE, orthogonal = FALSE),
-            arm_controls)
-  ),
-  general_plus_sparse_groups = do.call(
-    vbfa, c(list(Y = Y, Q = Q_flex, bifactor = TRUE, orthogonal = TRUE,
-                 general = 1), arm_controls)
-  )
-)
-
-arm_stats <- lapply(fits, function(f) {
-  if (!isTRUE(f$flag == 1L))
-    return(list(status = "unavailable", reason = "nonconverged", BIC = NA_real_))
-  fs <- tryCatch(
-    fit_stats(
-      f, Y = Y, Q = f$Q, tau = .50,
-      rank_adjust = TRUE, rank_max_J = 100
-    ),
-    error = function(e) e
-  )
-  if (inherits(fs, "error"))
-    return(list(status = "unavailable", reason = "fit_stats_error", BIC = NA_real_))
-  if (!is.finite(fs["BIC"]))
-    return(list(status = "unavailable", reason = "nonfinite_hard_bic", BIC = NA_real_))
-  list(status = "ok", reason = NA_character_, BIC = unname(fs["BIC"]))
-})
-stopifnot(all(vapply(arm_stats, `[[`, character(1), "status") == "ok"))
-bic <- vapply(arm_stats, `[[`, numeric(1), "BIC")
-c(
-  delta_BIC_strict = bic["strict_oblique"] - bic["strict_bifactor"],
-  delta_BIC_flexible =
-    bic["flexible_oblique"] - bic["general_plus_sparse_groups"]
-)
+idx <- c("RMSEA", "SRMR", "CFI", "TLI", "AIC", "BIC")
+round(rbind(
+  oblique  = fit_stats(f_obl, Y = Y, Q = f_obl$Q, tau = .50)[idx],
+  bifactor = fit_stats(f_bif, Y = Y, Q = f_bif$Q, tau = .50)[idx]
+), 3)
 ```
 
-Were that template run, a positive `delta_BIC` would favor the corresponding
-bifactor arm. Even then the contrast is an operational, profile-conditional
-comparison, not a formal test of an unrestricted population distance. Thin
-margins, disagreement between the two design families, or conspicuous residual
-dependence should be reported before a substantive general factor is
-interpreted. If a bifactor is retained, `special_effects()` can then describe
-its higher-order proportionality and group/testlet effects, as in Section 2.
+The bifactor arm is ahead by 57.3 BIC points, which is the right answer for
+this population. It is an operational comparison of two fitted models on one
+design, not a test against an unrestricted alternative, and it is conditional
+on the count and support that Step 1 delivered. A thin margin, or a margin that
+flips when the Step-1 count changes, should be reported rather than resolved.
+
+`special_effects()` then describes the retained bifactor fit: within-cluster
+Schmid-Leiman ratios and their CVs, the implied second-order loadings, and
+group effect sizes.
+
+```{r step2-effects}
+effects <- special_effects(f_bif)
+effects$mean_cv
+effects$groups[, c("group", "mean_ratio", "cv", "gamma", "D")]
+```
+
+## The same window as a bifactor sweep
+
+`pefa(..., bifactor = TRUE)` sweeps the number of group factors. The backbone
+supplies group columns only, the general column is added internally, and the
+comparator strips it before matching, so the correspondence and the seven pair
+facts have exactly the definitions used above.
+
+```{r bifactor-sweep}
+BI <- pefa(Q0_AO, Y, Kmin = 2, Kmax = 5, bifactor = TRUE, v0 = .001,
+           verbose = FALSE)
+BI$sweep[, c("K", "ELBO", "AIC", "BIC", "SRMR", "CFI")]
+BI$transitions[, c("K_from", "K_to", "ELBO_gain_pct", "BIC_gain_pct",
+                   "phi_min", "rmsd_max", "unmatched_ssl", "collision")]
+round(BI$persistence$phi, 3)
+round(BI$persistence$rmsd, 3)
+ssl(BI)
+```
+
+In this example the bifactor sweep is much less sharp than the ordinary one.
+
+* Both percentage columns are `NA` for every row. ELBO is highest and BIC
+  lowest at the window's lower edge, so neither path contains a positive gain
+  and the whole percentage path is `NA` by construction. The Step-1 reading has
+  no defined path to consume; a rule that reads those columns must decide for
+  itself what an all-`NA` path means, which is exactly the kind of decision the
+  package leaves outside.
+* `phi_min` is 0.998 or higher in every cell of `$persistence$phi`, and no
+  `rmsd_max` cell exceeds 0.061. Everything persists, so persistence
+  discriminates nothing either.
+* `ssl()` says why. The general column holds 4.29-4.37 and the two backbone
+  group columns hold about 2.1-2.25 at every candidate, while the third
+  group column reaches only 0.27 at `K = 3` and splits into columns near 0.06
+  by `K = 5`. With the general factor already carrying the shared variance, the
+  third cluster's specific variance never accumulates into a group column here,
+  and the surplus columns that follow are small enough that two of them collide
+  at `4 -> 5`.
+
+Read that as a property of this example --- this population, this two-column
+backbone, this window, this sample size --- and not as a general ranking. A
+bifactor sweep measures the same quantities as an ordinary one, and whether it
+separates candidates as well depends on how much group-specific variance is
+left once a general factor is in the model. A study that needs both readings
+should run both on the same data, backbone, and window rather than assume they
+must agree.
 
 ## References
 
@@ -623,8 +265,6 @@ its higher-order proportionality and group/testlet effects, as in Section 2.
   special effects within the generalized partially confirmatory factor
   analysis framework. *Applied Psychological Measurement*, 48(4-5), 208-229.
   \doi{10.1177/01466216241261704}
-* Chen, J., & Jin, Y. (2026a). Recovering latent structures after variational
+* Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
   Bayesian variable selection: Fit assessment and factor-number selection in
   partially exploratory factor analysis. *arXiv preprint* arXiv:2607.07159.
-* Chen, J., & Jin, Y. (2026b). *When factor count is uncertain: Stable
-  structure before the bifactor decision.* Manuscript in preparation.

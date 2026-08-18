@@ -23,11 +23,11 @@ Description: Variational Bayes estimation for a family of psychometric
     multiple-causes models, placing spike-and-slab priors on both the
     measurement and the structural part (Jin and Chen, 2025
     <doi:10.1080/00273171.2025.2483253>). Companion tools compute SEM-like
-    fit statistics, sweep a factor-count window and return fit, criterion,
-    and structural-persistence evidence without selecting a count, and apply
-    a user-specified relative gain rule to any criterion path (Chen and Jin,
-    2026 <doi:10.48550/arXiv.2607.07159>). Data generators for either model
-    family are also provided.
+    fit statistics, and sweep a factor-count window to report candidate fit,
+    criterion, and between-candidate loading-correspondence measurements
+    without selecting a count (Chen and Jin, 2026
+    <doi:10.48550/arXiv.2607.07159>). Data generators for either model family
+    are also provided.
 License: GPL-3
 Encoding: UTF-8
 LazyData: true
@@ -36,9 +36,7 @@ Depends: R (>= 4.1)
 Imports:
     Rcpp,
     MASS,
-    digest,
-    stats,
-    utils
+    stats
 LinkingTo:
     Rcpp,
     RcppArmadillo

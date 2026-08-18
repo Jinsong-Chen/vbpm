@@ -277,36 +277,38 @@ test_that("complete data is unchanged by the vbmimic missing-data path", {
 ## ---- pefa plot method ----------------------------------------------------
 
 test_that("plot.pefa draws its three compact displays without error", {
-  skip_if_not_installed("grDevices")
   d <- make_dat(N = 250)
   r <- pefa(d$Q[, 1:2, drop = FALSE], d$Y, Kmin = 2, Kmax = 3,
             verbose = FALSE, v0 = .001, max_it = 300)
   tmp <- tempfile(fileext = ".png")
   grDevices::png(tmp, width = 600, height = 400)
   on.exit({ grDevices::dev.off(); unlink(tmp) }, add = TRUE)
-  expect_silent(plot(r, type = "objective"))
-  expect_silent(plot(r, type = "gain", criterion = "elbo"))
-  expect_silent(plot(r, type = "gain", criterion = "bic"))
-  ablines <- list()
-  testthat::with_mocked_bindings(
-    plot(r, type = "gain", criterion = "bic"),
-    abline = function(...) {
-      ablines[[length(ablines) + 1L]] <<- list(...)
-    },
-    .package = "vbpm"
-  )
-  ## The only BIC-panel reference is zero: no cut threshold or selected-K line.
-  expect_length(ablines, 1L)
-  expect_identical(ablines[[1L]]$h, 0)
-  expect_silent(plot(r, type = "fit"))
-  ## 0.9.0 retains five criterion paths, so all five are plottable and none of
-  ## them draws a threshold or a selection marker.
-  for (crit in c("elbo", "aic", "bic", "aic_s", "bic_s")) {
-    expect_silent(plot(r, type = "gain", criterion = crit))
+
+  ## objective: three criterion paths; gain: two; fit: the four descriptive
+  ## indices in one two-panel display.
+  for (crit in c("elbo", "aic", "bic")) {
+    expect_silent(plot(r, type = "objective", criterion = crit))
   }
-  expect_silent(plot(r, type = "gain", criterion = "elbo", pct = TRUE))
-  expect_error(plot(r, type = "gain", criterion = "sabic"), "arg")
+  for (crit in c("elbo", "bic")) {
+    expect_silent(plot(r, type = "gain", criterion = crit))
+    expect_silent(plot(r, type = "gain", criterion = crit, pct = TRUE))
+  }
+  expect_silent(plot(r, type = "fit"))
+
+  ## No reference line of any kind is drawable: 0.9.0 dropped the soft
+  ## criteria, the cut threshold and the selected-K marker together, so the
+  ## method neither imports nor calls abline().
+  expect_false("abline" %in% unlist(getNamespaceImports("vbpm"),
+                                    use.names = FALSE))
+  expect_false(any(grepl("abline", deparse(body(vbpm:::plot.pefa)))))
+
+  ## Soft criteria and the stability view are gone; the gain view has no AIC.
+  for (crit in c("aic_s", "bic_s", "sabic")) {
+    expect_error(plot(r, type = "gain", criterion = crit), "unavailable")
+  }
+  expect_error(plot(r, type = "gain", criterion = "aic"), "unavailable")
   expect_error(plot(r, type = "stability"), "arg")
+  expect_error(plot(r, pct = NA), "pct must be TRUE or FALSE")
 })
 
 ## ---- item 5b: the terminal VECM objective ------------------------------
@@ -346,22 +348,8 @@ test_that("objective_terms decompose the objective exactly", {
 
 ## ---- audit follow-up: input validation ----------------------------------
 ## (the checkpoint-provenance tests were removed with the checkpoint feature
-## in 0.8.0; pefa() performs one in-memory sweep and never resumes.)
-
-test_that("select_K_elbow validates its inputs", {
-  ok <- c(-100, -80, -75, -74)
-  expect_error(select_K_elbow(2:5, ok[1:3]), "same length")
-  expect_error(select_K_elbow(c(2, 2, 3, 4), ok), "duplicates")
-  expect_error(select_K_elbow(c(2, 3, 4, NA), ok), "finite")
-  expect_error(select_K_elbow(c(2.5, 3, 4, 5), ok), "whole numbers")
-  expect_error(select_K_elbow(c(2, 3, 5, 6), ok), "consecutive")
-  expect_error(select_K_elbow(2:5, c(ok[1:3], NA)), "finite")
-  expect_error(select_K_elbow(2:5, ok, delta = -1), "0, 100")
-  expect_error(select_K_elbow(2:5, ok, delta = 101), "0, 100")
-  expect_error(select_K_elbow(2:5, ok, sustain = 0), "positive whole number")
-  expect_error(select_K_elbow(2:5, ok, sustain = 1.5), "positive whole number")
-  expect_silent(select_K_elbow(2:5, ok))
-})
+## in 0.8.0, and the select_K_elbow() tests with the selector itself in 0.9.0;
+## pefa() performs one in-memory sweep, never resumes, and chooses nothing.)
 
 test_that("pefa validates its window", {
   d <- make_dat(N = 120)
@@ -373,17 +361,17 @@ test_that("pefa validates its window", {
                "whole number")
   expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, tau = 1.5, verbose = FALSE),
                "tau")
-  expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, stability_eps = 0,
-                    verbose = FALSE), "strictly positive")
 
-  ## 0.9.0 removed `...`, so a mode control cannot reach vbfa() at all: the
-  ## call fails to match rather than being caught and rejected. Every control
-  ## that changes a returned number is now a named formal recorded in
-  ## $settings, which is a stronger guarantee than the old screen.
-  expect_false(any(c("...", "ld", "Qe", "orthogonal", "cuts", "sustain") %in%
-                     names(formals(pefa))))
+  ## 0.9.0 removed `...` along with every selection control, so neither a mode
+  ## control nor a count rule can reach the call at all: it fails to match
+  ## rather than being caught and rejected. Every control that changes a
+  ## returned number is now a named formal recorded in $settings, which is a
+  ## stronger guarantee than the old screen.
+  expect_false(any(c("...", "ld", "Qe", "orthogonal", "cuts", "sustain",
+                     "stability_eps") %in% names(formals(pefa))))
   for (bad in list(list(ld = TRUE), list(orthogonal = TRUE),
-                   list(Qe = diag(ncol(d$Y))), list(cuts = c(primary = 10)))) {
+                   list(Qe = diag(ncol(d$Y))), list(cuts = c(primary = 10)),
+                   list(stability_eps = 0))) {
     expect_error(
       do.call(pefa, c(list(Q0 = Q0, Y = d$Y, Kmin = 2, Kmax = 3,
                            verbose = FALSE), bad)),

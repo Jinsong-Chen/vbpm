@@ -16,19 +16,21 @@ psychometric measurement models:
 * `fit_stats()` and `special_effects()` — SEM-like fit statistics with nominal,
   hard-selected, and soft/effective parameter counts, and post-processing of a
   fitted bifactor model;
-* `pefa()` — a fixed-window factor-count sweep that returns an **evidence
-  object** and makes no decision. It selects no factor count, applies no
-  threshold, and vetoes no comparison; it returns candidate fit evidence
-  (`$sweep`), adjacent criterion gains (`$transitions`), and all-pairs
-  structural-persistence evidence (`$persistence`), together with the candidate
-  loading and PIP matrices and an immutable SHA-256 `$provenance` record;
-* `persistence()`, `ssl()`, and `verify_pefa()` — accessors that pivot one
-  structural metric into a horizon triangle, report per-candidate sums of
-  squared loadings, and re-verify a stored evidence object against the
-  installed package;
-* `select_K_elbow()` — an optional criterion-generic count calculator that
-  applies a user-supplied relative-gain rule to any larger-is-better path.
-  `pefa()` never invokes it;
+* `pefa()` — a fixed-window factor-count sweep that measures and reports rather
+  than decides. It fits one `vbfa()` candidate for every integer `K` in a
+  consecutive window and returns exactly seven components: `$sweep` (one row per
+  candidate), `$transitions` (one row per adjacent pair: percent-of-largest
+  ELBO and BIC gains plus seven structural facts), `$persistence` (three
+  upper-triangular matrices over every ordered pair), the candidate `$loadings`
+  and `$pips` lists, `$Q0`, and `$settings`. Loading columns correspond by
+  minimum sign-aligned squared distance, with congruence as an exact-tie
+  breaker only; target reuse is reported as a collision rather than repaired.
+  The function selects no factor count and holds no cut, threshold, horizon, or
+  collision policy;
+* `ssl()` — per-candidate sums of squared loadings, the descriptive companion
+  to the sweep's congruence and unmatched-column measurements, together with
+  compact `print()`, `summary()`, and `plot()` methods that read the stored
+  object and never refit, rematch, or select;
 * `sim_fa()` and `sim_lvm()` — two data generators.
 
 ## Test environments
@@ -72,16 +74,6 @@ the tag is created.
   built with Rcpp/RcppArmadillo. `src/Makevars` links LAPACK/BLAS explicitly.
   There is no other compiled code and no external system dependency.
 
-* **The `digest` dependency.** `digest` is a hard Import used solely to compute
-  the SHA-256 fields in `pefa()`'s `$provenance` record and to re-verify them in
-  `verify_pefa()`. Serialization options are fixed in one internal helper
-  (canonical XDR, serialization version 3, with the writer-dependent stream
-  header excluded), so an unchanged scientific payload hashes identically across
-  R versions and locales. `tools::sha256sum(bytes =)` would remove the
-  dependency but was added in R 4.5.0, which would raise this package's floor
-  from `R (>= 4.1)`; `digest` itself requires only `R (>= 3.3.0)` and imports
-  `utils` alone.
-
 * **Included data.** `nlsy27` (3,458 x 27 responses) is derived from the public
   National Longitudinal Survey of Youth 1997 (Bureau of Labor Statistics, U.S.
   Department of Labor) and was previously distributed by the same maintainer in
@@ -98,14 +90,22 @@ the tag is created.
   is defined. The quantities that are defined are returned under their own
   names (`objective`, `objective_type`, `ELBO_conditional`). Likewise
   `fit_stats()` returns typed `NA` for covariance indices that are not yet
-  derived for `vbmimic` fits, and `pefa()` returns a typed `NA` for a
-  structural metric whose mathematical inputs are undefined, rather than
+  derived for `vbmimic` fits, and `pefa()` returns typed `NA` where a
+  quantity's mathematical domain is empty or undefined — `RMSEA` and `TLI` at
+  non-positive degrees of freedom, `phi_min` when a compared column has zero
+  norm, a gain percentage when its path holds no positive gain — rather than
   substituting a plausible but wrong number. Each case is documented in
   `?vbfa`, `?fit_stats`, `?pefa`, and the vignettes.
+
+* **`pefa()` makes no recommendation.** The function exposes no argument that
+  would select a factor count, and no method or example in the package prints
+  or returns a chosen `K`. The vignettes show count readings as ordinary local
+  code, labelled with the rule variant they implement, precisely so that no
+  package default is implied.
 
 * **Reproducibility.** `vbfa()` and `vbmimic()` consume no random numbers and
   take no seed argument; repeated runs are bit-identical. A stored-reference
   regression test pins `vbfa(v0 = 0.001)` to the published fixed-spike
-  estimator. The test suite also re-verifies stored `pefa()` evidence objects
-  through `verify_pefa()`, so a change in matcher or hashing semantics fails
-  the tests rather than passing silently.
+  estimator. `pefa()` inherits that determinism: it draws no random numbers of
+  its own, and its correspondence rule and derived tables are pinned by
+  hand-computed fixtures rather than by tolerance against a saved run.

@@ -185,8 +185,11 @@ test_that("pefa returns evidence over the window and selects nothing", {
   expect_false(any(grepl("_gain", names(r$sweep))))
 
   expect_identical(nrow(r$transitions), nrow(r$sweep) - 1L)
+  ## 0.9.0 stores all-pairs evidence as three upper-triangular W x W matrices
+  ## rather than one long pair table.
   W <- nrow(r$sweep)
-  expect_identical(nrow(r$persistence), as.integer(W * (W - 1L) / 2L))
+  expect_identical(names(r$persistence), c("phi", "rmsd", "collision"))
+  for (m in r$persistence) expect_identical(dim(m), c(W, W))
   expect_true(all(vapply(r$loadings, is.matrix, logical(1))))
   expect_true(all(vapply(r$pips, is.matrix, logical(1))))
 
@@ -194,8 +197,10 @@ test_that("pefa returns evidence over the window and selects nothing", {
   expect_s3_class(s, "summary.pefa")
   expect_identical(s$ssl, ssl(r))
   expect_identical(s$settings, r$settings)
-  expect_output(print(r), "PEFA evidence")
-  expect_output(print(r), "No factor count is selected")
+  expect_output(print(r), "PEFA sweep \\(ordinary\\)")
+  ## No display names a chosen count, because the package owns no count rule.
+  expect_false(any(grepl("selected", capture.output(print(r)),
+                         ignore.case = TRUE)))
   expect_output(print(s), "Candidates:")
 })
 
@@ -291,14 +296,17 @@ test_that("pefa bifactor sweep counts group factors without storing K_total", {
   expected_dims <- stats::setNames(3:4, c("2", "3"))
   expect_identical(vapply(r$loadings, ncol, integer(1)), expected_dims)
   expect_identical(vapply(r$pips, ncol, integer(1)), expected_dims)
-  ## Structural evidence lives in $persistence; $transitions is criterion-only.
-  expect_false("collision" %in% names(r$transitions))
+  ## The adjacent row carries all seven structural facts; $persistence
+  ## projects three of them over every direct pair.
+  expect_true(all(c("phi_min", "rmsd", "rmsd_max", "ari", "pip_rmsd",
+                    "unmatched_ssl", "collision") %in% names(r$transitions)))
   expect_type(r$persistence$collision, "logical")
-  expect_true(any(is.finite(unlist(r$persistence[c(
-    "rmsd", "rmsd_max", "phi_min", "ari", "pip_rmsd", "unmatched_ssl"
-  )], use.names = FALSE))))
-  expect_output(print(r), "group factors [(][+] 1 general")
-  expect_output(print(summary(r)), "K_total")
+  expect_true(is.finite(r$persistence$phi["2", "3"]))
+  expect_true(is.finite(r$persistence$rmsd["2", "3"]))
+  expect_output(print(r), "group factors [(][+]1 general")
+  ## K is the group-factor count everywhere; no total-factor column is stored
+  ## or displayed.
+  expect_false(any(grepl("K_total", capture.output(print(summary(r))))))
 })
 
 test_that("the fit object stores each quantity exactly once", {
