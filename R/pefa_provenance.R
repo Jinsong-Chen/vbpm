@@ -36,6 +36,15 @@
 ## the C locale, so the result does not depend on the session's collation, and
 ## `dim` sorts before `dimnames`, which is the one ordering constraint R
 ## enforces on assignment.
+##
+## Value normalization happens here too, after materialization and before any
+## byte ever leaves: IEEE -0 and +0 are `identical()` and `==` yet serialize
+## differently, and the same text carried as latin1 rather than UTF-8 is again
+## `identical()` (R translates when it compares) yet serializes to different
+## bytes under a different declared encoding. Either one would make an
+## unchanged scientific payload look mutated. Names and dimnames need no
+## special case: both are attributes, so the recursion below feeds them back
+## through this same branch at every level.
 .pefa_canonical <- function(x) {
   if (isS4(x) || is.function(x) || is.environment(x)) return(x)
   a <- attributes(x)
@@ -44,9 +53,18 @@
     x <- lapply(x, .pefa_canonical)
   } else if (is.atomic(x) && length(x) > 0L) {
     x[1L] <- x[1L]   # subassignment expands any compact or deferred form
+    if (is.double(x)) {
+      ## which() drops the NA that NA and NaN return from the comparison, and
+      ## +-Inf compares FALSE, so only true signed zeros are rewritten.
+      zeros <- which(x == 0)
+      if (length(zeros)) x[zeros] <- 0
+    } else if (is.character(x)) {
+      x <- enc2utf8(x)
+    }
   }
   if (!is.null(a)) {
     a <- lapply(a, .pefa_canonical)
+    names(a) <- enc2utf8(names(a))
     attributes(x) <- a[order(names(a), method = "radix")]
   }
   x

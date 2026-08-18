@@ -75,6 +75,12 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
   horizon triangle, and read per-candidate sums of squared loadings.
   Compact `print()`, `summary()`, and `plot()` methods complete the set; none
   of them announces a selected count, because none is chosen.
+- **`verify_pefa()`** — the integrity checker for a stored evidence object. It
+  rebuilds `$transitions` and `$persistence` from the retained primitives with
+  the installed package, recomputes the `Q0`, settings, evidence, and lineage
+  fingerprints, and optionally re-derives the standardized-data hash from the
+  original `Y`. It returns `invisible(TRUE)` or names the component that failed;
+  it never mutates the object, hands back rebuilt evidence, or makes a decision.
 - **`sim_fa()`** and **`sim_lvm()`** — two complementary data generators.
   `sim_fa()` is driven by the loading *pattern* (items per factor, alternating
   cross-loadings, minor factors) and can generate **higher-order/testlet**
@@ -126,8 +132,8 @@ Then:
 ```r
 library(vbpm)
 vignette("vbfa")         # start here
-vignette("pefa")         # choosing the number of factors
-vignette("bifactor")     # bifactor, higher-order, and testlet structures
+vignette("pefa")         # candidate fit evidence and criterion-path readings
+vignette("bifactor")     # bifactor structures and structural-persistence evidence
 vignette("vbmimic")      # covariates predicting the factors
 citation("vbpm")
 ```
@@ -154,8 +160,9 @@ idx <- fit_stats(fit)                # nominal hard-selected count by default
 
 Fits are ordinary named lists with a shared `vbpm_fit` class attached — fields
 such as `fit$Lam`, `fit$pi`, and `fit$Phi` remain public API. Focused vignettes
-cover `vbfa`, factor-number selection (`pefa`), bifactor/higher-order/testlet
-structures, and `vbmimic`.
+cover `vbfa`, the `pefa()` evidence object and the count readings a user can
+compose from it, bifactor/higher-order/testlet structures together with
+all-pairs structural persistence, and `vbmimic`.
 
 MIMIC, with covariates predicting the factors:
 
@@ -218,7 +225,7 @@ round(fit$B, 2)                      # which covariates predict which factors
 
 ## Known limitations
 
-As of 0.8.3:
+As of 0.9.0:
 
 - **Response types.** The estimators model **continuous Gaussian responses**,
   and in-loop missing-data support covers that case in both `vbfa()` and
@@ -227,14 +234,16 @@ As of 0.8.3:
   and augmenting latent responses, which is a modelling extension rather than
   a feature. Simulating them is supported (`cati`/`noc` in `sim_fa()`,
   `ilvl` in `sim_lvm()`); estimating from them is not.
-- **Bifactor factor-number sweeps are a research extension.** Their `K` counts
-  group factors, and their adjacent diagnostics remove the labelled general
+- **Bifactor `pefa()` sweeps are a research extension.** Their `K` counts group
+  factors, and the all-pairs persistence evidence removes the labelled general
   column before applying exactly the same loading/PIP matcher used by an
   ordinary oblique sweep. General and group columns can nevertheless
-  redistribute common variance as `K` changes, so compare the two modes on the
-  same data, backbone, and window rather than assuming that either route must
-  agree. The `bifactor` vignette shows this empirical comparison and the
-  paper-defined two-step ordinary-count then matched-model route.
+  redistribute common variance as `K` changes, so a study that needs both modes
+  should run them on the same data, backbone, and window rather than assume
+  that either route must agree. The `bifactor` vignette does not run that
+  two-mode comparison: it builds ordinary oblique evidence under two backbones
+  (anchor-only and anchor-zero), reads it under several explicit decision
+  profiles, and shows the later matched-model step as an unexecuted template.
 - **No DIF paths in `vbmimic()`.** Covariates predict the *factors*
   (`Q_B`, i.e. impact); there are no direct covariate-to-item paths, so the
   model cannot currently express or detect differential item functioning.

@@ -144,9 +144,9 @@ vbmimic(Y, Xm, Q_A, Q_B)
   `ELBO`, `objective`, ...) and a single `n_active_coef` — the count of
   soft-selected measurement plus structural coefficients, not a full
   parameter count, and not to be fed to an information criterion. `pefa()`
-  has no such accommodation: it is built around `vbfa()`'s single `Q`, not a
-  measurement/structural pair, so it refuses `vbmimic` fits outright rather
-  than selecting a factor count that does not apply to this model. An
+  has no such accommodation: it sweeps `vbfa()` over a window from a single
+  backbone `Q0`, not a measurement/structural pair, so there is no MIMIC
+  factor-count evidence to return. An
   implemented ELBO for `vbmimic()` is on the roadmap.
 
 ## References

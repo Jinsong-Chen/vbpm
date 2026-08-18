@@ -72,6 +72,11 @@ names(p$provenance)
   larger is better for every displayed gain.
 - `$loadings` and `$pips` are named by the actual candidate count.
 
+Every `pefa()` call also returns a third table, `$persistence`, holding one
+structural comparison for each ordered pair of candidates; its columns are
+documented in `?pefa` and it is read in `vignette("bifactor")`, so this vignette
+leaves it aside rather than implying the object has only two tables.
+
 The percentage gain is a display and decision aid, not an additional fit
 criterion. It is relative to the largest positive gain in this fitted window;
 changing the window can therefore change both its denominator and a later
@@ -163,11 +168,19 @@ The first row uses the PEFA fit paper v1's 10%/two-gain settings under the
 0.9.0 requires complete look-ahead and returns `NA_integer_` rather than a
 boundary count when no complete strict crossing exists. The second row uses the
 helper defaults. The next three hold those settings fixed while changing the
-hard/soft criterion, and the final four abandon the gain rule entirely. These
-profiles can agree, but agreement is an empirical property of this path rather
-than a package guarantee. When they differ, report the different counts and
-the evidence responsible for the difference; do not silently choose the one
-that gives the preferred downstream model.
+hard/soft criterion, and the final four abandon the gain rule entirely.
+
+**These readings do not all agree.** Eight of the nine return `K = 4`; the
+exception is `raw_aic_minimum`, which returns `K = 6`. Both are correct
+readings of the same evidence. Raw hard AIC keeps drifting down past four
+candidates before it turns, so its unconditional minimum lands at six, while
+the gain rule asks a different question: those late AIC improvements are only
+0.09% and 1.6% of the largest gain on that path, far below any cut displayed
+here, so every gain reading stops at four. Nothing in the object arbitrates
+between an extremum rule and a sustained-drop rule; the profile does. Report
+the counts that differ together with the evidence responsible for the
+difference, and do not silently keep the one that gives the preferred
+downstream model.
 
 The source hash is `NA` only because this installed vignette is not a sealed
 research registry. A paper registry must record the exact source version and
@@ -193,6 +206,12 @@ data.frame(
   )
 )
 ```
+
+On this path the reading does not move: every displayed combination returns
+`K = 4`, which is a fact about how sharply this ELBO path bends rather than a
+property of the rule. `?select_K_elbow` carries small constructed paths where
+the same arguments do change the answer, including one where requiring the drop
+to persist moves the count and one where no candidate qualifies at all.
 
 This table is a sensitivity display, not permission to select `delta` after
 seeing which count is most attractive. For a confirmatory use, state the
@@ -285,6 +304,11 @@ data.frame(
   requested_sustain = count_readings$sustain[gain_rows]
 )
 ```
+
+Here every gain reading lands strictly inside the window, with three further
+candidates behind it, so none of them is an artefact of where the bracket was
+drawn. A reading at `min(K_path)` or `max(K_path)`, or an `NA` from a `sustain`
+the window cannot support, would need the opposite report.
 
 If the prespecified analysis requires more headroom, change the bracket and
 obtain a new complete evidence object over the expanded window. In vbpm 0.9.0

@@ -168,6 +168,62 @@ test_that("the input hashes bind the data, its order, and the backbone", {
                          .prov_first$provenance$Q0_sha256))
 })
 
+test_that("signed zero and source encoding cannot move a hash", {
+  h <- vbpm:::.pefa_sha256
+
+  ## -0 and 0 are `identical()` and `==` but serialize to different bytes, so
+  ## before normalization an unchanged payload carrying one looked mutated.
+  expect_true(identical(0, -0))
+  expect_identical(h(0), h(-0))
+  expect_identical(h(c(1, 0, 3)), h(c(1, -0, 3)))
+  expect_identical(h(matrix(c(0, 1, 2, 3), 2)), h(matrix(c(-0, 1, 2, 3), 2)))
+
+  ## NA, NaN and both infinities pass through the normalization untouched.
+  canonical <- vbpm:::.pefa_canonical(c(NA, NaN, Inf, -Inf, 1, -0))
+  expect_true(is.na(canonical[1L]) && !is.nan(canonical[1L]))
+  expect_true(is.nan(canonical[2L]))
+  expect_identical(canonical[3L], Inf)
+  expect_identical(canonical[4L], -Inf)
+  expect_identical(canonical[5L], 1)
+  expect_identical(1 / canonical[6L], Inf)   # the -0 really did become +0
+  expect_false(identical(h(NaN), h(NA_real_)))
+
+  ## The same text in latin1 and in UTF-8 is one value to R -- comparison
+  ## translates -- but serialize() writes the declared encoding and the source
+  ## bytes.  Values, names, and dimnames must all normalize.
+  latin <- "caf\xe9"
+  Encoding(latin) <- "latin1"
+  utf8 <- enc2utf8(latin)
+  expect_true(identical(latin, utf8))
+  expect_false(identical(Encoding(latin), Encoding(utf8)))
+  expect_identical(h(latin), h(utf8))
+
+  named_a <- c(1, 2)
+  named_b <- c(1, 2)
+  names(named_a) <- c(latin, "b")
+  names(named_b) <- c(utf8, "b")
+  expect_true(identical(named_a, named_b))
+  expect_identical(h(named_a), h(named_b))
+
+  dim_a <- matrix(1:4, 2, dimnames = list(c(latin, "r2"), c("c1", latin)))
+  dim_b <- matrix(1:4, 2, dimnames = list(c(utf8, "r2"), c("c1", utf8)))
+  expect_true(identical(dim_a, dim_b))
+  expect_identical(h(dim_a), h(dim_b))
+
+  ## Nested one level deeper, which is how the evidence payload carries its
+  ## matrices, and with a signed zero in the same object.
+  expect_identical(h(list(a = list(b = dim_a, s = latin, z = -0))),
+                   h(list(a = list(b = dim_b, s = utf8, z = 0))))
+
+  ## The normalization is not a blunt instrument: genuinely different values,
+  ## names, and dimnames still hash apart.
+  expect_false(identical(h(latin), h("cafe")))
+  expect_false(identical(h(c(1, 0, 3)), h(c(1, 1e-300, 3))))
+  renamed <- named_a
+  names(renamed) <- c("a", "b")
+  expect_false(identical(h(named_a), h(renamed)))
+})
+
 test_that("the lineage hash protects only the lineage declaration", {
   a <- .prov_first$provenance
   child <- vbpm:::.pefa_provenance(

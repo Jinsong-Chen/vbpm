@@ -28,9 +28,10 @@
 #' defaults below are conveniences of a criterion-generic calculator, not a
 #' claim that one setting is universally preferable.
 #'
-#' @param K Candidate factor counts: a finite, unique, integer-valued numeric
-#'   vector that is consecutive once sorted. Any input order is accepted, since
-#'   `K` and `score` are sorted by `K` before gains are computed.
+#' @param K Candidate factor counts: a finite, unique, positive,
+#'   integer-valued numeric vector, representable as R integers and consecutive
+#'   once sorted. Any input order is accepted, since `K` and `score` are sorted
+#'   by `K` before gains are computed.
 #' @param score The criterion at each candidate in `K`, oriented so that larger
 #'   is better; pass the negative of an information criterion. Must be finite,
 #'   the same length as `K`, and on a scale whose adjacent differences remain
@@ -38,7 +39,7 @@
 #' @param delta Threshold as a percentage of the largest marginal gain on the
 #'   path: one finite number in `[0, 100]`.
 #' @param sustain Number of consecutive sub-threshold gains required: one
-#'   positive whole number.
+#'   positive whole number, representable as an R integer.
 #'
 #' @return The smallest qualifying count, as a length-one integer, or
 #'   `NA_integer_` when no count qualifies. There are three `NA_integer_`
@@ -80,6 +81,15 @@
 #' @seealso [pefa()]
 #' @export
 select_K_elbow <- function(K, score, delta = 20, sustain = 1) {
+  ## is.numeric() is already FALSE for a complex vector, so complex input would
+  ## otherwise fall through the generic checks below under a message naming the
+  ## wrong problem. Rejecting it by name is a contract requirement and keeps
+  ## the diagnosis honest for the one caller who ever hits it.
+  if (is.complex(K) || is.complex(score) || is.complex(delta) ||
+      is.complex(sustain)) {
+    stop("K, score, delta, and sustain must be real, not complex.",
+         call. = FALSE)
+  }
   ## A matrix would silently change what diff() means, so paths must be plain
   ## numeric vectors.
   path_vector <- function(x) is.numeric(x) && is.null(dim(x))
@@ -91,9 +101,17 @@ select_K_elbow <- function(K, score, delta = 20, sustain = 1) {
   }
   if (!length(K)) stop("K must not be empty.", call. = FALSE)
   if (!all(is.finite(K))) stop("K must be finite.", call. = FALSE)
+  ## The range test precedes every as.integer() below: past the R-integer range
+  ## as.integer() returns NA_integer_ with a coercion warning, and that NA
+  ## would reach the rule as a missing value rather than as an argument error.
   if (any(K != round(K)) || any(abs(K) > .Machine$integer.max)) {
     stop("K must contain whole numbers representable as integers.",
          call. = FALSE)
+  }
+  ## A factor count is positive by definition, and pefa() never sweeps below 1,
+  ## so a nonpositive candidate is a caller error rather than a usable path.
+  if (any(K <= 0)) {
+    stop("K must contain positive whole numbers.", call. = FALSE)
   }
   if (anyDuplicated(K)) stop("K must not contain duplicates.", call. = FALSE)
   if (!all(is.finite(score))) stop("score must be finite.", call. = FALSE)
@@ -101,9 +119,15 @@ select_K_elbow <- function(K, score, delta = 20, sustain = 1) {
       delta < 0 || delta > 100) {
     stop("delta must be a single number in [0, 100].", call. = FALSE)
   }
+  ## Same pre-coercion range rule as K: as.integer(3e10) is NA_integer_ plus a
+  ## coercion warning, and that NA would then propagate into `last_start` and
+  ## surface as "missing value where TRUE/FALSE needed" instead of a controlled
+  ## argument error.
   if (length(sustain) != 1L || !is.numeric(sustain) || !is.finite(sustain) ||
-      sustain < 1 || sustain != round(sustain)) {
-    stop("sustain must be a single positive whole number.", call. = FALSE)
+      sustain < 1 || sustain != round(sustain) ||
+      sustain > .Machine$integer.max) {
+    stop("sustain must be a single positive whole number no larger than ",
+         .Machine$integer.max, ".", call. = FALSE)
   }
   sustain <- as.integer(sustain)
 

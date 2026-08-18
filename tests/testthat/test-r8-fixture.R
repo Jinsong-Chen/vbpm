@@ -1,10 +1,13 @@
-## The R8 integration fixture (plan section 6.1).
+## The R8 integration fixture (plan section 6.1 and release-plan section 8.1).
 ##
-## inst/extdata/vbpm_r8_fixture.rds is a named list of sweeps whose loading and
-## PIP matrices were built by hand, never fitted.  Re-running the matcher and
-## the two table builders on those stored matrices therefore exercises only
-## R/pefa_match.R, R/pefa.R's builders, and the persistence() pivot -- vbfa()
-## is never called, so the frozen expectations are BLAS-stable.
+## inst/extdata/vbpm_r8_fixture.rds holds `$members`, a named list of sweeps
+## whose loading and PIP matrices were built by hand, never fitted, and
+## `$integrity`, one complete sealed evidence object carrying the
+## discriminating max-congruence case.  Re-running the matcher and the two
+## table builders on those stored matrices therefore exercises only
+## R/pefa_match.R, R/pefa.R's builders, the persistence() pivot, and
+## verify_pefa() -- vbfa() is never called, so the frozen expectations are
+## BLAS-stable.
 ##
 ## Comparison policy, as stated in section 6.1 and in ?pefa: identical() for
 ## integers, logicals, status/reason character vectors, `r`, dimnames, storage
@@ -101,6 +104,11 @@ test_that("the R8 fixture ships every member section 6.1 requires", {
 
   expect_identical(fx$fixture_version, "vbpm_r8_fixture_1")
   expect_identical(fx$evidence_schema_id, "vbpm_pefa_evidence_1")
+  ## The file holds the low-level members and the one sealed integrity case,
+  ## and nothing else: an unannounced component would travel to R8 unread.
+  expect_identical(names(fx),
+                   c("fixture_version", "evidence_schema_id", "metrics",
+                     "double_pair_cols", "members", "integrity"))
   expect_identical(fx$metrics,
                    c("phi_min", "rmsd", "rmsd_max", "ari", "pip_rmsd",
                      "unmatched_ssl", "n_collisions"))
@@ -519,4 +527,280 @@ test_that("the frozen tables are stable across repeat matcher runs", {
     second <- r8_rebuild(member)$persistence
     expect_identical(first, second, info = nm)
   }
+})
+
+
+## ---------------------------------------------------------------------------
+## The section 8.1 integrity case.
+##
+## Everything above re-runs the matcher on hand-built matrices.  The integrity
+## case is the other half of the fixture: one complete, classed, sealed pefa
+## object that the INSTALLED package must accept, whose two-candidate geometry
+## decides between the 0.9.0 max-absolute-congruence rule and the rule 0.8.3
+## retracted.  The object is constructed and re-sealed rather than fitted --
+## no variational fit returns four exact loading columns -- but every hash it
+## carries was computed by the package's own sealing code over the stored
+## content, and $Y is the real matrix whose standardization produced the
+## stored data fingerprint.  data-raw/make_r8_fixture.R argues the route in
+## full and re-runs this gate before it writes the file.
+##
+## Reached through ::: so the tests resolve whether or not NAMESPACE has been
+## regenerated from the @export tag; test-pefa-verify.R asserts the export
+## itself.
+.r8_verify <- vbpm:::verify_pefa
+
+r8_integrity <- function() {
+  integrity <- r8_fixture()$integrity
+  if (is.null(integrity)) {
+    skip("The installed fixture carries no integrity case.")
+  }
+  integrity
+}
+
+
+test_that("the fixture ships the section 8.1 integrity case whole", {
+  it <- r8_integrity()
+
+  expect_identical(
+    names(it),
+    c("description", "route", "features", "K0", "stability_eps", "columns",
+      "rules", "object", "Y", "expected", "matcher_case", "retracted_copy",
+      "retracted_copy_note")
+  )
+  ## The fixture states its own construction: a reader must not have to infer
+  ## from the numbers that the candidates were built rather than fitted.
+  expect_match(it$route, "Constructed and re-sealed, not fitted", fixed = TRUE)
+  expect_match(it$retracted_copy_note, "DELIBERATELY CORRUPT", fixed = TRUE)
+
+  ## A complete current-schema object, in construction order, with the twelve
+  ## provenance fields and the ten settings.
+  obj <- it$object
+  expect_s3_class(obj, "pefa")
+  expect_identical(names(obj),
+                   c("sweep", "transitions", "persistence", "loadings",
+                     "pips", "Q0", "settings", "provenance"))
+  expect_identical(
+    names(obj$provenance),
+    c("evidence_schema_id", "engine_semantics_id", "package_version",
+      "package_build_id", "standardized_data_sha256", "Q0_sha256",
+      "settings_sha256", "evidence_sha256", "lineage_sha256",
+      "parent_evidence_sha256", "reused_K", "newly_fitted_K")
+  )
+  expect_identical(obj$provenance$evidence_schema_id, "vbpm_pefa_evidence_1")
+  expect_identical(obj$provenance$engine_semantics_id, "vbpm_pefa_engine_0.9")
+  expect_identical(obj$provenance$newly_fitted_K, 2:3)
+  expect_identical(obj$provenance$reused_K, integer(0))
+  expect_identical(obj$provenance$parent_evidence_sha256, NA_character_)
+  expect_identical(
+    names(obj$settings),
+    c("bifactor", "general", "v0", "max_it", "convChk", "tolVal", "tau",
+      "stability_eps", "rank_adjust", "rank_max_J")
+  )
+  expect_identical(obj$settings$stability_eps, 0.10)
+  expect_false(obj$settings$bifactor)
+
+  ## Canonical dimensions: J = 6 items, a one-column backbone, a two-candidate
+  ## window, and the single ordered pair that window admits.
+  expect_identical(dim(obj$Q0), c(6L, 1L))
+  expect_identical(it$K0, ncol(obj$Q0))
+  expect_true(is.integer(obj$Q0))
+  expect_identical(obj$sweep$K, 2:3)
+  expect_identical(names(obj$loadings), c("2", "3"))
+  expect_identical(names(obj$pips), names(obj$loadings))
+  expect_identical(dim(obj$loadings[["2"]]), c(6L, 2L))
+  expect_identical(dim(obj$loadings[["3"]]), c(6L, 3L))
+  expect_identical(dimnames(obj$loadings[["3"]]),
+                   list(paste0("item_", 1:6), c("F1", "F2", "F3")))
+  expect_identical(nrow(obj$persistence), 1L)
+  expect_identical(nrow(obj$transitions), 1L)
+
+  ## Y is a real matrix in the object's item order, not a placeholder.
+  expect_true(is.matrix(it$Y) && is.numeric(it$Y))
+  expect_identical(ncol(it$Y), nrow(obj$Q0))
+  expect_identical(colnames(it$Y), rownames(obj$Q0))
+  expect_false(anyNA(it$Y))
+
+  ## The fixture's self-description is the object's own geometry, so the two
+  ## can never drift into disagreeing about which case this is.
+  expect_equal(unname(obj$loadings[["2"]][, 1]), it$columns$backbone,
+               tolerance = 1e-15)
+  expect_equal(unname(obj$loadings[["2"]][, 2]), it$columns$source,
+               tolerance = 1e-15)
+  expect_equal(unname(obj$loadings[["3"]][, 1]), it$columns$backbone,
+               tolerance = 1e-15)
+  expect_equal(unname(obj$loadings[["3"]][, 2]), it$columns$target_1,
+               tolerance = 1e-15)
+  expect_equal(unname(obj$loadings[["3"]][, 3]), it$columns$target_2,
+               tolerance = 1e-15)
+})
+
+
+test_that("the integrity geometry discriminates the two rules", {
+  it <- r8_integrity()
+  a <- it$columns$source
+  t1 <- it$columns$target_1
+  t2 <- it$columns$target_2
+
+  ## Plan section 8.1's four numbers, recomputed from the shipped columns.
+  cong <- function(x, y) abs(sum(x * y)) / sqrt(sum(x^2) * sum(y^2))
+  expect_equal(sum((a - t1)^2), 0.72, tolerance = 1e-12)
+  expect_equal(sum((a - t2)^2), 0.095, tolerance = 1e-12)
+  expect_equal(cong(a, t1), 1, tolerance = 1e-12)
+  expect_equal(cong(a, t2), 0.9330078, tolerance = 1e-7)
+
+  ## The disagreement is the point: the nearer target is the less congruent
+  ## one, and every column clears the eligibility screen.
+  expect_lt(sum((a - t2)^2), sum((a - t1)^2))
+  expect_gt(cong(a, t1), cong(a, t2))
+  expect_gte(sum(a^2), it$stability_eps)
+  expect_gte(sum(t1^2), it$stability_eps)
+  expect_gte(sum(t2^2), it$stability_eps)
+
+  ## The frozen answers are the two rules' answers, far apart.
+  expect_equal(it$rules$phi_min, 1, tolerance = 1e-12)
+  expect_identical(it$rules$retracted_phi_min, 0.93300782)
+  expect_equal(it$rules$retracted_phi_min, cong(a, t2), tolerance = 1e-8)
+  expect_gt(abs(it$rules$phi_min - it$rules$retracted_phi_min), 0.06)
+})
+
+
+test_that("the installed package recomputes phi_min = 1, not 0.9330078", {
+  fx <- r8_fixture()
+  it <- r8_integrity()
+  obj <- it$object
+
+  ## Recomputed with the installed builders from the stored primitives --
+  ## never read out of the frozen table.
+  rebuilt <- vbpm:::.pefa_persistence_table(
+    obj$sweep, obj$loadings, obj$pips, obj$Q0, ncol(obj$Q0),
+    obj$settings$stability_eps, obj$settings$bifactor
+  )
+  expect_frozen_table(rebuilt, obj$persistence, fx$double_pair_cols,
+                      "integrity:sealed")
+  expect_frozen_table(rebuilt, it$expected$persistence, fx$double_pair_cols,
+                      "integrity:frozen")
+
+  row <- r8_row(rebuilt, 2L, 3L)
+  expect_equal(row$phi_min, 1, tolerance = 1e-12)
+  expect_gt(abs(row$phi_min - it$rules$retracted_phi_min), 0.06)
+  expect_false(isTRUE(all.equal(row$phi_min, it$rules$retracted_phi_min,
+                                tolerance = 1e-6)))
+
+  ## The same choice shows in three independent places on the row: how many
+  ## pairs were scored, which target was left over, and how big it is.
+  expect_identical(row$n_pairs, 2L)
+  expect_identical(row$unmatched_n, 1L)
+  expect_equal(row$unmatched_ssl, sum(it$columns$target_2^2),
+               tolerance = 1e-12)
+  expect_false(isTRUE(all.equal(row$unmatched_ssl, sum(it$columns$target_1^2),
+                                tolerance = 1e-6)))
+  expect_identical(row$pair_status, "available")
+  expect_identical(row$collision, FALSE)
+  expect_false(row$backbone_degenerate)
+
+  ## The triangle a reader prints carries the same number.
+  triangle <- persistence(obj, "phi_min")
+  expect_identical(dimnames(triangle), list(c("2", "3"), c("2", "3")))
+  expect_equal(triangle[["2", "3"]], 1, tolerance = 1e-12)
+})
+
+
+test_that("the low-level discriminating call reproduces the sealed row", {
+  it <- r8_integrity()
+  case <- it$matcher_case
+
+  direct <- function() {
+    vbpm:::.pefa_pair_facts(
+      lam_from = case$lam_from, lam_to = case$lam_to,
+      pip_from = case$pip_from, pip_to = case$pip_to,
+      reg_from = case$reg_from, reg_to = case$reg_to,
+      K0 = case$K0, stability_eps = case$stability_eps,
+      loading_ok_from = TRUE, loading_ok_to = TRUE,
+      pip_ok_from = TRUE, pip_ok_to = TRUE
+    )
+  }
+  facts <- direct()
+
+  ## Every field, frozen: the raw matcher is covered beside the sealed object.
+  expect_identical(facts[setdiff(names(facts), ".assign")], case$expected)
+  expect_identical(facts$.assign, case$expected_assign)
+
+  ## The assignment is the whole discriminator. Source column 2 takes target
+  ## column 2 (t1, congruence 1); the retracted rule would have taken the
+  ## nearer column 3.
+  expect_identical(facts$.assign$target, c(1L, 2L))
+  expect_identical(facts$.assign$target[2L], it$rules$max_congruence_target)
+  expect_false(identical(facts$.assign$target[2L],
+                         it$rules$min_distance_target))
+  expect_equal(facts$.assign$congruence[2L], 1, tolerance = 1e-12)
+  expect_equal(facts$phi_min, 1, tolerance = 1e-12)
+
+  ## And it is the same number the sealed table stores.
+  expect_identical(facts$phi_min, it$object$persistence$phi_min[1L])
+  expect_identical(facts$phi_min, it$expected$phi_min)
+  expect_identical(facts$unmatched_n, it$expected$unmatched_n)
+  expect_identical(facts$n_pairs, it$expected$n_pairs)
+
+  ## Repeat calls are identical: the tie rule leaves nothing to chance.
+  expect_identical(direct(), facts)
+})
+
+
+test_that("the sealed integrity object verifies against the installation", {
+  it <- r8_integrity()
+  obj <- it$object
+
+  expect_true(.r8_verify(obj))
+  expect_true(.r8_verify(obj, it$Y))
+  expect_invisible(.r8_verify(obj))
+
+  ## The data hash is checked, not assumed: a perturbed or permuted Y is
+  ## refused, so the passing call above is evidence about this matrix.
+  expect_error(.r8_verify(obj, it$Y + 1),
+               "`Y` does not reproduce `$provenance$standardized_data_sha256`",
+               fixed = TRUE)
+  expect_error(.r8_verify(obj, it$Y[, c(2:6, 1)]),
+               "`Y` does not reproduce", fixed = TRUE)
+
+  ## Verification is inert, so a fixture read twice is the same fixture.
+  before <- serialize(obj, NULL)
+  .r8_verify(obj)
+  .r8_verify(obj, it$Y)
+  expect_identical(serialize(obj, NULL), before)
+})
+
+
+test_that("the retracted-rule copy fails on persistence and evidence", {
+  it <- r8_integrity()
+
+  ## The shipped negative copy, and one made here from the good object: the
+  ## first proves what the artifact carries, the second that the failure is a
+  ## property of the value rather than of how the copy was stored.
+  local_copy <- it$object
+  local_copy$persistence$phi_min[1L] <- it$rules$retracted_phi_min
+
+  for (bad in list(it$retracted_copy, local_copy)) {
+    expect_identical(bad$persistence$phi_min[1L], 0.93300782)
+    message <- tryCatch(.r8_verify(bad), error = conditionMessage)
+    expect_true(is.character(message))
+    ## Controlled: the rebuilt table disagrees, and the sealed payload hash
+    ## disagrees with it. Two findings, both named, and no other complaint.
+    expect_match(message, "failed 2 integrity checks", fixed = TRUE)
+    expect_match(message, "`$persistence` disagrees with the table rebuilt",
+                 fixed = TRUE)
+    expect_match(message, "column `phi_min` differs beyond tolerance",
+                 fixed = TRUE)
+    expect_match(message, "`$provenance$evidence_sha256` does not match",
+                 fixed = TRUE)
+    ## Not a shape, schema, or engine complaint: this is a valid object
+    ## carrying one wrong number.
+    expect_false(grepl("evidence_schema_id", message, fixed = TRUE))
+    expect_false(grepl("engine_semantics_id", message, fixed = TRUE))
+    expect_false(grepl("does not have the current evidence-object shape",
+                       message, fixed = TRUE))
+  }
+
+  ## The good object is untouched by any of it.
+  expect_true(.r8_verify(it$object))
+  expect_equal(it$object$persistence$phi_min[1L], 1, tolerance = 1e-12)
 })

@@ -239,7 +239,10 @@
   if (!length(finite)) return(rep(NA_real_, length(gain)))
   gmax <- max(finite)
   if (!(gmax > 0)) return(rep(NA_real_, length(gain)))
-  out <- 100 * gain / gmax
+  ## Divide first.  For gains near the largest finite double, 100 * gain
+  ## overflows to Inf before the division ever happens, blanking a ratio that
+  ## is perfectly representable; gain / gmax is bounded by 1 in magnitude.
+  out <- 100 * (gain / gmax)
   out[!is.finite(out)] <- NA_real_
   out
 }
@@ -398,6 +401,325 @@
 #' gating on them; a consumer wanting converged endpoints filters on those
 #' columns.
 #'
+#' @section The evidence object:
+#' The returned list holds exactly eight members, in this order: `sweep`,
+#' `transitions`, `persistence`, `loadings`, `pips`, `Q0`, `settings`, and
+#' `provenance`. There is no `selected_K`, no `boundary`, no stored call and
+#' no stored window: the window is `range(x$sweep$K)` and the backbone size
+#' is `K0 = ncol(x$Q0)`.
+#'
+#' \describe{
+#'   \item{`$loadings`, `$pips`}{Named lists keyed by `as.character(K)`. Each
+#'     element is a double `J` by `C_K` matrix, where
+#'     `C_K = K + as.integer(bifactor)`. A missing or malformed matrix
+#'     becomes an all-`NA_real_` matrix of that expected shape. A correctly
+#'     shaped matrix with nonfinite or out-of-range cells keeps its shape
+#'     with only the invalid cells normalized to `NA_real_`, and its
+#'     component status stays `"unavailable"`, so a partial endpoint is never
+#'     mistaken for a complete one. The numeric cells of a valid finite
+#'     matrix returned by a nonconverged fit are retained unchanged.}
+#'   \item{`$Q0`}{The canonical integer backbone, `J` by `K0`, carrying the
+#'     same item and backbone-factor names.}
+#' }
+#'
+#' Canonical names are part of that payload. Item names are `colnames(Y)`
+#' when those are non-missing, nonempty and unique, otherwise `item_1`, ...,
+#' `item_J`; a non-`NULL` `rownames(Q0)` must agree exactly or `pefa()`
+#' errors. Backbone factor names are nonempty unique `colnames(Q0)` when
+#' supplied, otherwise `F1`, ..., `FK0`; appended exploratory factors
+#' continue as `F(K0 + 1)`, ..., `FK`. In bifactor mode the general column is
+#' named `G` and precedes the group columns. Loading and PIP matrices always
+#' share dimnames.
+#'
+#' @section The candidate sweep:
+#' `$sweep` is a data frame with one row per candidate `K`, in increasing
+#' order, and these 27 columns:
+#'
+#' \describe{
+#'   \item{`K`}{integer; the candidate factor count. In bifactor mode this is
+#'     the number of *group* factors, and the stored matrices have `K + 1`
+#'     columns.}
+#'   \item{`ELBO`}{double; the variational objective, larger is better.
+#'     `NA_real_` whenever `elbo_status` is not `"ok"`.}
+#'   \item{`t_nom`, `t`, `t_S`}{double parameter counts from [fit_stats()]:
+#'     nominal, rank-adjusted hard, and soft/effective.}
+#'   \item{`AIC`, `BIC`, `AIC_S`, `BIC_S`}{double information criteria under
+#'     hard (`tau`) and soft selection; smaller is better.}
+#'   \item{`RMSEA`, `SRMR`, `CFI`, `TLI`}{double descriptive fit indices. A
+#'     mathematically legitimate `NA_real_` — undefined degrees of freedom,
+#'     typically — does not by itself make `stats_status` unavailable, and
+#'     any `NaN` or infinite index is normalized to `NA_real_`.}
+#'   \item{`iter`}{integer iterations used, or `NA_integer_` when the engine
+#'     did not report a usable count.}
+#'   \item{`secs`}{double, finite and non-negative; wall-clock seconds for
+#'     that candidate. Machine-dependent, and therefore the one field
+#'     excluded from `evidence_sha256`.}
+#'   \item{`converged`}{logical; `TRUE` for a recognized converged fit,
+#'     `FALSE` for a recognized completed nonconverged fit, and `NA` after a
+#'     fit error or an unrecognizable convergence flag. It is never
+#'     reconstructed from matrix or criterion availability.}
+#'   \item{`backbone_ssl_min`}{double; the smallest SSL among that
+#'     candidate's `K0` position-matched backbone columns — in bifactor mode
+#'     the group block's first `K0`, i.e. stored columns `2:(K0 + 1)`, never
+#'     the general column. `NA_real_` when `K0 = 0` or
+#'     `loading_status != "ok"`. It gives a continuous scale for judging thin
+#'     anchors instead of a single cliff.}
+#'   \item{`fit_status`, `loading_status`, `pip_status`, `elbo_status`,
+#'     `stats_status`}{character, each exactly `"ok"` or `"unavailable"`.}
+#'   \item{`fit_reason`, `loading_reason`, `pip_reason`, `elbo_reason`,
+#'     `stats_reason`}{character; `NA_character_` if and only if the matching
+#'     status is `"ok"`, otherwise one code from the vocabulary below.}
+#' }
+#'
+#' @section Component reason-code vocabulary:
+#' Within a component the reasons are ordered: when more than one defect
+#' applies, the first listed reason wins. `upstream_fit_error` means the fit
+#' itself errored, so that component had no input to inspect.
+#'
+#' \describe{
+#'   \item{fit}{`fit_error`, `malformed_fit`, `nonconverged`. `"ok"` requires
+#'     that the engine returned an object whose recognized finite scalar
+#'     convergence flag (`flag == 1` for [vbfa()]) normalizes to `TRUE`. A
+#'     returned fit lacking such a flag is `malformed_fit`; a recognized flag
+#'     that does not indicate convergence is `nonconverged`. The two are
+#'     different evidence and never collapse into one code.}
+#'   \item{loading}{`upstream_fit_error`, `missing_loading`,
+#'     `malformed_loading`, `nonfinite_loading`. `"ok"` requires a real
+#'     numeric matrix of the exact expected dimensions with every cell
+#'     finite. `malformed_loading` covers wrong type, complex storage, or
+#'     wrong dimensions; `nonfinite_loading` applies only once the schema is
+#'     known good.}
+#'   \item{PIP}{`upstream_fit_error`, `missing_pip`, `malformed_pip`,
+#'     `nonfinite_pip`, `out_of_range_pip`. `"ok"` requires a real numeric
+#'     matrix of the exact loading dimensions, every cell finite, and every
+#'     value in the closed interval `[0, 1]`; a finite value outside it gives
+#'     `out_of_range_pip`.}
+#'   \item{ELBO}{`upstream_fit_error`, `missing_elbo`, `malformed_elbo`,
+#'     `nonfinite_elbo`. `"ok"` requires exactly one real finite numeric
+#'     scalar; `malformed_elbo` means anything else.}
+#'   \item{statistics}{`upstream_fit_error`, `stats_error`,
+#'     `malformed_stats`, `invalid_criterion_stats`. `"ok"` requires that the
+#'     protected [fit_stats()] extraction returned the required named real
+#'     scalars and that every parameter-count and hard/soft information
+#'     criterion is valid. `malformed_stats` means a non-real-numeric result
+#'     or absent/duplicated required names. `invalid_criterion_stats` means
+#'     any of `t_nom`, `t`, `t_S`, `AIC`, `BIC`, `AIC_S`, `BIC_S` is
+#'     nonfinite, `t_nom` or `t` is negative or non-whole-valued, or `t_S` is
+#'     negative; independently valid scalars are kept and only the invalid
+#'     ones are normalized.}
+#' }
+#'
+#' A valid-shaped engine matrix is read in the engine's positional order and
+#' given the canonical dimnames; returned dimname metadata is not a second
+#' schema. `summary()` compacts these ten columns into one `status` label
+#' using the frozen display precedence
+#' `fit -> loading -> pip -> elbo -> stats`, which never changes a stored
+#' status or payload.
+#'
+#' @section Criterion transitions:
+#' `$transitions` is a data frame with one row per **adjacent** pair, so
+#' `W - 1` rows for a `W`-candidate window, and 12 columns: integer `K_from`
+#' and `K_to`, then the five double raw gains `ELBO_gain`, `AIC_gain`,
+#' `BIC_gain`, `AIC_S_gain`, `BIC_S_gain` and their five double percentages
+#' `ELBO_gain_pct`, `AIC_gain_pct`, `BIC_gain_pct`, `AIC_S_gain_pct`,
+#' `BIC_S_gain_pct`.
+#'
+#' The table is criterion-path only; it holds no structural column, and the
+#' underlying counts `t_nom`, `t`, and `t_S` live on `$sweep`. ELBO is
+#' oriented larger-is-better, and every information-criterion gain is
+#' `IC_from - IC_to`, so a positive value favors the larger candidate on
+#' every path. Raw gains are kept alongside the percentages because they are
+#' the primitive from which any cut is computed and they carry the absolute
+#' scale that percentages destroy.
+#'
+#' Percentages are `100 * (gain / gain_max)`, where `gain_max` is the maximum
+#' over the **finite** gains of that path, and are `NA_real_` when
+#' `gain_max <= 0` or no gain on the path is finite. One nonfinite gain
+#' blanks only the edges it touches, never the whole column. The division is
+#' grouped so that gains near the largest finite double do not overflow
+#' before being scaled.
+#'
+#' @section Structural persistence:
+#' `$persistence` is a data frame with one row for **every ordered pair**
+#' `k < l` in the window — `W(W-1)/2` rows — ordered by `K_from` ascending
+#' then `K_to` ascending, and **including rows whose `pair_status` is
+#' `"unavailable"`**: a missing row and an unavailable one are different
+#' evidence, and a downstream join needs the row to exist. Every pair is
+#' computed directly from its two endpoints, never by chaining adjacent
+#' assignments, so the rows at horizon `1` are the adjacent comparisons and the
+#' longer horizons are genuine long-horizon measurements.
+#'
+#' The matcher aligns columns pairwise by sign, `s(a, b) = sign(a'b)`, and
+#' scores the pair set `P_kl` made of the `K0` position-matched backbone
+#' pairs plus one assigned pair for each eligible exploratory source column.
+#' A non-backbone column is **eligible** exactly when `sum(col^2)` is at
+#' least `stability_eps` (equality is eligible, compared exactly). The
+#' backbone is **never screened**: its columns keep their prespecified
+#' positions in both candidates and are always scored, with their thinness
+#' reported through `$sweep$backbone_ssl_min` and the pair-level
+#' `backbone_degenerate` rather than through exclusion. Each eligible source
+#' independently takes the eligible target of largest absolute congruence,
+#' ties broken by smaller aligned RMSD then smaller target index; reuse of a
+#' target is permitted, detected, and reported, never prevented.
+#'
+#' \describe{
+#'   \item{`K_from`, `K_to`, `r`}{integer; the source count `k`, the target
+#'     count `l`, and the horizon `r`, equal to `K_to - K_from`.}
+#'   \item{`n_pairs`}{integer size of `P_kl`: `K0` plus the eligible
+#'     exploratory sources that could be assigned. `NA_integer_` when the
+#'     assignment cannot be computed. It governs the matched-pair metrics
+#'     exactly, so a cell with `n_pairs < K_from` did not score every column
+#'     of the smaller candidate.}
+#'   \item{`phi_min`}{double; the minimum absolute congruence over `P_kl`.
+#'     Non-negative by construction.}
+#'   \item{`rmsd`}{double; the sign-aligned RMSE pooled over every
+#'     item-by-matched-pair cell, `sqrt(sum ||a - s b||^2 / (J * m))` for
+#'     `m = n_pairs`. Not an unsigned norm, not an average of column RMSDs,
+#'     and not exploratory-only.}
+#'   \item{`rmsd_max`}{double; the largest aligned column RMSD over `P_kl`.}
+#'   \item{`ari`}{double adjusted Rand index between two **independently**
+#'     formed partitions, one per endpoint, each assigning every item to the
+#'     column of largest absolute loading among all `K0` backbone columns
+#'     plus every eligible non-backbone column at that endpoint — including
+#'     eligible targets no source selected. It is deliberately not the
+#'     matched subset, and it is clamped to `[-1, 1]`.}
+#'   \item{`pip_rmsd`}{double RMSD between the two PIP matrices over the
+#'     matched item-factor cells that are unspecified (`Q == -1`) at **both**
+#'     endpoints. Fixed cells and unmatched columns are excluded.}
+#'   \item{`unmatched_n`, `unmatched_ssl`}{integer count and double maximum
+#'     column SSL over the non-backbone target columns that no source
+#'     selected, *including columns below the screen*. `unmatched_ssl` is
+#'     `0` when that set is empty.}
+#'   \item{`collision`, `n_collisions`}{logical flag and integer count of
+#'     **reused targets** — three sources landing on one target is one
+#'     collision. `collision` is exactly `n_collisions > 0`. Collision is
+#'     recorded evidence; it blanks no metric and vetoes no comparison.}
+#'   \item{`collision_targets`, `collision_multiplicities`}{character; the
+#'     reused **group-block** target-column indices sorted increasingly and
+#'     joined by commas, and the reuse counts in that same order, formatted
+#'     identically. The two `strsplit(x, ",", fixed = TRUE)` results are
+#'     therefore positionally aligned. Both are `""` for a computed clean
+#'     edge and `NA_character_` only when the assignment itself could not be
+#'     computed.}
+#'   \item{`source_ineligible_n`}{integer; exploratory source columns
+#'     screened out at `K_from`. Requires only that endpoint's loadings.}
+#'   \item{`target_eligible_n`}{integer; eligible exploratory target columns
+#'     at `K_to`. Requires only that endpoint's loadings. A value of `0` with
+#'     eligible sources present means no exploratory assignment could be
+#'     formed and the row retains the backbone-only measurement.}
+#'   \item{`backbone_degenerate`}{logical; `FALSE` when `K0 = 0`, `TRUE` when
+#'     any inspectable valid endpoint has a finite zero-norm backbone column,
+#'     `FALSE` when both valid endpoints establish that none exists, and `NA`
+#'     otherwise. It is the exact-zero boundary of `backbone_ssl_min`, and a
+#'     `TRUE` leaves `pair_status = "available"`.}
+#'   \item{`from_fit_ok`, `to_fit_ok`}{logical endpoint-convergence facts
+#'     copied from `$sweep$converged`, hence `NA` after a fit error or a
+#'     malformed flag. They are **recorded, not applied**: the matcher does
+#'     not consult `fit_status`, and a nonconverged endpoint that returned a
+#'     finite well-formed loading matrix yields the same computation. Filter
+#'     on these columns to obtain a converged-endpoints-only reading.}
+#'   \item{`pair_status`, `pair_reason`}{character; see below.}
+#' }
+#'
+#' @section Pair status and metric-specific computability:
+#' `pair_status` takes exactly two values and has exactly two reason codes:
+#'
+#' \describe{
+#'   \item{`"available"` with `pair_reason = NA_character_`}{Both endpoints
+#'     have `loading_status == "ok"`, so the matching inputs are usable.}
+#'   \item{`"unavailable"` with `pair_reason = "malformed_loading"`}{At least
+#'     one endpoint has `loading_status != "ok"`. This is the sole
+#'     unavailability reason; nonconvergence, collision, a thin or degenerate
+#'     backbone, ineligible sources, and scarce targets never reach it.}
+#' }
+#'
+#' The row-level status says whether matching input is usable, not whether
+#' every optional scalar is defined. Each field then follows its own
+#' dependency, and a missing dependency gives that field its typed `NA`
+#' without blanking an independently defined neighbour:
+#'
+#' \itemize{
+#'   \item endpoint convergence facts are always logical and are `NA` only
+#'     for a fit error or a malformed convergence flag;
+#'   \item `source_ineligible_n` and `target_eligible_n` need only their own
+#'     valid loading endpoint;
+#'   \item the assignment, `n_pairs`, the collision fields, and the unmatched
+#'     fields need both valid loadings;
+#'   \item `phi_min` additionally needs a nonempty `P_kl` and a nonzero norm
+#'     for every scored pair, so a zero-norm scored backbone column makes it
+#'     `NA_real_` while the aligned `rmsd` and `rmsd_max` stay defined;
+#'   \item `rmsd` and `rmsd_max` need a nonempty `P_kl`;
+#'   \item `ari` needs both valid loadings and a retained partition column at
+#'     each endpoint;
+#'   \item `pip_rmsd` additionally needs both PIP endpoints valid and at
+#'     least one jointly unspecified matched cell.
+#' }
+#'
+#' For a computed empty `P_kl` the row stores `n_pairs = 0L`, `NA_real_` for
+#' `phi_min`, `rmsd`, `rmsd_max` and `pip_rmsd`, `collision = FALSE`,
+#' `n_collisions = 0L`, `""` for both collision strings, and the
+#' independently computable unmatched facts — and still reports
+#' `pair_status = "available"` when both loading matrices are valid.
+#'
+#' In bifactor mode the labelled general column is stripped before any of
+#' this, so every persistence index and count refers to the group block;
+#' dimension and finiteness validation happens on the stored `K + 1` matrix
+#' beforehand.
+#'
+#' @section Run settings:
+#' `$settings` is a named list of exactly the ten controls that can change a
+#' returned number, in this order: `bifactor`, `general`, `v0`, `max_it`,
+#' `convChk`, `tolVal`, `tau`, `stability_eps`, `rank_adjust`, and
+#' `rank_max_J`. `general` is `NULL` unless `bifactor = TRUE`, in which case
+#' it is the resolved length-`J` integer design. `pefa()` accepts no
+#' pass-through control absent from this list, so a run is interpretable from
+#' the object alone.
+#'
+#' `verbose` is the one formal deliberately **omitted**: it changes console
+#' output and no returned value, so recording it would make two otherwise
+#' identical runs hash differently for a purely cosmetic reason.
+#'
+#' Every integer-backed formal — `Kmin`, `Kmax`, `max_it`, `rank_max_J` — is
+#' validated as real, finite, whole-valued and within
+#' `.Machine$integer.max` **before** coercion; a complex or out-of-range
+#' value is a controlled argument error, never a coercion warning or an
+#' accidental `NA_integer_`. The stored settings are then normalized:
+#' `rank_max_J` is one unnamed integer, the logical controls are unnamed
+#' logicals, and the numeric controls are unnamed doubles. `100` and `100L`
+#' therefore produce identical `$settings` and identical hashes, as do named
+#' and unnamed spellings of the same value.
+#'
+#' @section Provenance:
+#' `$provenance` is a named list, in this order: `evidence_schema_id`,
+#' `engine_semantics_id`, `package_version`, `package_build_id`,
+#' `standardized_data_sha256`, `Q0_sha256`, `settings_sha256`,
+#' `evidence_sha256`, `lineage_sha256`, `parent_evidence_sha256`, `reused_K`,
+#' and `newly_fitted_K`. The data hash covers the engine-scale standardized
+#' matrix and its missingness mask, not the raw input's units.
+#' `evidence_sha256` covers the three tables, `$loadings`, `$pips`, `$Q0`,
+#' `$settings`, the two identity strings, the package version and the three
+#' input hashes, and excludes the machine-dependent `$sweep$secs`, itself,
+#' and the lineage fields. A root object has
+#' `parent_evidence_sha256 = NA_character_`, `reused_K = integer(0)`, and
+#' `newly_fitted_K = Kmin:Kmax`. Provenance carries no count rule, criterion
+#' preference, cut, threshold, horizon, or collision policy.
+#'
+#' @section Standalone fit_stats provenance:
+#' Inside `pefa()` the resolved `Q`, the data, `tau`, the orthogonality
+#' implied by `bifactor`, `rank_adjust`, and the integer-normalized
+#' `rank_max_J` are all recorded by `$settings` and the provenance hashes.
+#' Called on its own, [fit_stats()] remains a **numeric calculator**: it
+#' returns a named numeric vector and deliberately attaches no partial record
+#' of its invocation controls, because a partial record would imply
+#' self-certification while omitting other result-changing inputs.
+#'
+#' A provenance-sensitive caller therefore owns that record. Beside the
+#' returned vector it stores the resolved `Q` actually used, the data
+#' identity, `tau`, whether the fit was orthogonal, `rank_adjust`, and the
+#' integer-normalized `rank_max_J`, and its consumer gates inspect that
+#' caller-owned record. Do not expect — or add — provenance attributes on the
+#' vector [fit_stats()] returns.
+#'
 #' @param Q0 A `J` by `K0` backbone matrix with entries `1`, `0`, or `-1`.
 #'   `K0 = 0` (fully exploratory) is supported.
 #' @param Y An `N` by `J` data matrix.
@@ -465,18 +787,30 @@ pefa <- function(Q0, Y, Kmin, Kmax, bifactor = FALSE, general = 1,
     stop("Q0 entries must be in {-1, 0, 1}.", call. = FALSE)
   }
 
+  ## Every integer-backed formal is checked as real, finite, whole, and inside
+  ## the representable R-integer range BEFORE as.integer() sees it: past that
+  ## range as.integer() returns NA_integer_ with a coercion warning, which
+  ## would turn an argument mistake into a silent failed-fit evidence object.
+  ## is.complex() is stated explicitly even though is.numeric() already
+  ## excludes complex, because rejecting complex is a contract requirement.
   whole_scalar <- function(value, nm, min_value = 1) {
-    if (length(value) != 1L || !is.numeric(value) || is.complex(value) ||
-        is.na(value) || !is.finite(value) || value < min_value ||
-        value != round(value)) {
-      stop(nm, " must be a single whole number >= ", min_value, ".",
-           call. = FALSE)
+    ok <- length(value) == 1L && is.numeric(value) && !is.complex(value) &&
+      !is.na(value) && is.finite(value) && value >= min_value &&
+      value == round(value) && value <= .Machine$integer.max
+    if (!ok) {
+      stop(nm, " must be a single whole number in [", min_value, ", ",
+           .Machine$integer.max, "].", call. = FALSE)
     }
+    ## as.integer() also drops names and every other attribute, so a named or
+    ## double-typed input cannot change the settings hash for the same run.
     as.integer(value)
   }
   Kmin <- whole_scalar(Kmin, "Kmin")
   Kmax <- whole_scalar(Kmax, "Kmax")
   max_it <- whole_scalar(max_it, "max_it")
+  ## Normalized, not merely validated: 100 and 100L must reach $settings and
+  ## fit_stats() as one and the same unnamed integer.
+  rank_max_J <- whole_scalar(rank_max_J, "rank_max_J")
   if (Kmax < Kmin) {
     stop(sprintf("Kmax (%d) < Kmin (%d): the window must be non-decreasing.",
                  Kmax, Kmin), call. = FALSE)
@@ -520,11 +854,15 @@ pefa <- function(Q0, Y, Kmin, Kmax, bifactor = FALSE, general = 1,
     if (length(value) != 1L || !is.logical(value) || is.na(value)) {
       stop(nm, " must be TRUE or FALSE.", call. = FALSE)
     }
-    value
+    ## as.logical() strips names and any other attribute for the same reason
+    ## as whole_scalar(): a stored setting must not carry input decoration.
+    as.logical(value)
   }
   bifactor <- flag_scalar(bifactor, "bifactor")
   convChk <- flag_scalar(convChk, "convChk")
   verbose <- flag_scalar(verbose, "verbose")
+  ## Already validated by .validate_rank_controls(); this call only normalizes.
+  rank_adjust <- flag_scalar(rank_adjust, "rank_adjust")
 
   if (isTRUE(rank_adjust)) {
     if (J > rank_max_J) {

@@ -58,16 +58,38 @@
   min(1, value)
 }
 
+## The largest power of two not exceeding a finite positive `x`.  Every
+## rescaling below divides by this rather than by the raw magnitude, because
+## dividing a double by an exact power of two only shifts its exponent: the
+## scaled arithmetic then reproduces the unscaled result bit for bit wherever
+## the unscaled one does not overflow, so removing the overflow moves no number
+## that the ordinary fixtures pin.  log2()/floor() can only misjudge at the
+## subnormal edge, where a zero or infinite scale would be worse than an
+## inexact one, so the value itself is the fallback.
+.pefa_pow2_scale <- function(x) {
+  p <- 2^floor(log2(x))
+  if (is.finite(p) && p > 0) p else x
+}
+
 ## alignedRMSD(a, b) = ||a - s(a, b) b|| / sqrt(J), on a rescaled copy.
+##
+## Both columns are divided by one common scale BEFORE the subtraction, and the
+## scale is restored only after the normalized RMSD is formed.  Rescaling the
+## difference instead would be too late: a = (1e308, 1e308) against
+## b = (-1e308, 1e308) has s = 1 and a perfectly representable RMSD of
+## 1.41e308, but the raw difference overflows to Inf first and the whole column
+## then reports NA for a number the double range holds.
 .pefa_aligned_rmsd <- function(a, b, s) {
   J <- length(a)
   if (J == 0L) return(NA_real_)
-  d <- a - s * b
-  scale_d <- max(abs(d))
-  if (!is.finite(scale_d)) return(NA_real_)
-  if (scale_d == 0) return(0)
-  z <- d / scale_d
-  scale_d * sqrt(sum(z^2) / J)
+  scale_ab <- max(abs(a), abs(b))
+  if (!is.finite(scale_ab)) return(NA_real_)
+  if (scale_ab == 0) return(0)
+  scale_ab <- .pefa_pow2_scale(scale_ab)
+  ## Each rescaled entry is now at most 2 in magnitude, so neither the
+  ## difference nor its squares can overflow whatever the input magnitudes.
+  d <- a / scale_ab - s * (b / scale_ab)
+  scale_ab * sqrt(sum(d^2) / J)
 }
 
 ## Adjusted Rand index between two item partitions (section 2.8), with the
@@ -208,8 +230,19 @@
       rmsd_max <- max(pair_rmsd)
       ## The sign-aligned RMSE pooled over every item-by-pair cell,
       ## sqrt(sum ||a - s b||^2 / (J * m)) -- equivalently the root mean of the
-      ## squared column RMSDs, and not their average.
-      rmsd <- sqrt(sum(pair_rmsd^2) / m)
+      ## squared column RMSDs, and not their average.  The sum of squares is
+      ## formed on a common scale, because per-column RMSDs that are each
+      ## finite can still overflow merely by being squared and added: two
+      ## columns at 1.41e200 pool to 1.41e200, not to Inf.
+      rmsd <- if (is.finite(rmsd_max) && rmsd_max > 0) {
+        scale_r <- .pefa_pow2_scale(rmsd_max)
+        scale_r * sqrt(sum((pair_rmsd / scale_r)^2) / m)
+      } else {
+        ## An all-zero pair set, whose exact 0 the fixtures pin, or a column
+        ## RMSD that genuinely exceeded the double range: in both the unscaled
+        ## form already carries the right answer.
+        sqrt(sum(pair_rmsd^2) / m)
+      }
     }
   }
 

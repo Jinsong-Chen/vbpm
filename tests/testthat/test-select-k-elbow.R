@@ -94,6 +94,54 @@ test_that("malformed paths are errors, never NA", {
   expect_error(select_K_elbow(2:5, path, sustain = c(1, 2)), "positive whole")
 })
 
+test_that("oversized integer-backed input errors before any coercion", {
+  path <- cumsum(c(0, 100, 5, 3))
+  ## as.integer(3e10) is NA_integer_ plus a coercion warning.  Before the range
+  ## check that NA reached the look-ahead and surfaced as "missing value where
+  ## TRUE/FALSE needed" -- a downstream failure, not an argument error.
+  expect_error(select_K_elbow(2:5, path, sustain = 3e10),
+               "positive whole number")
+  expect_error(select_K_elbow(2:5, path,
+                              sustain = .Machine$integer.max + 1),
+               "positive whole number")
+  ## Controlled error and no warning: the coercion never happens.
+  for (bad in list(3e10, .Machine$integer.max + 1)) {
+    expect_silent(tryCatch(select_K_elbow(2:5, path, sustain = bad),
+                           error = function(e) NULL))
+  }
+  ## The representable boundary is admissible; it simply finds no answer,
+  ## because no start index has that many gains after it.
+  expect_identical(select_K_elbow(2:5, path,
+                                  sustain = .Machine$integer.max),
+                   NA_integer_)
+
+  ## K carries the same pre-coercion rule, and likewise never warns.
+  expect_error(select_K_elbow(3e10 + 0:3, path), "representable as integers")
+  expect_silent(tryCatch(select_K_elbow(3e10 + 0:3, path),
+                         error = function(e) NULL))
+  expect_error(select_K_elbow(c(2, 3, .Machine$integer.max + 1), path[1:3]),
+               "representable as integers")
+})
+
+test_that("complex and nonpositive input are rejected by name", {
+  path <- cumsum(c(0, 100, 5, 3))
+  ## is.numeric() already excludes complex, but the contract asks for the
+  ## rejection to be explicit rather than incidental.
+  expect_error(select_K_elbow(as.complex(2:5), path), "not complex")
+  expect_error(select_K_elbow(2:5, as.complex(path)), "not complex")
+  expect_error(select_K_elbow(2:5, path, delta = 20 + 0i), "not complex")
+  expect_error(select_K_elbow(2:5, path, sustain = 1 + 0i), "not complex")
+  for (bad in list(as.complex(2:5), 2:5)) {
+    expect_silent(tryCatch(select_K_elbow(bad, path, sustain = 1 + 0i),
+                           error = function(e) NULL))
+  }
+
+  ## A factor count is positive; pefa() never sweeps below 1.
+  expect_error(select_K_elbow(c(0, 1, 2, 3), path), "positive whole numbers")
+  expect_error(select_K_elbow(-1:2, path), "positive whole numbers")
+  expect_identical(select_K_elbow(1:4, path), 2L)
+})
+
 test_that("pefa() never calls the calculator", {
   code <- deparse(pefa)
   expect_false(any(grepl("select_K_elbow", code, fixed = TRUE)))

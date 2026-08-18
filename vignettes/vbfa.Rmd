@@ -21,7 +21,7 @@ spike-and-slab priors select the rest from the data.
 This vignette walks the factor-analysis side of the package: designing a `Q`
 matrix, fitting with `vbfa()`, reading the fit, computing fit statistics with
 `fit_stats()`, and local-dependence (residual-correlation) estimation.
-Selecting the number of factors is covered in `vignette("pefa")`; bifactor and
+Choosing the number of factors is covered in `vignette("pefa")`; bifactor and
 higher-order structures are covered in `vignette("bifactor")`. It ends with an
 empirical example, a look at missing data, and a recipe for turning *graded*
 prior knowledge into a `Q` matrix.
@@ -111,14 +111,20 @@ data.frame(
   max_abs_Lam_diff_vs_default = round(c(
     0,
     max(abs(f_fixed$Lam  - f_default$Lam)),
-    max(abs(f_gentle$Lam - f_default$Lam))), 3)
+    max(abs(f_gentle$Lam - f_default$Lam))), 3),
+  mean_abs_Lam_diff_vs_default = round(c(
+    0,
+    mean(abs(f_fixed$Lam  - f_default$Lam)),
+    mean(abs(f_gentle$Lam - f_default$Lam))), 4)
 )
 ```
 
-On this easy, well-identified simulation all three agree closely: the largest
-loading discrepancy is a few hundredths, concentrated at a single entry near
-the spike/slab boundary, and the average discrepancy is an order of magnitude
-smaller still. Say this honestly: the regularization path earns its keep on
+On this easy, well-identified simulation all three land on the same solution.
+Read the two discrepancy columns together: the *largest* single-entry
+disagreement is a tenth or so of a loading, concentrated near the spike/slab
+boundary where a cell is close to being switched off, while the *mean*
+disagreement across the whole matrix is one to two orders of magnitude
+smaller. One boundary cell moves; the structure does not. Say this honestly: the regularization path earns its keep on
 *hard* landscapes — near-singular designs, weak signal, fits that fail to
 converge within `max_it` — not on easy ones like this. Prefer the gentle path
 over raising `max_it` when a fit misbehaves.
@@ -154,7 +160,8 @@ use one policy throughout a comparison. `pefa()` exposes the same two
 arguments and computes the requested counts before discarding full candidate
 fits.
 
-Selecting the number of factors (the gain rule implemented by `pefa()`) is
+Factor-count evidence over a window (returned by `pefa()`, which applies no
+count rule itself) is
 covered in `vignette("pefa")`; bifactor and higher-order models are covered in
 `vignette("bifactor")`.
 

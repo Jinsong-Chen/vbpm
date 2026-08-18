@@ -7,9 +7,10 @@
 select_K_elbow(K, score, delta = 20, sustain = 1)
 }
 \arguments{
-\item{K}{Candidate factor counts: a finite, unique, integer-valued numeric
-vector that is consecutive once sorted. Any input order is accepted, since
-\code{K} and \code{score} are sorted by \code{K} before gains are computed.}
+\item{K}{Candidate factor counts: a finite, unique, positive,
+integer-valued numeric vector, representable as R integers and consecutive
+once sorted. Any input order is accepted, since \code{K} and \code{score} are sorted
+by \code{K} before gains are computed.}
 
 \item{score}{The criterion at each candidate in \code{K}, oriented so that larger
 is better; pass the negative of an information criterion. Must be finite,
@@ -20,7 +21,7 @@ representable.}
 path: one finite number in \verb{[0, 100]}.}
 
 \item{sustain}{Number of consecutive sub-threshold gains required: one
-positive whole number.}
+positive whole number, representable as an R integer.}
 }
 \value{
 The smallest qualifying count, as a length-one integer, or

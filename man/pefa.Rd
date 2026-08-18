@@ -88,6 +88,343 @@ gating on them; a consumer wanting converged endpoints filters on those
 columns.
 }
 
+\section{The evidence object}{
+
+The returned list holds exactly eight members, in this order: \code{sweep},
+\code{transitions}, \code{persistence}, \code{loadings}, \code{pips}, \code{Q0}, \code{settings}, and
+\code{provenance}. There is no \code{selected_K}, no \code{boundary}, no stored call and
+no stored window: the window is \code{range(x$sweep$K)} and the backbone size
+is \code{K0 = ncol(x$Q0)}.
+
+\describe{
+\item{\verb{$loadings}, \verb{$pips}}{Named lists keyed by \code{as.character(K)}. Each
+element is a double \code{J} by \code{C_K} matrix, where
+\code{C_K = K + as.integer(bifactor)}. A missing or malformed matrix
+becomes an all-\code{NA_real_} matrix of that expected shape. A correctly
+shaped matrix with nonfinite or out-of-range cells keeps its shape
+with only the invalid cells normalized to \code{NA_real_}, and its
+component status stays \code{"unavailable"}, so a partial endpoint is never
+mistaken for a complete one. The numeric cells of a valid finite
+matrix returned by a nonconverged fit are retained unchanged.}
+\item{\verb{$Q0}}{The canonical integer backbone, \code{J} by \code{K0}, carrying the
+same item and backbone-factor names.}
+}
+
+Canonical names are part of that payload. Item names are \code{colnames(Y)}
+when those are non-missing, nonempty and unique, otherwise \code{item_1}, ...,
+\code{item_J}; a non-\code{NULL} \code{rownames(Q0)} must agree exactly or \code{pefa()}
+errors. Backbone factor names are nonempty unique \code{colnames(Q0)} when
+supplied, otherwise \code{F1}, ..., \code{FK0}; appended exploratory factors
+continue as \code{F(K0 + 1)}, ..., \code{FK}. In bifactor mode the general column is
+named \code{G} and precedes the group columns. Loading and PIP matrices always
+share dimnames.
+}
+
+\section{The candidate sweep}{
+
+\verb{$sweep} is a data frame with one row per candidate \code{K}, in increasing
+order, and these 27 columns:
+
+\describe{
+\item{\code{K}}{integer; the candidate factor count. In bifactor mode this is
+the number of \emph{group} factors, and the stored matrices have \code{K + 1}
+columns.}
+\item{\code{ELBO}}{double; the variational objective, larger is better.
+\code{NA_real_} whenever \code{elbo_status} is not \code{"ok"}.}
+\item{\code{t_nom}, \code{t}, \code{t_S}}{double parameter counts from \code{\link[=fit_stats]{fit_stats()}}:
+nominal, rank-adjusted hard, and soft/effective.}
+\item{\code{AIC}, \code{BIC}, \code{AIC_S}, \code{BIC_S}}{double information criteria under
+hard (\code{tau}) and soft selection; smaller is better.}
+\item{\code{RMSEA}, \code{SRMR}, \code{CFI}, \code{TLI}}{double descriptive fit indices. A
+mathematically legitimate \code{NA_real_} — undefined degrees of freedom,
+typically — does not by itself make \code{stats_status} unavailable, and
+any \code{NaN} or infinite index is normalized to \code{NA_real_}.}
+\item{\code{iter}}{integer iterations used, or \code{NA_integer_} when the engine
+did not report a usable count.}
+\item{\code{secs}}{double, finite and non-negative; wall-clock seconds for
+that candidate. Machine-dependent, and therefore the one field
+excluded from \code{evidence_sha256}.}
+\item{\code{converged}}{logical; \code{TRUE} for a recognized converged fit,
+\code{FALSE} for a recognized completed nonconverged fit, and \code{NA} after a
+fit error or an unrecognizable convergence flag. It is never
+reconstructed from matrix or criterion availability.}
+\item{\code{backbone_ssl_min}}{double; the smallest SSL among that
+candidate's \code{K0} position-matched backbone columns — in bifactor mode
+the group block's first \code{K0}, i.e. stored columns \code{2:(K0 + 1)}, never
+the general column. \code{NA_real_} when \code{K0 = 0} or
+\code{loading_status != "ok"}. It gives a continuous scale for judging thin
+anchors instead of a single cliff.}
+\item{\code{fit_status}, \code{loading_status}, \code{pip_status}, \code{elbo_status},
+\code{stats_status}}{character, each exactly \code{"ok"} or \code{"unavailable"}.}
+\item{\code{fit_reason}, \code{loading_reason}, \code{pip_reason}, \code{elbo_reason},
+\code{stats_reason}}{character; \code{NA_character_} if and only if the matching
+status is \code{"ok"}, otherwise one code from the vocabulary below.}
+}
+}
+
+\section{Component reason-code vocabulary}{
+
+Within a component the reasons are ordered: when more than one defect
+applies, the first listed reason wins. \code{upstream_fit_error} means the fit
+itself errored, so that component had no input to inspect.
+
+\describe{
+\item{fit}{\code{fit_error}, \code{malformed_fit}, \code{nonconverged}. \code{"ok"} requires
+that the engine returned an object whose recognized finite scalar
+convergence flag (\code{flag == 1} for \code{\link[=vbfa]{vbfa()}}) normalizes to \code{TRUE}. A
+returned fit lacking such a flag is \code{malformed_fit}; a recognized flag
+that does not indicate convergence is \code{nonconverged}. The two are
+different evidence and never collapse into one code.}
+\item{loading}{\code{upstream_fit_error}, \code{missing_loading},
+\code{malformed_loading}, \code{nonfinite_loading}. \code{"ok"} requires a real
+numeric matrix of the exact expected dimensions with every cell
+finite. \code{malformed_loading} covers wrong type, complex storage, or
+wrong dimensions; \code{nonfinite_loading} applies only once the schema is
+known good.}
+\item{PIP}{\code{upstream_fit_error}, \code{missing_pip}, \code{malformed_pip},
+\code{nonfinite_pip}, \code{out_of_range_pip}. \code{"ok"} requires a real numeric
+matrix of the exact loading dimensions, every cell finite, and every
+value in the closed interval \verb{[0, 1]}; a finite value outside it gives
+\code{out_of_range_pip}.}
+\item{ELBO}{\code{upstream_fit_error}, \code{missing_elbo}, \code{malformed_elbo},
+\code{nonfinite_elbo}. \code{"ok"} requires exactly one real finite numeric
+scalar; \code{malformed_elbo} means anything else.}
+\item{statistics}{\code{upstream_fit_error}, \code{stats_error},
+\code{malformed_stats}, \code{invalid_criterion_stats}. \code{"ok"} requires that the
+protected \code{\link[=fit_stats]{fit_stats()}} extraction returned the required named real
+scalars and that every parameter-count and hard/soft information
+criterion is valid. \code{malformed_stats} means a non-real-numeric result
+or absent/duplicated required names. \code{invalid_criterion_stats} means
+any of \code{t_nom}, \code{t}, \code{t_S}, \code{AIC}, \code{BIC}, \code{AIC_S}, \code{BIC_S} is
+nonfinite, \code{t_nom} or \code{t} is negative or non-whole-valued, or \code{t_S} is
+negative; independently valid scalars are kept and only the invalid
+ones are normalized.}
+}
+
+A valid-shaped engine matrix is read in the engine's positional order and
+given the canonical dimnames; returned dimname metadata is not a second
+schema. \code{summary()} compacts these ten columns into one \code{status} label
+using the frozen display precedence
+\code{fit -> loading -> pip -> elbo -> stats}, which never changes a stored
+status or payload.
+}
+
+\section{Criterion transitions}{
+
+\verb{$transitions} is a data frame with one row per \strong{adjacent} pair, so
+\code{W - 1} rows for a \code{W}-candidate window, and 12 columns: integer \code{K_from}
+and \code{K_to}, then the five double raw gains \code{ELBO_gain}, \code{AIC_gain},
+\code{BIC_gain}, \code{AIC_S_gain}, \code{BIC_S_gain} and their five double percentages
+\code{ELBO_gain_pct}, \code{AIC_gain_pct}, \code{BIC_gain_pct}, \code{AIC_S_gain_pct},
+\code{BIC_S_gain_pct}.
+
+The table is criterion-path only; it holds no structural column, and the
+underlying counts \code{t_nom}, \code{t}, and \code{t_S} live on \verb{$sweep}. ELBO is
+oriented larger-is-better, and every information-criterion gain is
+\code{IC_from - IC_to}, so a positive value favors the larger candidate on
+every path. Raw gains are kept alongside the percentages because they are
+the primitive from which any cut is computed and they carry the absolute
+scale that percentages destroy.
+
+Percentages are \code{100 * (gain / gain_max)}, where \code{gain_max} is the maximum
+over the \strong{finite} gains of that path, and are \code{NA_real_} when
+\code{gain_max <= 0} or no gain on the path is finite. One nonfinite gain
+blanks only the edges it touches, never the whole column. The division is
+grouped so that gains near the largest finite double do not overflow
+before being scaled.
+}
+
+\section{Structural persistence}{
+
+\verb{$persistence} is a data frame with one row for \strong{every ordered pair}
+\code{k < l} in the window — \code{W(W-1)/2} rows — ordered by \code{K_from} ascending
+then \code{K_to} ascending, and \strong{including rows whose \code{pair_status} is
+\code{"unavailable"}}: a missing row and an unavailable one are different
+evidence, and a downstream join needs the row to exist. Every pair is
+computed directly from its two endpoints, never by chaining adjacent
+assignments, so the rows at horizon \code{1} are the adjacent comparisons and the
+longer horizons are genuine long-horizon measurements.
+
+The matcher aligns columns pairwise by sign, \verb{s(a, b) = sign(a'b)}, and
+scores the pair set \code{P_kl} made of the \code{K0} position-matched backbone
+pairs plus one assigned pair for each eligible exploratory source column.
+A non-backbone column is \strong{eligible} exactly when \code{sum(col^2)} is at
+least \code{stability_eps} (equality is eligible, compared exactly). The
+backbone is \strong{never screened}: its columns keep their prespecified
+positions in both candidates and are always scored, with their thinness
+reported through \verb{$sweep$backbone_ssl_min} and the pair-level
+\code{backbone_degenerate} rather than through exclusion. Each eligible source
+independently takes the eligible target of largest absolute congruence,
+ties broken by smaller aligned RMSD then smaller target index; reuse of a
+target is permitted, detected, and reported, never prevented.
+
+\describe{
+\item{\code{K_from}, \code{K_to}, \code{r}}{integer; the source count \code{k}, the target
+count \code{l}, and the horizon \code{r}, equal to \code{K_to - K_from}.}
+\item{\code{n_pairs}}{integer size of \code{P_kl}: \code{K0} plus the eligible
+exploratory sources that could be assigned. \code{NA_integer_} when the
+assignment cannot be computed. It governs the matched-pair metrics
+exactly, so a cell with \code{n_pairs < K_from} did not score every column
+of the smaller candidate.}
+\item{\code{phi_min}}{double; the minimum absolute congruence over \code{P_kl}.
+Non-negative by construction.}
+\item{\code{rmsd}}{double; the sign-aligned RMSE pooled over every
+item-by-matched-pair cell, \verb{sqrt(sum ||a - s b||^2 / (J * m))} for
+\code{m = n_pairs}. Not an unsigned norm, not an average of column RMSDs,
+and not exploratory-only.}
+\item{\code{rmsd_max}}{double; the largest aligned column RMSD over \code{P_kl}.}
+\item{\code{ari}}{double adjusted Rand index between two \strong{independently}
+formed partitions, one per endpoint, each assigning every item to the
+column of largest absolute loading among all \code{K0} backbone columns
+plus every eligible non-backbone column at that endpoint — including
+eligible targets no source selected. It is deliberately not the
+matched subset, and it is clamped to \verb{[-1, 1]}.}
+\item{\code{pip_rmsd}}{double RMSD between the two PIP matrices over the
+matched item-factor cells that are unspecified (\code{Q == -1}) at \strong{both}
+endpoints. Fixed cells and unmatched columns are excluded.}
+\item{\code{unmatched_n}, \code{unmatched_ssl}}{integer count and double maximum
+column SSL over the non-backbone target columns that no source
+selected, \emph{including columns below the screen}. \code{unmatched_ssl} is
+\code{0} when that set is empty.}
+\item{\code{collision}, \code{n_collisions}}{logical flag and integer count of
+\strong{reused targets} — three sources landing on one target is one
+collision. \code{collision} is exactly \code{n_collisions > 0}. Collision is
+recorded evidence; it blanks no metric and vetoes no comparison.}
+\item{\code{collision_targets}, \code{collision_multiplicities}}{character; the
+reused \strong{group-block} target-column indices sorted increasingly and
+joined by commas, and the reuse counts in that same order, formatted
+identically. The two \code{strsplit(x, ",", fixed = TRUE)} results are
+therefore positionally aligned. Both are \code{""} for a computed clean
+edge and \code{NA_character_} only when the assignment itself could not be
+computed.}
+\item{\code{source_ineligible_n}}{integer; exploratory source columns
+screened out at \code{K_from}. Requires only that endpoint's loadings.}
+\item{\code{target_eligible_n}}{integer; eligible exploratory target columns
+at \code{K_to}. Requires only that endpoint's loadings. A value of \code{0} with
+eligible sources present means no exploratory assignment could be
+formed and the row retains the backbone-only measurement.}
+\item{\code{backbone_degenerate}}{logical; \code{FALSE} when \code{K0 = 0}, \code{TRUE} when
+any inspectable valid endpoint has a finite zero-norm backbone column,
+\code{FALSE} when both valid endpoints establish that none exists, and \code{NA}
+otherwise. It is the exact-zero boundary of \code{backbone_ssl_min}, and a
+\code{TRUE} leaves \code{pair_status = "available"}.}
+\item{\code{from_fit_ok}, \code{to_fit_ok}}{logical endpoint-convergence facts
+copied from \verb{$sweep$converged}, hence \code{NA} after a fit error or a
+malformed flag. They are \strong{recorded, not applied}: the matcher does
+not consult \code{fit_status}, and a nonconverged endpoint that returned a
+finite well-formed loading matrix yields the same computation. Filter
+on these columns to obtain a converged-endpoints-only reading.}
+\item{\code{pair_status}, \code{pair_reason}}{character; see below.}
+}
+}
+
+\section{Pair status and metric-specific computability}{
+
+\code{pair_status} takes exactly two values and has exactly two reason codes:
+
+\describe{
+\item{\code{"available"} with \code{pair_reason = NA_character_}}{Both endpoints
+have \code{loading_status == "ok"}, so the matching inputs are usable.}
+\item{\code{"unavailable"} with \code{pair_reason = "malformed_loading"}}{At least
+one endpoint has \code{loading_status != "ok"}. This is the sole
+unavailability reason; nonconvergence, collision, a thin or degenerate
+backbone, ineligible sources, and scarce targets never reach it.}
+}
+
+The row-level status says whether matching input is usable, not whether
+every optional scalar is defined. Each field then follows its own
+dependency, and a missing dependency gives that field its typed \code{NA}
+without blanking an independently defined neighbour:
+
+\itemize{
+\item endpoint convergence facts are always logical and are \code{NA} only
+for a fit error or a malformed convergence flag;
+\item \code{source_ineligible_n} and \code{target_eligible_n} need only their own
+valid loading endpoint;
+\item the assignment, \code{n_pairs}, the collision fields, and the unmatched
+fields need both valid loadings;
+\item \code{phi_min} additionally needs a nonempty \code{P_kl} and a nonzero norm
+for every scored pair, so a zero-norm scored backbone column makes it
+\code{NA_real_} while the aligned \code{rmsd} and \code{rmsd_max} stay defined;
+\item \code{rmsd} and \code{rmsd_max} need a nonempty \code{P_kl};
+\item \code{ari} needs both valid loadings and a retained partition column at
+each endpoint;
+\item \code{pip_rmsd} additionally needs both PIP endpoints valid and at
+least one jointly unspecified matched cell.
+}
+
+For a computed empty \code{P_kl} the row stores \code{n_pairs = 0L}, \code{NA_real_} for
+\code{phi_min}, \code{rmsd}, \code{rmsd_max} and \code{pip_rmsd}, \code{collision = FALSE},
+\code{n_collisions = 0L}, \code{""} for both collision strings, and the
+independently computable unmatched facts — and still reports
+\code{pair_status = "available"} when both loading matrices are valid.
+
+In bifactor mode the labelled general column is stripped before any of
+this, so every persistence index and count refers to the group block;
+dimension and finiteness validation happens on the stored \code{K + 1} matrix
+beforehand.
+}
+
+\section{Run settings}{
+
+\verb{$settings} is a named list of exactly the ten controls that can change a
+returned number, in this order: \code{bifactor}, \code{general}, \code{v0}, \code{max_it},
+\code{convChk}, \code{tolVal}, \code{tau}, \code{stability_eps}, \code{rank_adjust}, and
+\code{rank_max_J}. \code{general} is \code{NULL} unless \code{bifactor = TRUE}, in which case
+it is the resolved length-\code{J} integer design. \code{pefa()} accepts no
+pass-through control absent from this list, so a run is interpretable from
+the object alone.
+
+\code{verbose} is the one formal deliberately \strong{omitted}: it changes console
+output and no returned value, so recording it would make two otherwise
+identical runs hash differently for a purely cosmetic reason.
+
+Every integer-backed formal — \code{Kmin}, \code{Kmax}, \code{max_it}, \code{rank_max_J} — is
+validated as real, finite, whole-valued and within
+\code{.Machine$integer.max} \strong{before} coercion; a complex or out-of-range
+value is a controlled argument error, never a coercion warning or an
+accidental \code{NA_integer_}. The stored settings are then normalized:
+\code{rank_max_J} is one unnamed integer, the logical controls are unnamed
+logicals, and the numeric controls are unnamed doubles. \code{100} and \code{100L}
+therefore produce identical \verb{$settings} and identical hashes, as do named
+and unnamed spellings of the same value.
+}
+
+\section{Provenance}{
+
+\verb{$provenance} is a named list, in this order: \code{evidence_schema_id},
+\code{engine_semantics_id}, \code{package_version}, \code{package_build_id},
+\code{standardized_data_sha256}, \code{Q0_sha256}, \code{settings_sha256},
+\code{evidence_sha256}, \code{lineage_sha256}, \code{parent_evidence_sha256}, \code{reused_K},
+and \code{newly_fitted_K}. The data hash covers the engine-scale standardized
+matrix and its missingness mask, not the raw input's units.
+\code{evidence_sha256} covers the three tables, \verb{$loadings}, \verb{$pips}, \verb{$Q0},
+\verb{$settings}, the two identity strings, the package version and the three
+input hashes, and excludes the machine-dependent \verb{$sweep$secs}, itself,
+and the lineage fields. A root object has
+\code{parent_evidence_sha256 = NA_character_}, \code{reused_K = integer(0)}, and
+\code{newly_fitted_K = Kmin:Kmax}. Provenance carries no count rule, criterion
+preference, cut, threshold, horizon, or collision policy.
+}
+
+\section{Standalone fit_stats provenance}{
+
+Inside \code{pefa()} the resolved \code{Q}, the data, \code{tau}, the orthogonality
+implied by \code{bifactor}, \code{rank_adjust}, and the integer-normalized
+\code{rank_max_J} are all recorded by \verb{$settings} and the provenance hashes.
+Called on its own, \code{\link[=fit_stats]{fit_stats()}} remains a \strong{numeric calculator}: it
+returns a named numeric vector and deliberately attaches no partial record
+of its invocation controls, because a partial record would imply
+self-certification while omitting other result-changing inputs.
+
+A provenance-sensitive caller therefore owns that record. Beside the
+returned vector it stores the resolved \code{Q} actually used, the data
+identity, \code{tau}, whether the fit was orthogonal, \code{rank_adjust}, and the
+integer-normalized \code{rank_max_J}, and its consumer gates inspect that
+caller-owned record. Do not expect — or add — provenance attributes on the
+vector \code{\link[=fit_stats]{fit_stats()}} returns.
+}
+
 \examples{
 \donttest{
 sim <- sim_fa(N = 400, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)

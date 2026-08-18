@@ -229,6 +229,36 @@ test_that("an all-nonfinite gain path is NA and emits no warning", {
   expect_equal(tr$AIC_gain_pct, c(100, 10, 2))
 })
 
+test_that("gain percentages survive gains near the largest double", {
+  xmax <- .Machine$double.xmax
+  ## Each AIC gain is IC_from - IC_to, so these four finite criterion values
+  ## produce gains of xmax, xmax / 2, and -xmax.
+  sweep <- data.frame(K = 2:5,
+                      ELBO = c(0, 100, 120, 125),
+                      AIC = c(xmax, 0, -xmax / 2, xmax / 2),
+                      BIC = c(600, 500, 495, 494),
+                      AIC_S = c(510, 405, 400, 399),
+                      BIC_S = c(610, 505, 503, 502))
+  tr <- vbpm:::.pefa_transitions_table(sweep)
+  expect_equal(tr$AIC_gain, c(xmax, xmax / 2, -xmax))
+  ## 100 * gain overflows to Inf before the division and would blank all
+  ## three cells; 100 * (gain / gain_max) keeps every ratio representable.
+  expect_equal(tr$AIC_gain_pct, c(100, 50, -100))
+  expect_false(any(is.na(tr$AIC_gain_pct)))
+  expect_false(any(is.infinite(tr$AIC_gain_pct)))
+  ## The other paths are untouched by the extreme one.
+  expect_equal(tr$BIC_gain_pct, c(100, 5, 1))
+
+  ## Percentages are scale-free: any positive rescaling of the gain vector
+  ## leaves them alone, at either end of the representable range.
+  expect_equal(vbpm:::.pefa_gain_pct(c(xmax, xmax / 2, -xmax)),
+               c(100, 50, -100))
+  for (s in c(1e-300, 1e-3, 1, 7, 1e300)) {
+    expect_equal(vbpm:::.pefa_gain_pct(c(1, 0.5, -1) * s),
+                 c(100, 50, -100))
+  }
+})
+
 test_that("component statuses are independent", {
   dn <- list(paste0("item_", 1:4), c("F1", "F2"))
   stats_ok <- stats::setNames(
@@ -464,6 +494,99 @@ test_that("pefa validates the window and the stability screen", {
     pefa(matrix(integer(0), ncol(Y), 0), Y, 0, 2, verbose = FALSE),
     "Kmin"
   )
+})
+
+## Runs `expr`, returning the error message (or the value) plus every warning
+## the call emitted, so a test can assert "controlled error and no warning".
+.quiet_error <- function(expr) {
+  emitted <- character(0)
+  value <- withCallingHandlers(
+    tryCatch(expr, error = conditionMessage),
+    warning = function(w) {
+      emitted <<- c(emitted, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+  list(message = value, warnings = emitted)
+}
+
+test_that("integer-backed formals are range-checked before coercion", {
+  Q0 <- .toy$Q0
+  Y <- .toy$Y
+  ## as.integer(3e10) is NA_integer_ plus a coercion warning, which would
+  ## turn an argument mistake into a silent failed-fit evidence object.
+  big <- 3e10
+  oversized <- list(
+    Kmin = function() pefa(Q0, Y, big, big + 1, verbose = FALSE),
+    Kmax = function() pefa(Q0, Y, 2, big, verbose = FALSE),
+    max_it = function() pefa(Q0, Y, 2, 2, max_it = big, verbose = FALSE),
+    rank_max_J = function() pefa(Q0, Y, 2, 2, rank_max_J = big,
+                                 verbose = FALSE)
+  )
+  for (nm in names(oversized)) {
+    got <- .quiet_error(oversized[[nm]]())
+    expect_true(is.character(got$message), info = nm)
+    expect_match(got$message, nm, fixed = TRUE)
+    expect_match(got$message, "whole number in", fixed = TRUE)
+    expect_length(got$warnings, 0L)
+  }
+
+  ## Complex values are rejected outright rather than coerced.
+  complexes <- list(
+    Kmin = function() pefa(Q0, Y, complex(real = 2), 3, verbose = FALSE),
+    Kmax = function() pefa(Q0, Y, 2, complex(real = 3), verbose = FALSE),
+    max_it = function() pefa(Q0, Y, 2, 2, verbose = FALSE,
+                             max_it = complex(real = 400, imaginary = 1)),
+    rank_max_J = function() pefa(Q0, Y, 2, 2, verbose = FALSE,
+                                 rank_max_J = complex(real = 100))
+  )
+  for (nm in names(complexes)) {
+    got <- .quiet_error(complexes[[nm]]())
+    expect_true(is.character(got$message), info = nm)
+    expect_match(got$message, nm, fixed = TRUE)
+    expect_length(got$warnings, 0L)
+  }
+
+  ## The range check is inclusive, so the largest representable integer is
+  ## still a legal setting and reaches $settings unchanged.
+  at_max <- pefa(Q0, Y, 2, 2, v0 = .001, max_it = 400,
+                 rank_max_J = .Machine$integer.max, verbose = FALSE)
+  expect_identical(at_max$settings$rank_max_J, .Machine$integer.max)
+})
+
+test_that("rank_max_J normalizes so 100 and 100L hash identically", {
+  expect_identical(.healthy$settings$rank_max_J, 100L)
+  expect_identical(typeof(.healthy$settings$rank_max_J), "integer")
+  expect_null(names(.healthy$settings$rank_max_J))
+
+  ## The default 100 is a double; 100L must not fork the provenance.
+  typed <- pefa(.toy$Q0, .toy$Y, 2, 4, v0 = .001, max_it = 800,
+                rank_max_J = 100L, verbose = FALSE)
+  expect_identical(typed$settings, .healthy$settings)
+  expect_identical(typed$provenance$settings_sha256,
+                   .healthy$provenance$settings_sha256)
+  expect_identical(typed$provenance$evidence_sha256,
+                   .healthy$provenance$evidence_sha256)
+  expect_identical(typed$provenance$lineage_sha256,
+                   .healthy$provenance$lineage_sha256)
+
+  ## Names on a stored control are input decoration, not evidence: they must
+  ## not move any hash either.
+  named <- pefa(.toy$Q0, .toy$Y, 2, 4, v0 = c(spike = .001),
+                max_it = c(it = 800), convChk = c(cc = FALSE),
+                tolVal = c(tv = 1e-4), tau = c(th = 0.5),
+                stability_eps = c(se = 0.10), bifactor = c(bf = FALSE),
+                rank_adjust = c(ra = FALSE), rank_max_J = c(cap = 100),
+                verbose = FALSE)
+  expect_identical(vapply(named$settings[-2L], function(v) is.null(names(v)),
+                          logical(1)),
+                   stats::setNames(rep(TRUE, 9L),
+                                   names(named$settings)[-2L]))
+  expect_identical(named$settings, .healthy$settings)
+  expect_identical(named$provenance$settings_sha256,
+                   .healthy$provenance$settings_sha256)
+  expect_identical(named$provenance$evidence_sha256,
+                   .healthy$provenance$evidence_sha256)
 })
 
 test_that("backbone_ssl_min tracks ssl() in both modes", {

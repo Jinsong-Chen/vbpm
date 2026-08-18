@@ -234,3 +234,95 @@ test_that("ssl() is the one definition of the column sizes", {
                unname(colSums(bifactor$loadings[["2"]]^2)),
                tolerance = 1e-12)
 })
+
+
+## ---------------------------------------------------------------------------
+## Release-plan R4: the two printed markers that are easiest to lose to
+## formatting, and the storage mode they may never touch.
+
+test_that("printing marks a collided zero and an unavailable collided cell", {
+  ## Two cells that stress the marker logic: an exact computed zero on a
+  ## collided edge, and a collided edge whose selected metric is unavailable
+  ## because its zero-norm backbone left the congruence undefined.  The
+  ## markers describe the pair, not the number, so the second cell takes its
+  ## "*" as well.  Nothing else is marked, so the printed text is exactly the
+  ## two cases under test.
+  pairs <- .acc_persistence()
+  pairs$phi_min <- c(NA_real_, 0, 0.5)
+  pairs$collision <- c(TRUE, TRUE, FALSE)
+  pairs$n_collisions <- c(1L, 2L, 0L)
+  pairs$n_pairs <- c(2L, 2L, 3L)          # never a reduced pair set
+  pairs$from_fit_ok <- TRUE               # and no nonconverged endpoint
+  pairs$backbone_degenerate <- c(TRUE, FALSE, FALSE)
+  x <- .acc_object(pairs)
+  m <- persistence(x, "phi_min")
+
+  shown <- paste(capture.output(print(m)), collapse = "\n")
+  ## Whole cells, not substrings: "0*" inside "10.00*" would prove nothing.
+  expect_match(shown, "(^|[[:space:]])0\\.00\\*([[:space:]]|$)")
+  expect_match(shown, "(^|[[:space:]])\\?\\*([[:space:]]|$)")
+  expect_match(shown, "(^|[[:space:]])0\\.50([[:space:]]|$)")
+  ## An unavailable cell prints "?", never "NA", and the legend names only
+  ## the two facts present.
+  expect_false(grepl("NA", shown, fixed = TRUE))
+  legend <- capture.output(print(m))
+  expect_identical(legend[length(legend)], "* = collision, ? = unavailable")
+
+  ## digits reaches the cell text and the markers travel with it: at zero
+  ## decimals the collided zero is the plan's "0*".
+  tight <- paste(capture.output(print(m, digits = 0)), collapse = "\n")
+  expect_match(tight, "(^|[[:space:]])0\\*([[:space:]]|$)")
+  expect_match(tight, "(^|[[:space:]])\\?\\*([[:space:]]|$)")
+
+  ## The count metric keeps its own formatting: a collided count prints as a
+  ## whole number with the same marker.
+  counts <- paste(capture.output(print(persistence(x, "n_collisions"))),
+                  collapse = "\n")
+  expect_match(counts, "(^|[[:space:]])1\\*([[:space:]]|$)")
+  expect_match(counts, "(^|[[:space:]])2\\*([[:space:]]|$)")
+  expect_false(grepl("2.00", counts, fixed = TRUE))
+})
+
+test_that("the markers never coerce the stored matrices to character", {
+  ## The markers are assembled inside print(); the matrix persistence()
+  ## returns, and the table it was pivoted from, stay numeric before and after
+  ## printing.  A character round trip would make every downstream
+  ## comparison, threshold, and hash silently wrong.
+  pairs <- .acc_persistence()
+  pairs$phi_min <- c(NA_real_, 0, 0.5)
+  pairs$collision <- c(TRUE, TRUE, FALSE)
+  pairs$n_collisions <- c(1L, 2L, 0L)
+  x <- .acc_object(pairs)
+
+  for (metric in eval(formals(persistence)$metric)) {
+    m <- persistence(x, metric)
+    want <- if (identical(metric, "n_collisions")) "integer" else "double"
+    expect_identical(typeof(unclass(m)), want, info = metric)
+    before <- serialize(m, NULL)
+    invisible(capture.output(print(m)))
+    invisible(capture.output(print(m, digits = 0)))
+    ## Byte-identical: not merely the same storage mode, the same object.
+    expect_identical(serialize(m, NULL), before, info = metric)
+    expect_identical(typeof(unclass(m)), want, info = metric)
+    expect_true(is.numeric(unclass(m)), info = metric)
+    expect_false(is.character(unclass(m)), info = metric)
+    ## The three fact attributes are logical throughout.
+    for (a in c("collision", "reduced", "fit_ok")) {
+      expect_true(is.logical(attr(m, a, exact = TRUE)),
+                  info = paste0(metric, " attr:", a))
+    }
+  }
+
+  ## The marked cells still hold their numbers, addressable as numbers.
+  m <- persistence(x, "phi_min")
+  invisible(capture.output(print(m)))
+  expect_identical(m[["2", "3"]], NA_real_)
+  expect_identical(m[["2", "4"]], 0)
+  expect_equal(m[["3", "4"]], 0.5, tolerance = 1e-12)
+  expect_identical(sum(m[upper.tri(m)], na.rm = TRUE), 0.5)
+
+  ## And the source table is untouched by any of it.
+  expect_identical(typeof(x$persistence$phi_min), "double")
+  expect_identical(typeof(x$persistence$n_collisions), "integer")
+  expect_identical(typeof(x$persistence$collision), "logical")
+})
