@@ -428,6 +428,28 @@ test_that("both derived views rebuild from the five source components", {
 
 # ---- failure contract -------------------------------------------------
 
+test_that("a negative or fractional t aborts the call naming the K", {
+  ## t counts parameters, so these are malformed candidates rather than
+  ## unusual ones (technical note 6.1, plan 9.2).
+  d <- .mk()
+  real <- vbpm::fit_stats
+  for (bad in c(-5, 12.5)) {
+    local({
+      value <- bad
+      local_mocked_bindings(
+        fit_stats = function(object, ...) {
+          out <- real(object, ...)
+          if (ncol(object$Lam) == 3L) out[["t"]] <- value
+          out
+        },
+        .package = "vbpm")
+      expect_error(pefa(d$Q0, d$Y, 2, 3, v0 = .001, max_it = 200,
+                        verbose = FALSE),
+                   "PEFA candidate K = 3: t is not a nonnegative whole number")
+    })
+  }
+})
+
 test_that("a nonfinite required criterion aborts the call naming the K", {
   d <- .mk()
   real <- vbpm::fit_stats

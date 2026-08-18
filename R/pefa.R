@@ -103,6 +103,11 @@
   if (!all(is.finite(value[.pefa_required_stats]))) {
     .pefa_stop_K(K, "AIC, BIC, or t is nonfinite")
   }
+  ## t counts parameters, so a negative or fractional value is a malformed
+  ## candidate rather than an unusual one.
+  if (value[["t"]] < 0 || value[["t"]] != round(value[["t"]])) {
+    .pefa_stop_K(K, "t is not a nonnegative whole number")
+  }
   ## A nonfinite descriptive index becomes NA_real_.  That is a reported
   ## value, not a defect; see the Identification section of ?pefa.
   descriptive <- value[.pefa_descriptive_stats]
@@ -251,29 +256,57 @@
 #' matrix has `K + 1` columns; every between-candidate comparison removes that
 #' column first and works on the `K` group columns.
 #'
+#' One private comparator produces every between-candidate number, and both
+#' `transitions` and `persistence` are read from its stored results. The
+#' accessors do no matching of their own: [ssl()], `print()`, `summary()`, and
+#' `plot()` only describe what is already stored, and none of them rematches
+#' columns or applies an analysis rule. There is no `persistence()` accessor:
+#' `x$persistence$phi`, `$rmsd`, and `$collision` are already the three
+#' stored matrices.
+#'
 #' @section The returned object:
 #' A list of class `"pefa"` with exactly these components, in order.
 #' \describe{
-#'   \item{`sweep`}{One row per candidate: `K`, `ELBO`, `AIC`, `BIC`, `RMSEA`,
-#'     `SRMR`, `CFI`, `TLI`, `t`, `iter`, `converged`. `AIC` and `BIC` are
-#'     hard-selection values at the resolved `tau` and `t` is their effective
-#'     parameter count, rank-adjusted when `rank_adjust = TRUE`.}
-#'   \item{`transitions`}{One row per adjacent pair: `K_from`, `K_to`,
-#'     `ELBO_gain_pct`, `BIC_gain_pct`, then the seven structural facts
-#'     `phi_min`, `rmsd`, `rmsd_max`, `ari`, `pip_rmsd`, `unmatched_ssl`,
-#'     `collision`. Positive gains favor `K_to`. Each percentage divides by the
-#'     largest positive gain on its own path, or is `NA_real_` when no positive
-#'     gain exists. Raw criteria stay in `sweep`.}
-#'   \item{`persistence`}{A list of three upper-triangular `W` by `W` matrices
-#'     over the fitted `K` values: `phi` holds `phi_min`, `rmsd` holds
-#'     **`rmsd_max`**, and `collision` is the logical reuse mask. Diagonal and
-#'     lower triangle are `NA`. Every cell is a direct endpoint comparison,
-#'     never a chain through intervening candidates.}
-#'   \item{`loadings`, `pips`}{Named `K`-indexed lists of candidate matrices,
-#'     retaining the general column in bifactor mode.}
-#'   \item{`Q0`, `settings`}{The canonical backbone, and the resolved fitting
-#'     and fit-statistic controls. `settings` holds no analysis rule.}
+#'   \item{`sweep`}{One row per candidate, in column order. `K` is integer;
+#'     `ELBO`, `AIC`, and `BIC` are required finite doubles; `RMSEA`, `SRMR`,
+#'     `CFI`, and `TLI` are descriptive doubles; `t` is a double; `iter` is a
+#'     nonnegative integer, or `NA_integer_` when a well-formed engine result
+#'     reports none; `converged` is a nonmissing logical. `AIC` and `BIC` are
+#'     hard-selection values at the resolved `tau`, and `t` is their effective
+#'     parameter count -- a finite, nonnegative, whole-valued count stored as
+#'     a double -- rank-adjusted when `rank_adjust = TRUE`. Each descriptive
+#'     index is `NA_real_` exactly when its own definition does not apply, and
+#'     is never silently substituted.}
+#'   \item{`transitions`}{One row per adjacent pair: the integers `K_from` and
+#'     `K_to`, the doubles `ELBO_gain_pct` and `BIC_gain_pct`, then the seven
+#'     structural facts -- the doubles `phi_min`, `rmsd`, `rmsd_max`, `ari`,
+#'     `pip_rmsd`, `unmatched_ssl` and the logical `collision`. Positive gains
+#'     favor `K_to`. Each percentage divides by the largest positive gain on
+#'     its own path, or is `NA_real_` when no positive gain exists. Raw
+#'     criteria stay in `sweep`.}
+#'   \item{`persistence`}{Three upper-triangular `W` by `W` matrices over the
+#'     fitted `K` values, named and ordered `phi`, `rmsd`, `collision`: `phi`
+#'     holds `phi_min`, `rmsd` holds **`rmsd_max`**, and `collision` is the
+#'     logical reuse mask. Diagonal and lower triangle are `NA`. Every cell is
+#'     a direct endpoint comparison, never a chain through intervening
+#'     candidates.}
+#'   \item{`loadings`, `pips`}{Named `K`-indexed lists of candidate matrices
+#'     with items in rows and factors in columns: `J` by `K`, or `J` by
+#'     `K + 1` with the general column first in bifactor mode. Loadings are
+#'     finite and PIPs lie in `[0, 1]`.}
+#'   \item{`Q0`, `settings`}{The canonical `J` by `K0` integer backbone, and
+#'     the resolved controls `bifactor`, `general`, `v0`, `max_it`, `convChk`,
+#'     `tolVal`, `tau`, `rank_adjust`, `rank_max_J`, in that order. `general`
+#'     is `NULL` outside bifactor mode. `settings` records fitting and
+#'     fit-statistic controls only: no `verbose`, and no analysis rule.}
 #' }
+#'
+#' The loading and PIP matrices and the criteria `ELBO`, `AIC`, `BIC`, and `t`
+#' are required. A fitting failure or a malformed required quantity aborts the
+#' call with an error naming the `K`; there is no status taxonomy and no
+#' partially populated object. A candidate that merely failed to converge is
+#' retained with `converged = FALSE`, and one aggregate warning names every
+#' affected `K`.
 #'
 #' @section Loading correspondence:
 #' For source column `a` and target column `b`, let `s = 1` when `a'b >= 0` and
@@ -284,9 +317,22 @@
 #' congruence, then by smaller target index.
 #'
 #' The assignment is independent, not one-to-one, so two sources may select the
-#' same target. That reuse is a **collision**, recorded rather than repaired.
-#' There is no salience screen: every column participates, and a comparison
-#' always contains exactly `K_from` scored pairs.
+#' same target. That reuse is a **collision**: it is recorded rather than
+#' repaired, the pair keeps every otherwise defined measurement, and the target
+#' left unselected still counts toward `unmatched_ssl`. There is no salience
+#' screen: every column participates, and a comparison always contains exactly
+#' `K_from` scored pairs.
+#'
+#' A zero-norm column is no exception. Its aligned distance is defined, so it
+#' takes part in the assignment and in `rmsd` and `rmsd_max`, but its Tucker
+#' congruence is `0/0` and therefore undefined. An undefined congruence is
+#' reported as `NA_real_` and makes that comparison's `phi_min` `NA_real_`;
+#' it is never dropped by an `na.rm`.
+#'
+#' Because `phi_min` is a minimum over *every* column, an overextracted
+#' candidate carrying a near-empty column will report a low `phi_min` and often
+#' `collision = TRUE`. Read that with [ssl()]: it usually means the candidate
+#' contains a column with nothing in it, not that the retained structure moved.
 #'
 #' @section Identification:
 #' `pefa()` imposes no upper bound on `K` relative to `J`. The Ledermann bound
@@ -303,25 +349,37 @@
 #' identification directly; that count cannot exceed `J(J + 1)/2`, so its
 #' degrees of freedom saturate at zero instead of going negative.
 #'
-#' Because `phi_min` is a minimum over *every* column, an overextracted
-#' candidate carrying a near-empty column will report a low `phi_min` and often
-#' `collision = TRUE`. Read that with [ssl()]: it usually means the candidate
-#' contains a column with nothing in it, not that the retained structure moved.
+#' @section Removed in 0.9.0:
+#' `select_K_elbow()`, the `pefa()` arguments `cuts`, `sustain`, and
+#' `stability_eps`, and the `$selected_K` and `$boundary` components existed
+#' in 0.8.3 and are gone. That is an intentional pre-1.0 breaking change rather
+#' than a deprecation cycle: the package owns no count rule, so it can own
+#' neither a selector nor a stability cutoff. The replacement is ordinary
+#' analysis code over the stored path, as in the last chunk of the Examples,
+#' and such code has to say which variant it is, because look-ahead and
+#' boundary-fallback variants disagree on the same path. `NEWS.md` lists the
+#' removals in full.
 #'
 #' @param Q0 A `J` by `K0` backbone with entries `1`, `0`, or `-1`. Zero
 #'   columns (`K0 = 0`, fully exploratory) are allowed.
-#' @param Y A numeric `N` by `J` matrix, optionally with `NA`.
+#' @param Y A numeric `N` by `J` matrix of observed values, optionally with
+#'   literal `NA`; `NaN` and infinite values are rejected. Every row and every
+#'   item needs an observed value, and every item a positive finite SD.
 #' @param Kmin,Kmax Inclusive window, whole numbers with
-#'   `1 <= Kmin <= Kmax` and `Kmin >= ncol(Q0)`.
+#'   `1 <= Kmin <= Kmax <= .Machine$integer.max` and `Kmin >= ncol(Q0)`.
 #' @param bifactor Fit an orthogonal bifactor parameterization.
-#' @param general Scalar or length-`J` general design in `{-1, 0, 1}`, used
-#'   only when `bifactor = TRUE`.
-#' @param v0,max_it,convChk,tolVal Optimizer controls passed to [vbfa()].
-#' @param tau Loading-inclusion threshold used by [fit_stats()].
+#' @param general Scalar or length-`J` general design in `{-1, 0, 1}` with at
+#'   least one `1`, used only when `bifactor = TRUE`.
+#' @param v0,max_it,convChk,tolVal Optimizer controls passed to [vbfa()]:
+#'   finite positive `v0`, positive whole `max_it`, `TRUE`/`FALSE` `convChk`,
+#'   and finite `tolVal >= 0`.
+#' @param tau Loading-inclusion threshold in `[0, 1]`, used by [fit_stats()].
 #' @param rank_adjust,rank_max_J Rank-adjustment controls for [fit_stats()].
+#'   `rank_adjust = TRUE` requires `J <= rank_max_J` and the suggested
+#'   `numDeriv` package.
 #' @param verbose Print one progress line per candidate.
 #'
-#' @return An object of class `"pefa"`; see Details.
+#' @return An object of class `"pefa"`; see *The returned object* below.
 #'
 #' @references
 #' Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
@@ -345,8 +403,9 @@
 #' fit$persistence$phi
 #' ssl(fit)
 #'
-#' ## A count rule is the analysis's, never the package's. This one reads a
-#' ## 20% cut on the ELBO path with one candidate of look-ahead.
+#' ## A count rule is the analysis's, never the package's. This one stops at
+#' ## the first ELBO gain under 20% and looks no further ahead; a
+#' ## full-look-ahead variant can answer differently on the same path.
 #' g <- fit$transitions$ELBO_gain_pct
 #' fit$transitions$K_from[which(g < 20)[1]]
 #' }

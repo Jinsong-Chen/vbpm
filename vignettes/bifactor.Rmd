@@ -104,9 +104,13 @@ sweep.
 
 ## Step 1: ordinary oblique sweeps
 
+Every `pefa()` and `vbfa()` call below omits `v0` and `max_it` and therefore
+runs at its own function's documented defaults. Those are not one shared cap:
+`pefa()` allows `max_it = 10000` per candidate and `vbfa()` allows 5000.
+
 ```{r step1}
-AO <- pefa(Q0_AO, Y, Kmin = 2, Kmax = 5, v0 = .001, verbose = FALSE)
-AZ <- pefa(Q0_AZ, Y, Kmin = 2, Kmax = 5, v0 = .001, verbose = FALSE)
+AO <- pefa(Q0_AO, Y, Kmin = 2, Kmax = 5, verbose = FALSE)
+AZ <- pefa(Q0_AZ, Y, Kmin = 2, Kmax = 5, verbose = FALSE)
 
 AO$sweep[, c("K", "ELBO", "AIC", "BIC", "SRMR", "CFI")]
 AZ$sweep[, c("K", "ELBO", "AIC", "BIC", "SRMR", "CFI")]
@@ -120,12 +124,12 @@ AZ$transitions[, c("K_from", "K_to", "ELBO_gain_pct", "BIC_gain_pct",
 ```
 
 Both backbones put their only positive gain on the `2 -> 3` step and both put
-`unmatched_ssl` near 2.6-2.9 there, which is a full column's worth against the
-`ssl()` values below. After that they part company slightly. AO's BIC is
-minimized at `K = 3` (35196.8) and its later ELBO gains are -6.9% and -8.8%.
-AZ's BIC is minimized at `K = 4` (35209.3, against 35227.0 at `K = 3`), and its
-`3 -> 4` ELBO gain is -0.5%, close enough to zero that a stricter reading of
-the same path would hesitate there.
+`unmatched_ssl` near 2.6 there, which is a full column's worth against the
+`ssl()` values below. Both minimize BIC at `K = 3` --- 35212.89 for AO and
+35209.52 for AZ --- but only just: the `3 -> 4` BIC step gives back 0.5% (AO)
+and 1.0% (AZ) of that first gain, so the criterion is nearly flat between three
+and four factors. AIC dissents in both backbones, taking its minimum at `K = 4`
+(35015.32 and 35015.94, against 35025.55 and 35022.18 at three).
 
 ```{r step1-persistence}
 round(AO$persistence$phi, 3)
@@ -134,57 +138,115 @@ ssl(AO)[c("3", "4")]
 ssl(AZ)[c("3", "4")]
 ```
 
-Persistence separates the two backbones more than the criteria do. AO's
-three-factor columns survive into `K = 4` and `K = 5` at 0.988 and 0.987; AZ's
-survive at 0.935 and 0.922, and its `4 -> 5` cell falls to 0.834. In both
-backbones the fourth column is small --- `ssl()` puts it at 0.36 (AO) and 0.38
-(AZ) against three columns above 2.2 --- so the four-factor candidate is the
-three-factor one plus a thin extra column, not a different structure.
+Persistence separates the two backbones a little more than the criteria do.
+AO's three-factor columns survive into `K = 4` and `K = 5` at 0.989; AZ's
+survive at 0.985, and AZ's `2 -> 4` and `2 -> 5` cells read 0.905 against AO's
+0.925. In both backbones the fourth column is small --- `ssl()` puts it at 0.37
+(AO) and 0.45 (AZ) against three columns above 2.4 --- so the four-factor
+candidate is the three-factor one plus a thin extra column, not a different
+structure.
 
 ```{r step1-reading}
 ## Analysis-side reading, not a package rule. Variant: full look-ahead with no
 ## fallback -- the smallest K_from whose own and every later adjacent ELBO gain
 ## is under 20% of the largest positive gain, NA_integer_ when none qualifies.
-vapply(list(AO = AO, AZ = AZ), function(x) {
+reading <- vapply(list(AO = AO, AZ = AZ), function(x) {
   g <- x$transitions$ELBO_gain_pct
   below <- vapply(seq_along(g), function(i) all(g[i:length(g)] < 20),
                   logical(1))
   if (any(below)) x$transitions$K_from[which(below)[1]] else NA_integer_
 }, integer(1))
+reading
 ```
 
 Both deliver three. That agreement is a fact about this sample and window; the
-AZ BIC minimum at four is in the same evidence and disagrees, and no part of
+AIC minimum at four is in the same evidence and disagrees, and no part of
 `pefa()` arbitrates between them.
 
 ## Step 2: a comparison derived from Step 1
 
-Step 1 delivers a count and a loading matrix. Step 2 has to be built out of
-*that* result, not out of a design written down independently. Take the AO
-candidate at the delivered count, keep the backbone anchors as anchors, and
-assign every remaining item to the column carrying its largest absolute
-loading as a regularized cell.
+Step 1 delivers a count and a loading matrix. Step 2 is built out of *that*
+result, not out of a design written down independently, so `Kp` is the count
+the reading above returned and the group Q is derived from the AO candidate at
+that count. All of this is ordinary analysis-side code: `pefa()` neither
+performs it nor stores it.
+
+Let `K0 = ncol(Q0)` and let the **specification depth** `d` be the uniform
+number of backbone markers per factor, `colSums(Q0 == 1L)`. The automatic route
+needs one common depth; had the backbone columns been specified to different
+depths, the analyst would write down a depth rule of their own or supply a
+complete substantive `J x Kp` group-loading Q instead.
+
+At `Kp == K0` the Step-2 design is `Q0` itself. Otherwise `Q0` is carried over
+cell for cell --- every anchor, every AO or AZ zero, every unspecified cell ---
+and `Kp - K0` all-`-1` columns are appended. Each added column is then anchored
+independently: rank all `J` items by decreasing absolute loading in that column
+of the delivered candidate, break exact ties by item index, and turn its top `d`
+cells from `-1` into `1`. Nothing else is fixed --- no PIP cutoff, no magnitude
+cutoff, no dominant-factor assignment, no uniqueness restriction --- so the same
+item may be a top marker for more than one added factor.
 
 ```{r step2-design}
-Kp <- 3
-Lam <- AO$loadings[[as.character(Kp)]]
-anchor <- which(AO$Q0 == 1L, arr.ind = TRUE)
+Kp    <- reading[["AO"]]
+K0    <- ncol(AO$Q0)
+Lam   <- AO$loadings[[as.character(Kp)]]
+d     <- unique(colSums(AO$Q0 == 1L))
+added <- if (Kp > K0) seq(K0 + 1L, Kp) else integer(0)
+stopifnot(length(d) == 1L, d > 0L)        # one inherited specification depth
 
-Q2 <- matrix(0L, J, Kp)
-Q2[anchor] <- 1L
-free <- setdiff(seq_len(J), anchor[, "row"])
-Q2[cbind(free, max.col(abs(Lam[free, , drop = FALSE]),
-                       ties.method = "first"))] <- -1L
+Q2 <- AO$Q0
+if (length(added)) {
+  Q2 <- cbind(Q2, matrix(-1L, J, Kp - K0,
+                         dimnames = list(rownames(AO$Q0),
+                                         paste0("F", added))))
+  for (k in added) {
+    top <- order(abs(Lam[, k]), seq_len(J),
+                 decreasing = c(TRUE, FALSE), method = "radix")[seq_len(d)]
+    Q2[top, k] <- 1L
+  }
+}
 
-table(cluster, support = max.col(Q2 != 0L, ties.method = "first"))
+c(Kp = Kp, K0 = K0, depth = d)
+Q2[rowSums(Q2 == 1L) > 0L, , drop = FALSE]
 ```
 
-The derived support reproduces the three generating clusters exactly. Now fit
-the same design twice --- once oblique, once bifactor --- and compare.
+The added column inherits the backbone's depth of two and anchors itself on
+items 13 and 18, both from the cluster the two-column backbone did not cover.
+The checks below run at render time, so the vignette fails rather than
+misreports if the construction drifts from the recipe.
+
+```{r step2-check}
+stopifnot(
+  ## group columns only, no general column
+  nrow(Q2) == J, ncol(Q2) == Kp,
+  ## the first K0 columns are Q0 itself, cell for cell
+  identical(Q2[, seq_len(K0), drop = FALSE], AO$Q0),
+  ## no new fixed zero anywhere, in an added column or outside one
+  all(Q2[, added, drop = FALSE] %in% c(-1L, 1L)),
+  sum(Q2 == 0L) == sum(AO$Q0 == 0L),
+  ## each added column inherits the backbone depth exactly
+  all(colSums(Q2[, added, drop = FALSE] == 1L) == d),
+  ## and its markers are the top d absolute loadings, exact ties by item
+  ## index, with no PIP or magnitude cutoff standing between them
+  all(vapply(added, function(k) {
+    a   <- abs(Lam[, k])
+    sel <- which(Q2[, k] == 1L)
+    oth <- setdiff(seq_len(J), sel)
+    all(vapply(sel, function(i)
+      all(a[i] > a[oth] | (a[i] == a[oth] & i < oth)), logical(1)))
+  }, logical(1)))
+)
+```
+
+The same group Q now goes to both models. The bifactor general column is added
+inside `vbfa()` and never participated in marker selection, which the second
+check below confirms.
 
 ```{r step2-fit}
-f_obl <- vbfa(Y, Q2, v0 = .001)
-f_bif <- vbfa(Y, Q2, bifactor = TRUE, v0 = .001)
+f_obl <- vbfa(Y, Q2)
+f_bif <- vbfa(Y, Q2, bifactor = TRUE)
+stopifnot(identical(f_obl$Q, Q2),
+          identical(f_bif$Q[, -1L, drop = FALSE], Q2))
 
 idx <- c("RMSEA", "SRMR", "CFI", "TLI", "AIC", "BIC")
 round(rbind(
@@ -193,11 +255,18 @@ round(rbind(
 ), 3)
 ```
 
-The bifactor arm is ahead by 57.3 BIC points, which is the right answer for
-this population. It is an operational comparison of two fitted models on one
-design, not a test against an unrestricted alternative, and it is conditional
-on the count and support that Step 1 delivered. A thin margin, or a margin that
-flips when the Step-1 count changes, should be reported rather than resolved.
+The bifactor arm is ahead on every index, which is the right answer for this
+population, but by very unequal margins: 71.2 AIC points and only 5.6 BIC
+points. It is an operational comparison of two fitted models on one design, not
+a test against an unrestricted alternative, and it is conditional on the count
+and the markers that Step 1 delivered. A thin margin, or a margin that flips
+when the Step-1 count changes, should be reported rather than resolved.
+
+An analyst may instead supply a substantive `J x Kp` group-loading Q of their
+own, never one containing the bifactor general column. That is a different
+analysis design: it should be labelled as such, recorded, validated for codes
+and dimnames, and used identically in both arms. It is not a silent default and
+it is not a `pefa()` decision.
 
 `special_effects()` then describes the retained bifactor fit: within-cluster
 Schmid-Leiman ratios and their CVs, the implied second-order loadings, and
@@ -217,8 +286,7 @@ comparator strips it before matching, so the correspondence and the seven pair
 facts have exactly the definitions used above.
 
 ```{r bifactor-sweep}
-BI <- pefa(Q0_AO, Y, Kmin = 2, Kmax = 5, bifactor = TRUE, v0 = .001,
-           verbose = FALSE)
+BI <- pefa(Q0_AO, Y, Kmin = 2, Kmax = 5, bifactor = TRUE, verbose = FALSE)
 BI$sweep[, c("K", "ELBO", "AIC", "BIC", "SRMR", "CFI")]
 BI$transitions[, c("K_from", "K_to", "ELBO_gain_pct", "BIC_gain_pct",
                    "phi_min", "rmsd_max", "unmatched_ssl", "collision")]
@@ -229,22 +297,27 @@ ssl(BI)
 
 In this example the bifactor sweep is much less sharp than the ordinary one.
 
-* Both percentage columns are `NA` for every row. ELBO is highest and BIC
-  lowest at the window's lower edge, so neither path contains a positive gain
-  and the whole percentage path is `NA` by construction. The Step-1 reading has
-  no defined path to consume; a rule that reads those columns must decide for
-  itself what an all-`NA` path means, which is exactly the kind of decision the
-  package leaves outside.
-* `phi_min` is 0.998 or higher in every cell of `$persistence$phi`, and no
-  `rmsd_max` cell exceeds 0.061. Everything persists, so persistence
-  discriminates nothing either.
+* `ELBO_gain_pct` is `NA` for every row. ELBO is highest at the window's lower
+  edge and falls at every step, so that path contains no positive gain and its
+  whole percentage column is `NA` by construction. The Step-1 reading has no
+  defined path to consume; a rule that reads that column must decide for itself
+  what an all-`NA` path means, which is exactly the kind of decision the
+  package leaves outside. `BIC_gain_pct` does have a positive step, at
+  `3 -> 4`, and normalizes to it.
+* `phi_min` is 0.998 or better in every cell that involves `K = 2` and 0.990 at
+  `4 -> 5`, then drops to 0.444 and 0.519 in the two cells that start at
+  `K = 3`. No `rmsd_max` cell exceeds 0.122, so no column moved far in absolute
+  terms; those two low congruences are the weakest-link statistic scoring a
+  group column that has been emptied.
 * `ssl()` says why. The general column holds 4.29-4.37 and the two backbone
-  group columns hold about 2.1-2.25 at every candidate, while the third
-  group column reaches only 0.27 at `K = 3` and splits into columns near 0.06
-  by `K = 5`. With the general factor already carrying the shared variance, the
-  third cluster's specific variance never accumulates into a group column here,
-  and the surplus columns that follow are small enough that two of them collide
-  at `4 -> 5`.
+  group columns hold about 2.09-2.25 at every candidate, while the third group
+  column reaches only 0.27 at `K = 3` and collapses to the order of 1e-9 to
+  1e-7 at `K = 4` and `K = 5`. With the general factor already carrying the
+  shared variance, the third cluster's specific variance never accumulates into
+  a group column here. The four- and five-factor candidates are the two-group
+  solution again --- `$persistence$phi` reads 1.000 and 0.999 against `K = 2`
+  --- which is also why the four-factor candidate's two empty columns pick the
+  same target and raise `collision` at `4 -> 5`.
 
 Read that as a property of this example --- this population, this two-column
 backbone, this window, this sample size --- and not as a general ranking. A

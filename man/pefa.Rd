@@ -25,26 +25,32 @@ pefa(
 \item{Q0}{A \code{J} by \code{K0} backbone with entries \code{1}, \code{0}, or \code{-1}. Zero
 columns (\code{K0 = 0}, fully exploratory) are allowed.}
 
-\item{Y}{A numeric \code{N} by \code{J} matrix, optionally with \code{NA}.}
+\item{Y}{A numeric \code{N} by \code{J} matrix of observed values, optionally with
+literal \code{NA}; \code{NaN} and infinite values are rejected. Every row and every
+item needs an observed value, and every item a positive finite SD.}
 
 \item{Kmin, Kmax}{Inclusive window, whole numbers with
-\verb{1 <= Kmin <= Kmax} and \code{Kmin >= ncol(Q0)}.}
+\verb{1 <= Kmin <= Kmax <= .Machine$integer.max} and \code{Kmin >= ncol(Q0)}.}
 
 \item{bifactor}{Fit an orthogonal bifactor parameterization.}
 
-\item{general}{Scalar or length-\code{J} general design in \verb{\{-1, 0, 1\}}, used
-only when \code{bifactor = TRUE}.}
+\item{general}{Scalar or length-\code{J} general design in \verb{\{-1, 0, 1\}} with at
+least one \code{1}, used only when \code{bifactor = TRUE}.}
 
-\item{v0, max_it, convChk, tolVal}{Optimizer controls passed to \code{\link[=vbfa]{vbfa()}}.}
+\item{v0, max_it, convChk, tolVal}{Optimizer controls passed to \code{\link[=vbfa]{vbfa()}}:
+finite positive \code{v0}, positive whole \code{max_it}, \code{TRUE}/\code{FALSE} \code{convChk},
+and finite \code{tolVal >= 0}.}
 
-\item{tau}{Loading-inclusion threshold used by \code{\link[=fit_stats]{fit_stats()}}.}
+\item{tau}{Loading-inclusion threshold in \verb{[0, 1]}, used by \code{\link[=fit_stats]{fit_stats()}}.}
 
-\item{rank_adjust, rank_max_J}{Rank-adjustment controls for \code{\link[=fit_stats]{fit_stats()}}.}
+\item{rank_adjust, rank_max_J}{Rank-adjustment controls for \code{\link[=fit_stats]{fit_stats()}}.
+\code{rank_adjust = TRUE} requires \code{J <= rank_max_J} and the suggested
+\code{numDeriv} package.}
 
 \item{verbose}{Print one progress line per candidate.}
 }
 \value{
-An object of class \code{"pefa"}; see Details.
+An object of class \code{"pefa"}; see \emph{The returned object} below.
 }
 \description{
 Fits \code{\link[=vbfa]{vbfa()}} for every integer \code{K} in a fixed consecutive window, holding
@@ -61,31 +67,59 @@ Ordinary candidates are oblique with diagonal residuals. In bifactor mode
 \code{K} counts group factors and \code{\link[=vbfa]{vbfa()}} adds one general column, so a stored
 matrix has \code{K + 1} columns; every between-candidate comparison removes that
 column first and works on the \code{K} group columns.
+
+One private comparator produces every between-candidate number, and both
+\code{transitions} and \code{persistence} are read from its stored results. The
+accessors do no matching of their own: \code{\link[=ssl]{ssl()}}, \code{print()}, \code{summary()}, and
+\code{plot()} only describe what is already stored, and none of them rematches
+columns or applies an analysis rule. There is no \code{persistence()} accessor:
+\code{x$persistence$phi}, \verb{$rmsd}, and \verb{$collision} are already the three
+stored matrices.
 }
 \section{The returned object}{
 
 A list of class \code{"pefa"} with exactly these components, in order.
 \describe{
-\item{\code{sweep}}{One row per candidate: \code{K}, \code{ELBO}, \code{AIC}, \code{BIC}, \code{RMSEA},
-\code{SRMR}, \code{CFI}, \code{TLI}, \code{t}, \code{iter}, \code{converged}. \code{AIC} and \code{BIC} are
-hard-selection values at the resolved \code{tau} and \code{t} is their effective
-parameter count, rank-adjusted when \code{rank_adjust = TRUE}.}
-\item{\code{transitions}}{One row per adjacent pair: \code{K_from}, \code{K_to},
-\code{ELBO_gain_pct}, \code{BIC_gain_pct}, then the seven structural facts
-\code{phi_min}, \code{rmsd}, \code{rmsd_max}, \code{ari}, \code{pip_rmsd}, \code{unmatched_ssl},
-\code{collision}. Positive gains favor \code{K_to}. Each percentage divides by the
-largest positive gain on its own path, or is \code{NA_real_} when no positive
-gain exists. Raw criteria stay in \code{sweep}.}
-\item{\code{persistence}}{A list of three upper-triangular \code{W} by \code{W} matrices
-over the fitted \code{K} values: \code{phi} holds \code{phi_min}, \code{rmsd} holds
-\strong{\code{rmsd_max}}, and \code{collision} is the logical reuse mask. Diagonal and
-lower triangle are \code{NA}. Every cell is a direct endpoint comparison,
-never a chain through intervening candidates.}
-\item{\code{loadings}, \code{pips}}{Named \code{K}-indexed lists of candidate matrices,
-retaining the general column in bifactor mode.}
-\item{\code{Q0}, \code{settings}}{The canonical backbone, and the resolved fitting
-and fit-statistic controls. \code{settings} holds no analysis rule.}
+\item{\code{sweep}}{One row per candidate, in column order. \code{K} is integer;
+\code{ELBO}, \code{AIC}, and \code{BIC} are required finite doubles; \code{RMSEA}, \code{SRMR},
+\code{CFI}, and \code{TLI} are descriptive doubles; \code{t} is a double; \code{iter} is a
+nonnegative integer, or \code{NA_integer_} when a well-formed engine result
+reports none; \code{converged} is a nonmissing logical. \code{AIC} and \code{BIC} are
+hard-selection values at the resolved \code{tau}, and \code{t} is their effective
+parameter count -- a finite, nonnegative, whole-valued count stored as
+a double -- rank-adjusted when \code{rank_adjust = TRUE}. Each descriptive
+index is \code{NA_real_} exactly when its own definition does not apply, and
+is never silently substituted.}
+\item{\code{transitions}}{One row per adjacent pair: the integers \code{K_from} and
+\code{K_to}, the doubles \code{ELBO_gain_pct} and \code{BIC_gain_pct}, then the seven
+structural facts -- the doubles \code{phi_min}, \code{rmsd}, \code{rmsd_max}, \code{ari},
+\code{pip_rmsd}, \code{unmatched_ssl} and the logical \code{collision}. Positive gains
+favor \code{K_to}. Each percentage divides by the largest positive gain on
+its own path, or is \code{NA_real_} when no positive gain exists. Raw
+criteria stay in \code{sweep}.}
+\item{\code{persistence}}{Three upper-triangular \code{W} by \code{W} matrices over the
+fitted \code{K} values, named and ordered \code{phi}, \code{rmsd}, \code{collision}: \code{phi}
+holds \code{phi_min}, \code{rmsd} holds \strong{\code{rmsd_max}}, and \code{collision} is the
+logical reuse mask. Diagonal and lower triangle are \code{NA}. Every cell is
+a direct endpoint comparison, never a chain through intervening
+candidates.}
+\item{\code{loadings}, \code{pips}}{Named \code{K}-indexed lists of candidate matrices
+with items in rows and factors in columns: \code{J} by \code{K}, or \code{J} by
+\code{K + 1} with the general column first in bifactor mode. Loadings are
+finite and PIPs lie in \verb{[0, 1]}.}
+\item{\code{Q0}, \code{settings}}{The canonical \code{J} by \code{K0} integer backbone, and
+the resolved controls \code{bifactor}, \code{general}, \code{v0}, \code{max_it}, \code{convChk},
+\code{tolVal}, \code{tau}, \code{rank_adjust}, \code{rank_max_J}, in that order. \code{general}
+is \code{NULL} outside bifactor mode. \code{settings} records fitting and
+fit-statistic controls only: no \code{verbose}, and no analysis rule.}
 }
+
+The loading and PIP matrices and the criteria \code{ELBO}, \code{AIC}, \code{BIC}, and \code{t}
+are required. A fitting failure or a malformed required quantity aborts the
+call with an error naming the \code{K}; there is no status taxonomy and no
+partially populated object. A candidate that merely failed to converge is
+retained with \code{converged = FALSE}, and one aggregate warning names every
+affected \code{K}.
 }
 
 \section{Loading correspondence}{
@@ -98,9 +132,22 @@ whole-column reflection. Ties break by larger finite absolute Tucker
 congruence, then by smaller target index.
 
 The assignment is independent, not one-to-one, so two sources may select the
-same target. That reuse is a \strong{collision}, recorded rather than repaired.
-There is no salience screen: every column participates, and a comparison
-always contains exactly \code{K_from} scored pairs.
+same target. That reuse is a \strong{collision}: it is recorded rather than
+repaired, the pair keeps every otherwise defined measurement, and the target
+left unselected still counts toward \code{unmatched_ssl}. There is no salience
+screen: every column participates, and a comparison always contains exactly
+\code{K_from} scored pairs.
+
+A zero-norm column is no exception. Its aligned distance is defined, so it
+takes part in the assignment and in \code{rmsd} and \code{rmsd_max}, but its Tucker
+congruence is \code{0/0} and therefore undefined. An undefined congruence is
+reported as \code{NA_real_} and makes that comparison's \code{phi_min} \code{NA_real_};
+it is never dropped by an \code{na.rm}.
+
+Because \code{phi_min} is a minimum over \emph{every} column, an overextracted
+candidate carrying a near-empty column will report a low \code{phi_min} and often
+\code{collision = TRUE}. Read that with \code{\link[=ssl]{ssl()}}: it usually means the candidate
+contains a column with nothing in it, not that the retained structure moved.
 }
 
 \section{Identification}{
@@ -118,11 +165,19 @@ freedom. Both are reported evidence about the window rather than failures.
 the Jacobian of the unique covariance elements and therefore tests local
 identification directly; that count cannot exceed \code{J(J + 1)/2}, so its
 degrees of freedom saturate at zero instead of going negative.
+}
 
-Because \code{phi_min} is a minimum over \emph{every} column, an overextracted
-candidate carrying a near-empty column will report a low \code{phi_min} and often
-\code{collision = TRUE}. Read that with \code{\link[=ssl]{ssl()}}: it usually means the candidate
-contains a column with nothing in it, not that the retained structure moved.
+\section{Removed in 0.9.0}{
+
+\code{select_K_elbow()}, the \code{pefa()} arguments \code{cuts}, \code{sustain}, and
+\code{stability_eps}, and the \verb{$selected_K} and \verb{$boundary} components existed
+in 0.8.3 and are gone. That is an intentional pre-1.0 breaking change rather
+than a deprecation cycle: the package owns no count rule, so it can own
+neither a selector nor a stability cutoff. The replacement is ordinary
+analysis code over the stored path, as in the last chunk of the Examples,
+and such code has to say which variant it is, because look-ahead and
+boundary-fallback variants disagree on the same path. \code{NEWS.md} lists the
+removals in full.
 }
 
 \examples{
@@ -138,8 +193,9 @@ fit$transitions[, c("K_from", "K_to", "ELBO_gain_pct", "phi_min")]
 fit$persistence$phi
 ssl(fit)
 
-## A count rule is the analysis's, never the package's. This one reads a
-## 20\% cut on the ELBO path with one candidate of look-ahead.
+## A count rule is the analysis's, never the package's. This one stops at
+## the first ELBO gain under 20\% and looks no further ahead; a
+## full-look-ahead variant can answer differently on the same path.
 g <- fit$transitions$ELBO_gain_pct
 fit$transitions$K_from[which(g < 20)[1]]
 }

@@ -42,7 +42,7 @@ Q0 <- matrix(-1L, ncol(Y), 2)
 for (k in 1:2) Q0[which(groups == k)[1:2], k] <- 1L
 Q0[1:8, ]
 
-p <- pefa(Q0, Y, Kmin = 2, Kmax = 7, v0 = .001, verbose = FALSE)
+p <- pefa(Q0, Y, Kmin = 2, Kmax = 7, verbose = FALSE)
 p
 ```
 
@@ -50,6 +50,11 @@ The backbone has `K0 = 2` columns, so the window may start no lower than 2.
 For each candidate `K`, `pefa()` appends `K - K0` fully regularized columns to
 `Q0` and fits that design with `vbfa()`. The first two group columns keep the
 backbone's identity by position; the rest are exploratory.
+
+The call omits `v0` and `max_it`, so every candidate is fitted at the
+documented `pefa()` defaults: the four-step spike ladder
+`c(.01, .005, .002, .001)` and `max_it = 10000`. Those are `pefa()`'s own
+defaults, and `vbfa()` has its own.
 
 The object has exactly seven components and class `"pefa"`.
 
@@ -87,12 +92,13 @@ parameter count. `RMSEA`, `SRMR`, `CFI`, and `TLI` are descriptive and may be
 positive degrees of freedom. A candidate that ran to `max_it` is retained with
 `converged = FALSE` and one aggregate warning; every candidate converged here.
 
-Read down the columns. ELBO peaks at `K = 3` (-10936.7) and falls afterwards.
-BIC is minimized at `K = 3` (21709.4) and rises monotonically after it. AIC
-does not agree: its minimum is at `K = 5` (21513.0), only 6.9 below its value
-at `K = 3` (21519.8). The absolute-fit indices give no further discrimination
-past three factors: across `K = 3:7` SRMR only moves between 0.035 and 0.027,
-and CFI is already 0.996 at three factors.
+Read down the columns. ELBO peaks at `K = 3` (-10936.65) and falls afterwards.
+BIC is minimized there too (21709.40) and rises monotonically, and so is AIC
+(21519.83) --- at the default spike ladder the three criteria agree on this
+data set. The descriptive indices point the same way rather than adding
+discrimination: RMSEA is 0.017 at `K = 3` and larger at every later candidate,
+SRMR is 0.035 and never lower afterwards, and CFI and TLI peak there at 0.996
+and 0.995.
 
 ## Adjacent transitions
 
@@ -119,7 +125,7 @@ settles anything still tied.
 
 The assignment is independent, not one-to-one, so two sources may pick the same
 target. That reuse is a **collision**, recorded rather than repaired: the
-`6 -> 7` row is the only one here that carries it.
+`5 -> 6` and `6 -> 7` rows both carry it here.
 
 ## Persistence, read directly
 
@@ -141,13 +147,13 @@ loading matrices. Nothing is chained through the candidates in between, so the
 solutions rather than a product of four adjacent steps. The diagonal and lower
 triangle are typed `NA`.
 
-Read the `K = 3` row across: 0.958 against `K = 4`, 0.965 against `K = 5`,
-0.965 against `K = 6`, and then 0.818 against `K = 7`. Every column of the
+Read the `K = 3` row across: 0.996 against `K = 4`, 0.990 against `K = 5`,
+0.989 against `K = 6`, and then 0.789 against `K = 7`. Every column of the
 three-factor solution keeps a near-copy in the four-, five-, and six-factor
-solutions, and the weakest-column RMSD in that row stays between 0.147 and
-0.258.
+solutions, where the weakest-column RMSD stays at 0.039, 0.059, and 0.062. The
+seven-factor cell is the exception, at RMSD 0.253.
 
-The `K = 2` row never exceeds 0.194 anywhere, and the two-factor loading matrix
+The `K = 2` row never exceeds 0.052 anywhere, and the two-factor loading matrix
 says why.
 
 ```{r k2}
@@ -156,15 +162,17 @@ round(p$loadings[["2"]][c(1, 7, 8, 13), ], 2)
 
 Backbone columns are compared by *position*, and at `K = 2` the second backbone
 column is not holding what it holds from `K = 3` on. Items 13-18 have taken it
-over, while its own anchors --- items 7 and 8 --- sit at 0.11 and 0.17. Its
-congruence with the second column of the three-factor solution is 0.186, and
-that one weak pair is the whole of `phi_min` for every `2 -> K` cell. Specifying
-an anchor cell leaves it free to be estimated; it does not force the column to
-be about that cluster when there are too few columns to go round.
+over, while its own anchors --- items 7 and 8 --- sit at 0.02 and 0.08 and have
+been absorbed into the first column alongside cluster 1. Its congruence with the
+second column of the three-factor solution is 0.041, and that one weak pair is
+the whole of `phi_min` for every `2 -> K` cell. Specifying an anchor cell leaves
+it free to be estimated; it does not force the column to be about that cluster
+when there are too few columns to go round.
 
-The collision mask has one `TRUE` cell, at `6 -> 7`, where two source columns of
-the six-factor solution selected the same target. Its `phi_min` is 0.379, the
-lowest value in the table.
+The collision mask is `TRUE` in three cells --- `5 -> 6`, `5 -> 7`, and
+`6 -> 7` --- where two or more source columns selected the same target. Those
+cells sit at `phi_min` 0.998, 0.284, and 0.294, which is the first sign that a
+collision is not by itself bad news about the structure.
 
 ## Column strength
 
@@ -182,44 +190,58 @@ zero. Such a column has no shape, so it matches whichever target has the
 smallest norm and contributes an essentially arbitrary congruence; two such
 columns typically select the same target and raise `collision`. A low
 `phi_min` next to a near-empty column in `ssl()` means "this candidate contains
-a column with nothing in it", not "the retained structure moved". The `6 -> 7`
-row is exactly that case: the six-factor candidate carries columns at 0.178 and
-0.172 alongside two columns near 3, and those two near-empty columns are what
-collide.
+a column with nothing in it", not "the retained structure moved". The `4 -> 5`
+row is exactly that case: its `phi_min` is 0.656, yet its pooled `rmsd` is
+0.030 and its `ari` is 1 --- not one item changed its dominant column. What
+produced 0.656 is a source column of squared length 0.003 matching a target
+column of squared length 0.007, two columns of nothing sitting next to three
+columns near 3. The `5 -> 6` and `6 -> 7` collisions come from those same
+near-empty columns, which all select the same smallest-norm target.
 
 `unmatched_ssl` is on the same scale. It is the largest sum of squared loadings
 among the exploratory target columns that no exploratory source selected ---
 the size of the biggest column the smaller candidate did *not* account for.
-Across the adjacent rows it reads 3.049, 0.915, 0.206, 0.172, 0.614. At
+Across the adjacent rows it reads 3.049, 0.003, 0.007, 0.005, 0.642. At
 `2 -> 3` the surplus column carries 3.05, indistinguishable from the three
-genuine columns of the three-factor solution (3.08, 3.14, 3.05). At `3 -> 4` it
-carries 0.915, less than a third of a real column, and the four-factor solution
-has split the third factor rather than found a fourth one: its two trailing
-columns hold 1.14 and 0.91 where the three-factor solution held one column of
-3.05. At `4 -> 5` and `5 -> 6` the surplus is 0.21 and 0.17. It rises to 0.61
-at `6 -> 7` only because the collision there leaves a second target unselected,
-and `unmatched_ssl` reports the largest of the unused ones.
+genuine columns of the three-factor solution (3.08, 3.14, 3.05): the two-factor
+candidate really was missing a factor. At `3 -> 4`, `4 -> 5`, and `5 -> 6` the
+surplus is under 0.01, because each of those candidates adds a column with
+nothing in it and leaves the three real columns where they were.
+
+`6 -> 7` breaks that pattern, and `ssl(p)` shows why. The seven-factor candidate
+does not append an empty column: it shatters the third cluster into pieces of
+1.853, 0.642, and 0.570.
+
+```{r k7}
+round(p$loadings[["7"]][13:18, 3:5], 2)
+```
+
+Items 17 and 18 have each been given a column of their own. That is a
+genuinely different structure, and it is what drives the `3 -> 7` congruence
+down to 0.789 after three cells at 0.989 or better. The `6 -> 7` value of 0.294
+is a separate matter: like `4 -> 5`, it is two empty columns being compared.
 
 ## What the three readings say here
 
 The criterion path, the persistence row, and `unmatched_ssl` against `ssl()`
 point the same way in this example.
 
-* Both ELBO and BIC turn at `K = 3`, and every later adjacent gain on both
-  paths is negative.
-* The three-factor solution's columns persist into every larger candidate
-  through `K = 6` at congruence 0.958 or better, so nothing above three
-  displaces the structure it found --- the extra columns are added beside it.
-* The first added column (at `K = 3`) carries a full factor's worth of loading;
-  every later one carries a fraction of one, and by `K = 6` the candidate holds
-  two columns under 0.2 that a collision then merges at `K = 7`.
+* ELBO, AIC, and BIC all turn at `K = 3`, and every later adjacent gain on both
+  percentage paths is negative.
+* The three-factor solution's columns persist into `K = 4`, `5`, and `6` at
+  congruence 0.989 or better, so nothing in that range displaces the structure
+  it found --- the extra columns are added beside it.
+* The first added column (at `K = 3`) carries a full factor's worth of loading,
+  3.05; the columns added at `K = 4`, `5`, and `6` carry less than 0.01 each.
 
 The population had three factors, so the reading is right. **It is still the
-reader's inference, not a package verdict.** `pefa()` reported eleven candidate
-numbers, five transition rows, and three triangles; the sentence "the structure
-is three-dimensional and the later columns are surplus" was composed here, in
-the vignette, out of those numbers. AIC's minimum at `K = 5` is in the same
-table and points elsewhere. Nothing in the object arbitrates between them.
+reader's inference, not a package verdict.** `pefa()` reported six candidate
+rows of eleven numbers, five transition rows, and three triangles; the sentence
+"the structure is three-dimensional and the later columns are surplus" was
+composed here, in the vignette, out of those numbers. Two of those numbers point
+the other way if read alone: `phi_min` is 0.656 at `4 -> 5` and 0.294 at
+`6 -> 7`, which looks like structural instability until `ssl()` shows that both
+values belong to columns with nothing in them. Nothing in the object arbitrates.
 
 ## One analysis-side count rule
 
