@@ -6,7 +6,7 @@
 \alias{summary.pefa}
 \alias{print.summary.pefa}
 \alias{plot.pefa}
-\title{Methods for a PEFA factor-number sweep}
+\title{Methods for a PEFA factor-count sweep}
 \usage{
 \method{print}{pefa}(x, ...)
 
@@ -17,38 +17,33 @@
 \method{plot}{pefa}(
   x,
   type = c("objective", "gain", "fit"),
-  criterion = c("elbo", "bic"),
+  criterion = c("elbo", "aic", "bic", "aic_s", "bic_s"),
+  pct = FALSE,
   ...
 )
 }
 \arguments{
-\item{...}{Further arguments. For \code{plot()}, graphical arguments passed to
+\item{...}{Further arguments; for \code{plot()}, graphical arguments passed to
 the first base plot in the selected display.}
 
 \item{object, x}{A result returned by \code{\link[=pefa]{pefa()}}.}
 
-\item{digits}{Number of decimals used when printing fit and stability
-summaries.}
+\item{digits}{Number of decimals used when printing.}
 
 \item{type}{Plot type: criterion trajectories (\code{"objective"}), one gain
 trajectory (\code{"gain"}), or descriptive absolute-fit trajectories
 (\code{"fit"}).}
 
-\item{criterion}{Criterion used when \code{type = "gain"}: \code{"elbo"} (default)
-or \code{"bic"}. Only the ELBO panel draws automatic cut thresholds and the
-primary selection; the BIC-gain panel is descriptive.}
+\item{criterion}{Criterion path for \code{type = "objective"} and
+\code{type = "gain"}. Ignored when \code{type = "fit"}.}
+
+\item{pct}{Plot percent-of-largest gains instead of raw gains.}
 }
 \value{
-\code{summary()} returns a compact \code{summary.pefa} object without loading
-or PIP matrices. It carries \code{ssl}, the per-candidate sums of squared
-loadings (\code{colSums(Lam^2)}), derived from \verb{$loadings} at summary time
-rather than stored on the sweep object; in bifactor mode each vector
-covers all \code{K + 1} columns with the general factor first. SS loadings
-are descriptive column sizes, not Gram eigenvalues, and take part in no
-selection rule. Print and plot methods return their input invisibly.
+\code{summary()} returns a compact \code{summary.pefa} object. Print and plot
+methods return their input invisibly. No method announces a selected
+factor count, because the package selects none.
 }
 \description{
-Methods consume the compact sweep and transition tables directly. Loading
-and PIP matrices remain available in separate named lists on the original
-object but are omitted from summaries and console candidate tables.
+Methods for a PEFA factor-count sweep
 }

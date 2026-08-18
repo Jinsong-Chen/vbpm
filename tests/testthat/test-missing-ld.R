@@ -299,7 +299,13 @@ test_that("plot.pefa draws its three compact displays without error", {
   expect_length(ablines, 1L)
   expect_identical(ablines[[1L]]$h, 0)
   expect_silent(plot(r, type = "fit"))
-  expect_error(plot(r, type = "gain", criterion = "aic"), "arg")
+  ## 0.9.0 retains five criterion paths, so all five are plottable and none of
+  ## them draws a threshold or a selection marker.
+  for (crit in c("elbo", "aic", "bic", "aic_s", "bic_s")) {
+    expect_silent(plot(r, type = "gain", criterion = crit))
+  }
+  expect_silent(plot(r, type = "gain", criterion = "elbo", pct = TRUE))
+  expect_error(plot(r, type = "gain", criterion = "sabic"), "arg")
   expect_error(plot(r, type = "stability"), "arg")
 })
 
@@ -367,20 +373,23 @@ test_that("pefa validates its window", {
                "whole number")
   expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, tau = 1.5, verbose = FALSE),
                "tau")
-  expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, ld = TRUE,
-                    verbose = FALSE), "mode controls")
-  expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, orthogonal = TRUE,
-                    verbose = FALSE), "mode controls")
-  expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, Qe = diag(ncol(d$Y)),
-                    verbose = FALSE), "mode controls")
+  expect_error(pefa(Q0, d$Y, Kmin = 2, Kmax = 3, stability_eps = 0,
+                    verbose = FALSE), "strictly positive")
 
-  args <- list(Q0 = Q0, Y = d$Y, Kmin = 2, Kmax = 2,
-               cuts = c(primary = 10), sustain = 2, bifactor = FALSE,
-               general = 1, max_it = 50, tau = .5,
-               stability_eps = .1, rank_adjust = FALSE, rank_max_J = 100,
-               verbose = FALSE)
-  args[[length(args) + 1L]] <- .001
-  expect_error(do.call(pefa, args), "Every argument in \\.\\.\\. must be named")
+  ## 0.9.0 removed `...`, so a mode control cannot reach vbfa() at all: the
+  ## call fails to match rather than being caught and rejected. Every control
+  ## that changes a returned number is now a named formal recorded in
+  ## $settings, which is a stronger guarantee than the old screen.
+  expect_false(any(c("...", "ld", "Qe", "orthogonal", "cuts", "sustain") %in%
+                     names(formals(pefa))))
+  for (bad in list(list(ld = TRUE), list(orthogonal = TRUE),
+                   list(Qe = diag(ncol(d$Y))), list(cuts = c(primary = 10)))) {
+    expect_error(
+      do.call(pefa, c(list(Q0 = Q0, Y = d$Y, Kmin = 2, Kmax = 3,
+                           verbose = FALSE), bad)),
+      "unused argument"
+    )
+  }
 })
 
 test_that("anchored items' residual variances are not inflated under LD", {

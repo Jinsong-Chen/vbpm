@@ -2,140 +2,90 @@
 % Please edit documentation in R/pefa.R
 \name{pefa}
 \alias{pefa}
-\title{Partially exploratory factor analysis with gain-rule selection}
+\title{Partially exploratory factor analysis over a factor-count window}
 \usage{
 pefa(
   Q0,
   Y,
   Kmin,
   Kmax,
-  cuts = c(primary = 10),
-  sustain = 2,
   bifactor = FALSE,
   general = 1,
+  v0 = c(0.01, 0.005, 0.002, 0.001),
   max_it = 10000,
+  convChk = FALSE,
+  tolVal = 1e-04,
   tau = 0.5,
   stability_eps = 0.1,
   rank_adjust = FALSE,
   rank_max_J = 100,
-  verbose = TRUE,
-  ...
+  verbose = TRUE
 )
 }
 \arguments{
-\item{Q0}{A \code{J} by \code{K0} backbone matrix with entries \code{1}, \code{0}, or \code{-1}.}
+\item{Q0}{A \code{J} by \code{K0} backbone matrix with entries \code{1}, \code{0}, or \code{-1}.
+\code{K0 = 0} (fully exploratory) is supported.}
 
 \item{Y}{An \code{N} by \code{J} data matrix.}
 
 \item{Kmin, Kmax}{Inclusive factor-count window, with \code{Kmin >= ncol(Q0)}.}
 
-\item{cuts}{A named numeric vector of thresholds in \verb{[0, 100]}. Names must
-be unique after trimming and exactly one must be \code{primary}.}
+\item{bifactor}{Fit an orthogonal bifactor parameterization.}
 
-\item{sustain}{Number of consecutive sub-threshold gains required.}
+\item{general}{Scalar or length-\code{J} general-factor design in \verb{\{-1, 0, 1\}},
+used only when \code{bifactor = TRUE}.}
 
-\item{bifactor}{Logical; fit the labelled bifactor extension. In this mode
-\code{Kmin} and \code{Kmax} count group factors.}
+\item{v0}{Spike variance path passed to \code{\link[=vbfa]{vbfa()}}.}
 
-\item{general}{General-column design passed to \code{\link[=vbfa]{vbfa()}} in bifactor mode: a
-scalar or length-\code{J} vector in \code{-1}, \code{0}, \code{1}.}
+\item{max_it, convChk, tolVal}{Optimizer controls passed to \code{\link[=vbfa]{vbfa()}}.}
 
-\item{max_it}{Maximum iterations per \code{\link[=vbfa]{vbfa()}} path stage.}
+\item{tau}{Loading-inclusion threshold used by \code{\link[=fit_stats]{fit_stats()}}.}
 
-\item{tau}{Hard-selection threshold passed to \code{\link[=fit_stats]{fit_stats()}}.}
+\item{stability_eps}{Squared-norm screen for exploratory columns. Must be
+strictly positive: at zero a zero-norm column would clear the screen and
+produce an undefined congruence.}
 
-\item{stability_eps}{Positive squared-L2-norm cutoff for retaining a
-non-backbone column in adjacent loading comparisons. It is not a loading
-magnitude, PIP, or delivery threshold.}
+\item{rank_adjust, rank_max_J}{Rank-adjustment controls for \code{\link[=fit_stats]{fit_stats()}}.}
 
-\item{rank_adjust}{Logical; request Jacobian-rank parameter counts for every
-candidate. The deterministic default uses nominal counts.}
-
-\item{rank_max_J}{Positive whole-number size guard for explicit Jacobian-rank
-counting.}
-
-\item{verbose}{Logical; print per-candidate progress and named results.}
-
-\item{...}{Named estimation controls passed to \code{\link[=vbfa]{vbfa()}}. PEFA controls its
-own model class: \code{ld}, \code{Qe}, \code{ld_control}, and \code{orthogonal} are rejected.}
+\item{verbose}{Print one progress line per candidate.}
 }
 \value{
-An object of class \code{pefa} with two data frames and two matrix lists:
-\describe{
-\item{\verb{$sweep}}{Candidate properties: \code{K}, \code{ELBO}, \code{AIC}, \code{BIC},
-\code{RMSEA}, \code{SRMR}, \code{CFI}, \code{TLI}, \code{t}, \code{iter}, \code{secs}, and \code{converged}.}
-\item{\verb{$transitions}}{Adjacent edges: \code{K_from}, \code{K_to}, \code{ELBO_gain},
-\code{BIC_gain}, \code{rmsd}, \code{rmsd_max}, \code{phi_min}, \code{ari}, \code{pip_rmsd}, the
-logical \code{collision} flag, and \code{unmatched_max}.}
-\item{\verb{$loadings}, \verb{$pips}}{Named lists containing the natural loading
-and PIP matrix for every candidate \code{K}.}
-}
-In order, the other top-level fields are named \code{selected_K} and \code{boundary}
-vectors, the backbone \code{Q0}, and \code{settings}. The settings are \code{cuts},
-\code{sustain}, \code{bifactor}, \code{general}, \code{tau}, \code{stability_eps}, and
-\code{rank_adjust}. Full candidate fits are not retained.
+An object of class \code{"pefa"}: a list with \code{sweep}, \code{transitions},
+\code{persistence}, \code{loadings}, \code{pips}, \code{Q0}, \code{settings}, and \code{provenance},
+in that order. See \code{\link[=persistence]{persistence()}} and \code{\link[=ssl]{ssl()}} for accessors.
 }
 \description{
 Fits \code{\link[=vbfa]{vbfa()}} over a consecutive factor-count window while holding the
 partially specified backbone \code{Q0} fixed and adding exploratory columns.
-Automatic selection uses the named ELBO-gain cuts only. AIC, BIC, absolute
-fit indices, BIC gains, and adjacent structural summaries are descriptive.
 }
 \details{
-Ordinary \code{pefa()} candidates are oblique and have diagonal residuals. The
-optional bifactor sweep is retained as a research extension: its reported
-\code{K} is the number of group factors and \code{\link[=vbfa]{vbfa()}} adds one general factor.
-For directly comparable adjacent-count summaries, bifactor transitions
-remove that labelled general column and apply the ordinary matcher to the
-remaining group-loading and group-PIP blocks. Whether the bifactor extension
-recovers a useful group-factor count is an empirical question rather than a
-guarantee of the paper-defined ordinary workflow.
+\code{pefa()} \strong{returns evidence and decides nothing.} It selects no factor
+count, applies no threshold, vetoes no comparison, and grades nothing. The
+object carries every quantity needed to apply a downstream count rule,
+persistence rule, threshold, horizon, or collision policy; composing those
+facts into a conclusion is the assessor's job. \code{\link[=select_K_elbow]{select_K_elbow()}} is a
+criterion-generic calculator the user may invoke, never something \code{pefa()}
+calls.
+
+Ordinary candidates are oblique with diagonal residuals. The optional
+bifactor sweep is a research extension: its reported \code{K} is the number of
+group factors and \code{\link[=vbfa]{vbfa()}} adds one general factor, so a candidate stores
+\code{K + 1} columns. Structural comparisons strip that labelled general column
+and apply the matcher to the group block, while \verb{$loadings}, \verb{$pips}, and
+\code{\link[=ssl]{ssl()}} retain all \code{K + 1} columns with the general factor first.
 }
-\section{Adjacent loading and PIP summaries}{
+\section{Component evidence}{
 
-Every compared loading column is oriented to have a nonnegative mean. In a
-bifactor sweep the labelled general column is first removed, so the same
-definitions below operate on group factors in both modes. The first
-\code{ncol(Q0)} backbone columns retain their positions and bypass screening;
-remaining columns are screened by \code{stability_eps}, then each smaller-fit
-column is independently matched to its minimum-SSE larger-fit column. \code{rmsd}
-pools common cells; \code{rmsd_max} is the largest
-column-wise RMSD; and \code{phi_min} is signed Tucker congruence. For bipolar or
-contrast columns with means at or near zero, reflection orientation is weak,
-so interpret \code{phi_min} beside both RMSDs. \code{ari} compares dominant-loading
-item partitions using all retained columns, including an unmatched larger-
-fit column. \code{collision} is \code{TRUE} when two or more retained non-backbone
-columns in the smaller fit select the same retained larger-fit column; this
-reuse is permitted by the independent matching rule.
-
-\code{pip_rmsd} is the continuous PIP RMSD over matched cells that are
-unspecified/regularized in both adjacent candidates; fixed backbone cells
-are excluded. \code{unmatched_max} is the largest absolute loading outside
-the completely matched non-backbone core, including screened-out columns; it
-is descriptive and is not an added-factor or salience rule. The complete
-bifactor loading and PIP matrices, including the general column, remain in
-\verb{$loadings} and \verb{$pips} for candidate-level inspection.
-}
-
-\section{Complete paths and boundaries}{
-
-ELBO-gain selection requires every candidate to have converged and the whole
-ELBO-gain path to be finite. An incomplete path returns same-named
-\code{NA_integer_} selections, \code{"none"} boundaries, and one warning; candidates
-on opposite sides of a gap are never joined. An upper result calls for a
-rerun with larger \code{Kmax}. At a lower result, reduce \code{Kmin} when \code{Kmin > K0};
-when \code{Kmin == K0}, reduce or revise \code{Q0}. A one-candidate window has boundary
-\code{"single"}.
-}
-
-\section{Comparability and refitting}{
-
-Positive affine transformations of one fixed criterion path leave the gain
-rule unchanged. This does not make sweeps with different data,
-preprocessing, priors, hyperparameters, or optimization settings
-comparable. The object deliberately has no checkpoint/resume behavior. To
-inspect \code{Phi}, residuals, scores, or other complete-fit quantities, rebuild
-the selected design from \code{Q0} and refit it with \code{\link[=vbfa]{vbfa()}}.
+Each candidate carries five independent status/reason pairs — fit, loading,
+PIP, ELBO, and statistics. A status of \code{"unavailable"} records that the
+component's stated condition was not met, not that its payload is missing:
+a fit that stopped at \code{max_it} has \code{fit_status = "unavailable"} with
+\code{fit_reason = "nonconverged"} while its finite matrices are stored
+unchanged. No component is erased because another is unavailable, and
+convergence never suppresses a structural number that is mathematically
+defined. \verb{$persistence} records \code{from_fit_ok}/\code{to_fit_ok} rather than
+gating on them; a consumer wanting converged endpoints filters on those
+columns.
 }
 
 \examples{
@@ -143,15 +93,15 @@ the selected design from \code{Q0} and refit it with \code{\link[=vbfa]{vbfa()}}
 sim <- sim_fa(N = 400, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
 Q0 <- matrix(-1L, ncol(sim$dat), 2)
 groups <- rep(1:3, each = 6)
-for (k in 1:2) {
-  anchors <- which(groups == k)[1:2]
-  Q0[anchors, k] <- 1L
-}
-result <- pefa(Q0, sim$dat, 2, 4, verbose = FALSE)
-result$selected_K
-result$transitions
-K_selected <- result$selected_K[["primary"]]
-result$loadings[[as.character(K_selected)]]
+for (k in 1:2) Q0[which(groups == k)[1:2], k] <- 1L
+
+fit <- pefa(Q0, sim$dat, 2, 4, verbose = FALSE)
+fit$sweep[, c("K", "ELBO", "BIC", "converged")]
+fit$transitions[, c("K_from", "K_to", "ELBO_gain", "ELBO_gain_pct")]
+persistence(fit, "phi_min")
+
+## The count rule is the user's, not the package's.
+select_K_elbow(fit$sweep$K, fit$sweep$ELBO, delta = 20, sustain = 1)
 }
 
 }
@@ -165,5 +115,6 @@ bi-level Bayesian regularization. \emph{Behavior Research Methods}, 55(4),
 2125--2142. \doi{10.3758/s13428-022-01884-7}
 }
 \seealso{
-\code{\link[=vbfa]{vbfa()}}, \code{\link[=fit_stats]{fit_stats()}}, \code{\link[=select_K_elbow]{select_K_elbow()}}
+\code{\link[=vbfa]{vbfa()}}, \code{\link[=fit_stats]{fit_stats()}}, \code{\link[=select_K_elbow]{select_K_elbow()}}, \code{\link[=persistence]{persistence()}},
+\code{\link[=ssl]{ssl()}}
 }

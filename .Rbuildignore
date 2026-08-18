@@ -8,6 +8,7 @@
 ^doc$
 ^Meta$
 ^dev$
+^data-raw$
 ^tmp$
 ^workbench\.html$
 ^\.agents$

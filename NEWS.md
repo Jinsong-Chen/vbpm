@@ -1,3 +1,91 @@
+# vbpm 0.9.0
+
+First CRAN release. `pefa()` becomes an **evidence-only** function: it selects
+no factor count, applies no threshold, vetoes no comparison, and grades
+nothing. This completes an arc running through 0.8.0 (removed the `stable`
+verdict), 0.8.1 (removed absolute-fit gating), and 0.8.2 (removed automated
+raw/BIC selection). **Every stability number changes**, because the matcher
+changed. 0.8.3 is withdrawn and was never released to CRAN.
+
+## Removed from `pefa()`
+
+* `cuts`, `sustain`, `$selected_K`, and `$boundary` are gone, along with the
+  boundary vocabulary and its console advice. Anything that turned evidence
+  into a verdict by choosing a criterion, cut, metric, threshold, horizon,
+  collision policy, or layer mapping has left the package.
+* `select_K_elbow()` survives as an optional criterion-generic calculator that
+  `pefa()` never invokes. Its defaults are now `delta = 20, sustain = 1`, it
+  uses complete look-ahead with strict inequality, and it returns
+  `NA_integer_` when no candidate qualifies. The old `K[1]`/`K[length(K)]`
+  fallbacks are deleted: a boundary value is no longer returned as a
+  consolation result.
+
+## The matcher
+
+* Columns are now **pairwise sign-aligned**, `s(a,b) = sign(a'b)`, on every
+  column including the backbone. Previously each matrix was oriented to a
+  non-negative column mean, under which a totally reflected anchored factor
+  scored as though nothing had changed.
+* Assignment is independent **maximum absolute congruence** over eligible
+  targets, with ties broken by smaller aligned RMSD and then smaller target
+  index. Collisions are permitted, detected, and reported — never prevented.
+* The scored pair set is the position-matched backbone **union** the assigned
+  exploratory pairs, so a `k = K0` edge is a valid backbone-only comparison
+  instead of an empty index set.
+
+## New: `$persistence`, and structural evidence at every horizon
+
+* `$transitions` is now criterion-only. Structural comparison moves to
+  `$persistence`, one row per *ordered* pair `k < l` at every horizon, each
+  computed directly from its two endpoints and never by chaining adjacent
+  assignments. `persistence(x, metric)` pivots one metric into a horizon
+  triangle with markers for collisions, reduced pair sets, and nonconverged
+  endpoints.
+* `unmatched_ssl` (maximum unmatched column sum of squared loadings) replaces
+  `unmatched_max`; `n_pairs`, `collision_targets`, `collision_multiplicities`,
+  `source_ineligible_n`, and `target_eligible_n` are new.
+* Raw gains are joined by `*_gain_pct` on all five criterion paths, and the
+  soft/effective paths `AIC_S`/`BIC_S` and counts `t_nom`/`t`/`t_S` are
+  retained on `$sweep`.
+
+## Convergence is recorded, not enforced
+
+* A candidate that stopped at `max_it` keeps its returned matrices and **all**
+  of its structural comparisons. `fit_status` no longer propagates into
+  `pair_status`; each pair carries `from_fit_ok`/`to_fit_ok` instead, and a
+  profile requiring converged endpoints writes that condition itself. Blanking
+  a defined number is irreversible from the object, whereas discarding a
+  retained one is one comparison away.
+* Each candidate carries five independent component status–reason pairs (fit,
+  loading, PIP, ELBO, statistics) from a fixed codebook. No component is
+  erased because another is unavailable. `pefa()` emits at most one aggregate
+  warning per call, naming reason codes rather than raw condition text.
+* `pair_status` is `"unavailable"` only for `malformed_loading`. Backbone
+  degeneracy, collisions, ineligible sources, and scarce targets are all
+  reported as facts in their own columns without blanking a metric.
+
+## Other
+
+* New `$provenance` with SHA-256 identities for the standardized data, `Q0`,
+  the resolved settings, and the evidence payload, plus lineage fields for the
+  managed window extension planned in 0.9.1. Hashes exclude `$sweep$secs` and
+  the serialization header, so they track the scientific payload rather than
+  machine speed or the installed R version. Adds `digest` to Imports.
+* New exported accessors `persistence()` and `ssl()`. `summary()$ssl` now
+  calls `ssl()`, so there is one definition.
+* `stability_eps` must be strictly positive; at zero a zero-norm column would
+  clear the screen and produce an undefined congruence.
+* `v0`, `convChk`, and `tolVal` become explicit `pefa()` arguments, and `...`
+  is removed: every control that changes a returned number is recorded in
+  `$settings`.
+* Fully exploratory sweeps (`K0 = 0`) are supported.
+* AO (anchor-only) and AZ (anchor-zero) replace LPC/BPC throughout the
+  documentation and vignettes. `vignette("pefa")` now covers fit and count
+  evidence only; `vignette("bifactor")` covers structure, persistence, and
+  decision profiles.
+* Ships `inst/extdata/vbpm_r8_fixture.rds`, a BLAS-stable integration fixture
+  that re-runs only the matcher and table builders.
+
 # vbpm 0.8.3
 
 This release makes the compact PEFA object easier to inspect and removes two

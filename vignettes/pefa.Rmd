@@ -1,8 +1,8 @@
 ---
-title: "Factor-number sweeps with pefa"
+title: "PEFA Fit Assessment and Factor-Count Evidence"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Factor-number sweeps with pefa}
+  %\VignetteIndexEntry{PEFA Fit Assessment and Factor-Count Evidence}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -12,366 +12,297 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(vbpm)
 ```
 
-`pefa()` fits a bracketed window of partially exploratory factor models. Its
-paper-defined use is an ordinary oblique factor sweep with diagonal residuals.
-The result is a compact comparison object, not another fitted probability
-model: it retains scalar diagnostics and loading/PIP matrices, but not the
-complete candidate fits.
+`pefa()` fits a fixed window of partially exploratory factor models and returns
+an evidence object. It does not select a factor count, apply a gain cut, or
+declare a boundary. This vignette follows the PEFA fit-and-count framework of
+Chen and Jin (2026): ordinary oblique candidates, post-selection fit evidence,
+and several transparent readings of the same criterion paths. Structural
+persistence and the later bifactor decision are covered in
+`vignette("bifactor")`.
 
-## A compact sweep
+## One ordinary oblique sweep
 
-Start with a small LPC (least partially confirmatory) backbone, then leave
-enough room above the plausible count for the sustained-drop rule to observe
-what happens after the elbow. In an LPC backbone each anchor carries its `1`,
-but its entries on the other backbone factors remain unspecified (`-1`); LPC
-therefore imposes no fixed-zero cross-loading assumptions.
+Simulate four correlated factors and launch the sweep from a two-column
+anchor-only (AO) backbone. In AO, an anchor's intended loading is specified by
+`1`, while its cross-backbone cells remain unspecified (`-1`).
 
 ```{r sweep}
 sim <- sim_fa(N = 500, K = 4, ipf = 5, cpf = 0, lam = .7, phi = .3,
               rseed = 123)
-Y <- sim$dat
+Y <- scale(sim$dat, center = TRUE, scale = TRUE)
 
 Q0 <- matrix(-1L, ncol(Y), 2)
 Q0[1:2, 1] <- 1L
 Q0[6:7, 2] <- 1L
 
 p <- pefa(
-  Q0, Y, Kmin = 2, Kmax = 6,
-  cuts = c(primary = 10, sensitivity = 20),
+  Q0, Y, Kmin = 2, Kmax = 7,
+  v0 = .001, max_it = 10000, convChk = FALSE, tolVal = 1e-4,
+  tau = .50, stability_eps = .10,
+  rank_adjust = TRUE, rank_max_J = 100,
   verbose = FALSE
 )
 ```
 
-The object has two scalar tables with different indexing units, while the
-larger candidate matrices are kept separately:
+The analyzed matrix is standardized once explicitly so that its means, sample
+SDs, and analysis-input hash can be archived; `vbfa()`'s internal
+standardization then makes no substantive change. The package provenance hash
+for its engine-standardized matrix has a distinct canonical preimage, however,
+so an archive should retain and verify both rather than require the two byte
+hashes to be equal.
 
-```{r two-tables}
+The evidence object separates candidate evidence from adjacent criterion
+evidence. Loading and PIP matrices remain available for audit or an explicit
+refit, but no decision-dependent field is stored.
+
+```{r evidence-object}
 p$sweep
 p$transitions
 names(p$loadings)
-```
-
-- `$sweep` has one row per candidate. Its scalar columns contain ELBO, AIC,
-  BIC, absolute fit indices, timing, iteration, and convergence information.
-- `$transitions` has one row per adjacent step. It stores raw ELBO and
-  larger-is-better BIC gains, five descriptive stability metrics, a logical
-  column-match collision flag, and the size of the unmatched loading structure.
-- `$loadings` and `$pips` are lists whose names are exactly
-  `as.character(p$sweep$K)`. Each element is a matrix at its natural size, so
-  no padding is needed as `K` changes. In the bifactor research extension each
-  matrix has `K + 1` columns, with the general factor first.
-
-Named vectors give the ELBO-gain choices and their positions in the requested
-window. Their names and order follow `cuts`; `primary` is a role, not a fixed
-percentage.
-
-```{r named-selections}
-cuts <- p$settings$cuts
-data.frame(
-  cut = unname(cuts),
-  selected_K = unname(p$selected_K[names(cuts)]),
-  boundary = unname(p$boundary[names(cuts)]),
-  row.names = names(cuts)
-)
-```
-
-The complete top-level contract is deliberately short:
-
-```{r object-contract}
-names(p)
+names(p$pips)
 names(p$settings)
-c(Kmin = min(p$sweep$K), Kmax = max(p$sweep$K), K0 = ncol(p$Q0))
+names(p$provenance)
 ```
 
-`Q0` records the backbone. The lean `$settings` list records only the controls
-needed to interpret the selections, candidate statistics, matrix dimensions,
-and transitions: `cuts`, `sustain`, `bifactor`, `general`, `tau`,
-`stability_eps`, and `rank_adjust`. The requested window is already determined
-by `$sweep$K`, and the backbone size by `ncol(p$Q0)`, so neither is duplicated.
-This is still an object of class `pefa`, not a public generic sweep framework.
+- `$sweep` has one row per candidate, including ELBO, nominal/hard/soft
+  parameter counts, hard/soft AIC/BIC, hard absolute-fit indices, convergence,
+  and component-specific status/reason fields.
+- `$transitions` contains raw and percent-of-maximum gains for ELBO and
+  hard/soft AIC/BIC. Every AIC/BIC gain is oriented as `IC_from - IC_to`, so
+  larger is better for every displayed gain.
+- `$loadings` and `$pips` are named by the actual candidate count.
 
-## The gain rule
+The percentage gain is a display and decision aid, not an additional fit
+criterion. It is relative to the largest positive gain in this fitted window;
+changing the window can therefore change both its denominator and a later
+count reading.
 
-For a larger-is-better criterion $c(K)$, the adjacent gain is
-$g(K)=c(K)-c(K-1)$. The gain rule finds the first candidate followed by a
-complete run of `sustain` gains strictly below
+## Several count readings from the same evidence
 
-$$\frac{\delta}{100}\max_K g(K).$$
+`select_K_elbow()` is a criterion-generic calculator. Its convenient defaults
+are `delta = 20` and `sustain = 1`; `pefa()` never calls it automatically. The
+following decision profiles deliberately use different settings.
 
-With the default `sustain = 2`, two following sub-threshold gains must be
-available. The look-ahead is not shortened at the right edge; a window without
-enough post-elbow headroom therefore ends at its upper boundary.
+```{r count-profiles}
+K_path <- p$sweep$K
 
-```{r elbow-toy}
-elbo <- c(-5400, -5100, -4900, -4895, -4892)
-select_K_elbow(2:6, elbo, delta = 10, sustain = 2)
-```
+read_score_path <- function(x, criterion) {
+  K <- as.integer(x$sweep$K)
+  if (!identical(K, seq.int(min(K), max(K))))
+    stop("The count rule requires a complete consecutive K path.")
+  score <- switch(
+    criterion,
+    elbo = x$sweep$ELBO,
+    aic = -x$sweep$AIC,
+    bic = -x$sweep$BIC,
+    aic_s = -x$sweep$AIC_S,
+    bic_s = -x$sweep$BIC_S
+  )
+  component_ok <- switch(
+    criterion,
+    elbo = x$sweep$elbo_status == "ok",
+    aic = x$sweep$stats_status == "ok",
+    bic = x$sweep$stats_status == "ok",
+    aic_s = x$sweep$stats_status == "ok",
+    bic_s = x$sweep$stats_status == "ok"
+  )
+  if (!all(x$sweep$fit_status == "ok" & component_ok & is.finite(score)))
+    stop("The requested criterion path is not usable as a complete path.")
+  score
+}
 
-Here the gains are 300, 200, 5, and 3: after the two large steps, the complete
-run of two small gains selects `K = 4`. `pefa()` applies this rule to ELBO for
-every named cut. The normalizer and threshold need no separate selection table
-because they are exactly reproducible from the transition gains:
+score_elbo <- read_score_path(p, "elbo")
+score_aic <- read_score_path(p, "aic")
+score_bic <- read_score_path(p, "bic")
+score_bic_s <- read_score_path(p, "bic_s")
 
-```{r thresholds}
-gain_max <- max(p$transitions$ELBO_gain)
-p$settings$cuts / 100 * gain_max
-```
-
-AIC and BIC remain useful descriptive trajectories, but `pefa()` does not
-automatically select their optima or elbows. Raw optima, when wanted, are
-ordinary operations on the retained paths:
-
-```{r raw-optima}
-c(
-  ELBO = p$sweep$K[which.max(p$sweep$ELBO)],
-  BIC = p$sweep$K[which.min(p$sweep$BIC)]
-)
-```
-
-For a BIC-gain sensitivity analysis, make the smaller-is-better criterion
-larger-is-better explicitly:
-
-```{r bic-sensitivity}
-select_K_elbow(p$sweep$K, -p$sweep$BIC, delta = 10,
-               sustain = p$settings$sustain)
-```
-
-The normalization is relative to one fixed criterion path. Consequently the
-gain decision is unchanged by a positive affine transformation of that same
-path. This does not make results invariant to changing the data, items,
-preprocessing, priors, `tau`, optimization settings, or candidate window.
-
-## Reading candidates and refitting a selected model
-
-Use the character form of `K` when extracting a candidate matrix; do not assume
-that `K` is a list position.
-
-```{r candidate-matrices}
-K_selected <- p$selected_K[["primary"]]
-loading_selected <- p$loadings[[as.character(K_selected)]]
-pip_selected <- p$pips[[as.character(K_selected)]]
-
-dim(loading_selected)
-dim(pip_selected)
-```
-
-The retained matrices also let you inspect why a neighboring candidate may be
-structurally weak. Here are the maximum absolute loading and the number of
-loadings with `PIP >= .5` in every column of the `K = 5` and `K = 6`
-candidates:
-
-```{r inspect-extra-columns}
-Lam5 <- p$loadings[["5"]]
-PIP5 <- p$pips[["5"]]
-Lam6 <- p$loadings[["6"]]
-PIP6 <- p$pips[["6"]]
-
-rbind(
-  data.frame(
-    K = 5, column = seq_len(ncol(Lam5)),
-    max_abs_loading = round(apply(abs(Lam5), 2, max), 3),
-    active_PIPs = colSums(PIP5 >= .5)
+count_readings <- data.frame(
+  profile_id = c(
+    "pefa_fit_v1_style_elbo",
+    "convenience_elbo",
+    "convenience_aic",
+    "convenience_bic",
+    "convenience_soft_bic",
+    "raw_elbo_maximum",
+    "raw_aic_minimum",
+    "raw_bic_minimum",
+    "raw_soft_bic_minimum"
   ),
-  data.frame(
-    K = 6, column = seq_len(ncol(Lam6)),
-    max_abs_loading = round(apply(abs(Lam6), 2, max), 3),
-    active_PIPs = colSums(PIP6 >= .5)
+  profile_source_id = "vbpm_pefa_vignette",
+  profile_source_version = "0.9.0",
+  profile_source_sha256 = NA_character_,
+  count_rule_semantics_id = c(
+    rep("vbpm_0.9_gain_full_lookahead_na", 5),
+    rep("raw_smallest_optimum", 4)
+  ),
+  candidate_path_policy_id = "complete_consecutive_all_ok",
+  criterion = c(
+    "ELBO", "ELBO", "hard AIC", "hard BIC", "soft BIC",
+    "ELBO", "hard AIC", "hard BIC", "soft BIC"
+  ),
+  count_rule = c(rep("gain", 5), rep("raw_extremum", 4)),
+  delta = c(10, 20, 20, 20, 20, NA, NA, NA, NA),
+  sustain = c(2, 1, 1, 1, 1, NA, NA, NA, NA),
+  selected_K = c(
+    select_K_elbow(K_path, score_elbo, delta = 10, sustain = 2),
+    select_K_elbow(K_path, score_elbo),
+    select_K_elbow(K_path, score_aic, delta = 20, sustain = 1),
+    select_K_elbow(K_path, score_bic, delta = 20, sustain = 1),
+    select_K_elbow(K_path, score_bic_s, delta = 20, sustain = 1),
+    K_path[which.max(score_elbo)],
+    K_path[which.max(score_aic)],
+    K_path[which.max(score_bic)],
+    K_path[which.max(score_bic_s)]
+  )
+)
+count_readings
+```
+
+The first row uses the PEFA fit paper v1's 10%/two-gain settings under the
+0.9.0 helper semantics. It is not an exact reproduction of v1 boundary cases:
+0.9.0 requires complete look-ahead and returns `NA_integer_` rather than a
+boundary count when no complete strict crossing exists. The second row uses the
+helper defaults. The next three hold those settings fixed while changing the
+hard/soft criterion, and the final four abandon the gain rule entirely. These
+profiles can agree, but agreement is an empirical property of this path rather
+than a package guarantee. When they differ, report the different counts and
+the evidence responsible for the difference; do not silently choose the one
+that gives the preferred downstream model.
+
+The source hash is `NA` only because this installed vignette is not a sealed
+research registry. A paper registry must record the exact source version and
+hash together with both semantics identifiers.
+
+The arguments can be changed without refitting because every reading consumes
+the retained path:
+
+```{r change-a-decision}
+data.frame(
+  delta = c(5, 10, 20, 30),
+  sustain_1 = vapply(
+    c(5, 10, 20, 30),
+    function(d) select_K_elbow(K_path, p$sweep$ELBO,
+                               delta = d, sustain = 1),
+    integer(1)
+  ),
+  sustain_2 = vapply(
+    c(5, 10, 20, 30),
+    function(d) select_K_elbow(K_path, p$sweep$ELBO,
+                               delta = d, sustain = 2),
+    integer(1)
   )
 )
 ```
 
-At `K = 5`, column 4 is a singleton: it has one active PIP while the four
-substantive columns have five each. At `K = 6` that singleton persists and the
-sixth column is essentially empty, with no active PIP and a very small maximum
-loading. The matrices expose both features instead of hiding them inside one
-aggregate transition number. This `.5` count is a candidate-level diagnostic,
-not the continuous PIP stability metric defined below and not an automatic
-rule.
+This table is a sensitivity display, not permission to select `delta` after
+seeing which count is most attractive. For a confirmatory use, state the
+criterion, cut, and sustain value before interpreting the count. For an
+exploratory use, show the relevant profile range and label any preferred
+reading as judgemental. Every reading above first requires a complete
+consecutive path, `fit_status == "ok"`, the relevant ELBO/statistics status, and
+finite scores; it never deletes a failed candidate and bridges the resulting K
+gap.
 
-The unmatched maximum alone does not establish that diagnosis. After locating
-the unmatched fourth column by comparing the `K = 4` and `K = 5` matrices,
-pull its loading and PIP entries directly:
+### If the PEFA fit paper changes
 
-```{r inspect-singleton}
-data.frame(
-  item = seq_len(nrow(p$loadings[["5"]])),
-  loading = round(p$loadings[["5"]][, 4], 3),
-  PIP = round(p$pips[["5"]][, 4], 3)
-)
-```
+The paper and this package are versioned separately. A later paper revision may
+apply another retained criterion, cut, or sustain value as a newly named profile
+over the same usable path. A different window, simulation design, fitted control,
+or criterion absent from the object creates new evidence and requires the
+corresponding rerun rather than a profile-only change. If the revision
+changes the algorithm itself---for example, how no positive gain, incomplete
+look-ahead, or no crossing is handled---give it a new `count_rule` name rather
+than silently redefining `gain`. Also freeze the hard/soft and rank-count
+conventions: changing rank adjustment changes hard AIC/BIC and requires those
+paths and their simulations to be regenerated. The v1 engine also omitted
+nonconverged candidates before selection; retaining that behavior versus
+requiring a complete path is another rule-semantic decision, not an incidental
+implementation detail. Preserve a legacy path/output fixture before migrating.
+In particular, the paper's saved K = 4:6 design cannot return K = 5 with
+`sustain = 2` under complete look-ahead; that reading requires K = 7 and a new
+simulation rather than post-hoc rescoring of the three-candidate path.
+Freeze `tau` as well, because it changes the hard-selected pattern and therefore
+the hard parameter count and information criteria.
+Also record the optimizer path: this vignette passes scalar `v0 = .001`
+explicitly, whereas the package convenience default is a continuation sequence.
+Changing `v0`, `max_it`, `convChk`, or `tolVal` creates new fitted evidence.
+The structural-persistence
+workflow remains in `vignette("bifactor")` and need not change merely because a
+PEFA-fit count profile changes.
 
-One loading is about `.61`, the second largest is only about `.054`, and only
-the first has `PIP >= .5`. That is the singleton evidence; the transition
-maximum is only the signal to perform this matrix-level check.
+## Fit trajectories and hard/soft post-selection evidence
 
-These matrices support structural inspection and post-hoc comparison. They
-are not partial `vbfa` objects. If downstream work needs factor correlations,
-residual parameters, scores, optimizer state, or another fit component,
-explicitly refit the chosen model using the same data and estimation controls:
-
-```{r explicit-refit, eval=FALSE}
-K_selected <- p$selected_K[["primary"]]
-Q_selected <- if (K_selected == ncol(Q0)) {
-  Q0
-} else {
-  cbind(Q0, matrix(-1L, nrow(Q0), K_selected - ncol(Q0)))
-}
-fit_selected <- vbfa(Y, Q_selected)
-```
-
-`summary(p)` omits the matrix payloads but derives a per-candidate `ssl`
-component -- the column sums of squared loadings, `colSums(Lam^2)` -- and
-prints one row per candidate, which makes weak or emptied columns visible at
-a glance. `print(p)` reports each named cut, selection, and boundary
-compactly:
-
-```{r summary-print}
-summary(p)
-print(p)
-```
-
-## Fit trajectories and parameter counting
-
-RMSEA, SRMR, CFI, and TLI are descriptive trajectories. They help assess
-whether the selected model is adequate and whether fit has levelled off, but
-`pefa()` does not turn conventional fit-index cutoffs into eligibility gates.
+Absolute fit trajectories describe whether candidate misfit has levelled off;
+they do not create automatic eligibility thresholds.
 
 ```{r plots, fig.width=7, fig.height=4.5}
-plot(p, type = "objective")
-plot(p, type = "gain")
+plot(p, type = "objective", criterion = "elbo")
+plot(p, type = "gain", criterion = "elbo", pct = TRUE)
 plot(p, type = "fit")
 ```
 
-The gain plot defaults to ELBO. Use `criterion = "bic"` for a descriptive BIC
-gain trajectory; it has no automatic threshold or selection marker. Gains
-belong to transitions, so their points are located at the factor count reached
-by each step. The fit plot deliberately shows trajectories without fixed
-cutoff lines.
+To obtain a complete fitted object, refit an explicitly identified candidate.
+Here the raw hard-BIC minimum is used only to make the example deterministic.
 
-Candidate information criteria use the nominal hard-selected parameter count
-by default. The optional Jacobian-rank sensitivity can be requested while the
-candidate fits still exist:
-
-```{r rank-adjusted-sweep, eval=FALSE}
-p_rank <- pefa(Q0, Y, Kmin = 2, Kmax = 6,
-               rank_adjust = TRUE, rank_max_J = 100,
-               verbose = FALSE)
+```{r explicit-refit}
+K_refit <- count_readings$selected_K[
+  count_readings$profile_id == "raw_bic_minimum"
+]
+Q_refit <- cbind(
+  Q0,
+  matrix(-1L, nrow(Q0), K_refit - ncol(Q0))
+)
+fit_refit <- vbfa(
+  Y, Q_refit, v0 = .001, max_it = 10000,
+  convChk = FALSE, tolVal = 1e-4
+)
+round(fit_stats(
+  fit_refit, Y = Y, Q = fit_refit$Q, tau = .50,
+  rank_adjust = TRUE, rank_max_J = 100
+), 3)
 ```
 
-This optional calculation requires `numDeriv` and is guarded by `rank_max_J`;
-the default sweep does not invoke numerical derivatives. Record the setting
-when comparing BIC values across analyses.
+`fit_stats()` distinguishes the nominal, hard-selected, and soft/effective
+parameter counts and their corresponding information criteria. Record the
+parameter-count convention whenever AIC or BIC is compared across analyses.
+If Jacobian-rank adjustment is required, request and record it in the sweep and
+the refit rather than mixing conventions.
 
-## Boundary results require a new bracket
+## Window position is evidence, not a package boundary verdict
 
-A boundary is a statement about the requested window, not proof that its edge
-is the right dimension. For example, a window ending at the simulated count
-does not contain the two following steps needed by the default rule:
+A count at an edge, an `NA` returned because no strict crossing exists, or too
+little look-ahead for the requested `sustain` is information about the fitted
+window. It is not proof that an endpoint is the correct count.
 
-```{r boundary}
-p_narrow <- pefa(Q0, Y, Kmin = 2, Kmax = 4, verbose = FALSE)
+```{r headroom}
+gain_rows <- count_readings$count_rule == "gain"
 data.frame(
-  selected_K = p_narrow$selected_K[["primary"]],
-  boundary = p_narrow$boundary[["primary"]]
+  profile_id = count_readings$profile_id[gain_rows],
+  selected_K = count_readings$selected_K[gain_rows],
+  at_lower_edge = count_readings$selected_K[gain_rows] == min(K_path),
+  at_upper_edge = count_readings$selected_K[gain_rows] == max(K_path),
+  following_candidates = max(K_path) - count_readings$selected_K[gain_rows],
+  requested_sustain = count_readings$sustain[gain_rows]
 )
 ```
 
-An `upper` result asks for a complete rerun with a larger `Kmax`; a `lower`
-result asks for a smaller `Kmin` when the backbone permits it. Because the
-backbone has `ncol(Q0)` specified columns, `Kmin` cannot be smaller than that
-count; a lower result there asks you to reduce or revise `Q0`. A one-candidate
-window has boundary `single`.
-
-Every selection also requires a complete, converged, finite ELBO path. An
-unsuccessful interior candidate invalidates the selections, which become typed
-`NA` with boundary `none`; the rule does not bridge the gap or continue on a
-later fragment. Version 0.8.3 has no checkpoint, resume, or sweep-extension
-API, so changing either boundary requires a complete rerun.
-
-## Adjacent-count stability is descriptive
-
-For consecutive converged candidates, `$transitions` asks how well the smaller
-loading solution reappears in the larger one:
-
-```{r adjacent-stability}
-p$transitions[, c(
-  "K_from", "K_to", "rmsd", "rmsd_max", "phi_min", "ari",
-  "pip_rmsd", "collision", "unmatched_max"
-)]
-```
-
-For a bifactor edge, the labelled general column is removed first so that the
-same comparison operates on group columns in both modes. The comparison then
-orients each loading column to have a nonnegative mean. The
-`K0 = ncol(Q0)` backbone columns remain fixed by position. Beyond the backbone,
-a column is retained when its squared L2 norm is at least
-`stability_eps` (default `.1`). Following Chen (2023, Eq. 17), each retained
-smaller-fit non-backbone column independently selects the minimum-SSE retained
-column of the larger fit; exact ties choose the lowest larger-fit column.
-Larger-fit columns are not removed after a match, so repeated selections are
-possible. This is deterministic nearest-column matching, not a rotation or a
-global assignment search.
-
-The five stability metrics are:
-
-- `rmsd`, over all entries in the fixed and matched common columns;
-- `rmsd_max`, the largest column-wise RMSD, which exposes a changing factor
-  that the aggregate RMSD can dilute;
-- `phi_min`, the minimum **signed** Tucker congruence after the common
-  orientation;
-- `ari`, comparing dominant-absolute-loading item partitions using all
-  retained columns, including unmatched retained columns in the larger fit;
-- `pip_rmsd`, the continuous RMSD between PIPs after applying the same column
-  match, restricted to cells that are selectable at both endpoints.
-
-The logical `collision` flag is `TRUE` when two or more retained non-backbone
-columns in the smaller fit independently select the same larger-fit column.
-It exposes a many-to-one reproduction rather than silently forcing a distinct
-match; `FALSE` only says that no match index was reused, not that the edge is
-otherwise stable. It is `NA` when loading matching is unavailable. A malformed
-PIP endpoint alone does not erase it because collision is loading-based.
-
-Read signed `phi_min` beside both loading RMSDs. A bipolar or contrast column
-with zero or nearly zero mean has a weak orientation: equivalent reflected
-columns can then produce `phi_min` near `-1`.
-
-For `pip_rmsd`, a backbone cell is eligible only when its `Q0` entry is `-1`
-at both endpoints; every cell in a matched added exploratory column is
-eligible. Fixed backbone entries (`0` or `1`) and unmatched columns are
-excluded, so they cannot dilute the result. Zero means identical PIP values
-over the eligible matched cells, without dichotomizing them at `.5`; no
-eligible cells or a malformed PIP endpoint gives typed `NA`. The loading-based
-metrics remain available when only the PIP comparison is malformed.
-
-`unmatched_max` is separate from the five stability metrics. It is the
-largest absolute loading outside the matched non-backbone core, including
-larger-fit columns screened out by `stability_eps`; it is zero when nothing is
-unmatched and `NA` when a complete match is impossible. It is a continuous
-size diagnostic, not a `.3` salient-loading rule and not proof that one column
-is uniquely the added factor.
-
-`stability_eps` is a squared-column-norm screen, not a loading cutoff, a PIP
-threshold, or an ELBO gain cut. Values around `.1`--`.2` can be used as a
-sensitivity range, but are not validated structural thresholds. All these
-fields are descriptive and none enters automatic factor-number selection.
-Stability values are `NA` for failed endpoints, incomplete matches, and
-malformed endpoint matrices as applicable.
-
-These summaries are a package extension, not part of Chen and Jin's gain rule.
-The paper's separate robustness analysis instead compares solutions obtained
-from alternative backbones. When backbone choice is uncertain, repeat the
-complete sweep from another substantively defensible backbone and compare the
-selected counts and loading patterns. Candidate comparisons are meaningful
-only when the data and all other estimation settings are held fixed.
-
-`pefa()` does not sweep local-dependence models. Fit a prespecified residual
-structure directly with `vbfa(..., ld = TRUE)` when that model is required.
+If the prespecified analysis requires more headroom, change the bracket and
+obtain a new complete evidence object over the expanded window. In vbpm 0.9.0
+this means another `pefa()` call. A future managed extension may reuse verified
+compatible candidate fits only when exactly one bound moves strictly outward
+without creating a count below `max(1L, ncol(p$Q0))`, and only when the
+schema/engine/data/Q0/settings/evidence/lineage fingerprints agree. It must leave
+`p` byte-identical and return a complete child with the parent evidence hash and
+the exact reused/new K values. Do not paste in one isolated candidate or
+reinterpret a missing crossing as a selected endpoint. The package rebuilds
+the full evidence; because a percentage gain is window-relative, the assessor
+then recomputes every profile reading against the child.
 
 ## References
 
 * Chen, J. (2023). Fully and partially exploratory factor analysis with
   bi-level Bayesian regularization. *Behavior Research Methods*, 55(4),
-  2125--2142. \doi{10.3758/s13428-022-01884-7}
+  2125-2142. \doi{10.3758/s13428-022-01884-7}
 * Chen, J., & Jin, Y. (2026). Recovering latent structures after variational
   Bayesian variable selection: Fit assessment and factor-number selection in
   partially exploratory factor analysis. *arXiv preprint* arXiv:2607.07159.

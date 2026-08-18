@@ -170,38 +170,33 @@ test_that("fit_stats reads orthogonal from the fit (the bifactor footgun)", {
   expect_error(fit_stats(fo, Y = d$Y, Q = d$Q, orthogonal = TRUE), "contradicts")
 })
 
-test_that("pefa selects a factor number within the window", {
+test_that("pefa returns evidence over the window and selects nothing", {
   d <- make_dat()
   Q0 <- d$Q[, 1:2, drop = FALSE]
   r <- pefa(Q0, d$Y, Kmin = 2, Kmax = 4, verbose = FALSE,
                max_it = 1500, v0 = 0.001)
-  expect_true(all(r$selected_K %in% 2:4))
-  expect_true(all(r$sweep$converged))
   expect_s3_class(r, "pefa")
   expect_false(inherits(r, "vbpm_sweep"))
-  expect_named(r$sweep, c("K", "ELBO", "AIC", "BIC", "RMSEA", "SRMR",
-                          "CFI", "TLI", "t", "iter", "secs", "converged"))
-  ## Gains are edge quantities: they live in $transitions, not $sweep.
+  expect_true(all(r$sweep$converged))
+
+  ## The evidence-only contract: nothing here decides a count.
+  expect_null(r$selected_K)
+  expect_null(r$boundary)
   expect_false(any(grepl("_gain", names(r$sweep))))
-  expect_named(r$transitions,
-               c("K_from", "K_to", "ELBO_gain", "BIC_gain", "rmsd",
-                 "rmsd_max", "phi_min", "ari", "pip_rmsd", "collision",
-                 "unmatched_max"))
+
   expect_identical(nrow(r$transitions), nrow(r$sweep) - 1L)
+  W <- nrow(r$sweep)
+  expect_identical(nrow(r$persistence), as.integer(W * (W - 1L) / 2L))
   expect_true(all(vapply(r$loadings, is.matrix, logical(1))))
   expect_true(all(vapply(r$pips, is.matrix, logical(1))))
 
   s <- summary(r)
   expect_s3_class(s, "summary.pefa")
-  expect_identical(s$selected_K, r$selected_K)
-  expect_identical(s$boundary, r$boundary)
-  expect_identical(s$settings$cuts, c(primary = 10))
-  expect_named(s$sweep, c("K", "ELBO", "AIC", "BIC", "RMSEA", "SRMR",
-                          "CFI", "TLI", "t", "iter", "secs", "converged"))
-  expect_true(s$boundary[["primary"]] %in%
-                c("lower", "interior", "upper", "single", "none"))
-  expect_output(print(r), "PEFA sweep")
-  expect_output(print(s), "ELBO gain \\[primary = 10%\\]")
+  expect_identical(s$ssl, ssl(r))
+  expect_identical(s$settings, r$settings)
+  expect_output(print(r), "PEFA evidence")
+  expect_output(print(r), "No factor count is selected")
+  expect_output(print(s), "Candidates:")
 })
 
 test_that("fits carry the vbpm_fit class; print and coef dispatch", {
@@ -296,13 +291,12 @@ test_that("pefa bifactor sweep counts group factors without storing K_total", {
   expected_dims <- stats::setNames(3:4, c("2", "3"))
   expect_identical(vapply(r$loadings, ncol, integer(1)), expected_dims)
   expect_identical(vapply(r$pips, ncol, integer(1)), expected_dims)
-  expect_type(r$transitions$collision, "logical")
-  if (all(r$sweep$converged)) {
-    expect_true(any(is.finite(unlist(r$transitions[c(
-      "rmsd", "rmsd_max", "phi_min", "ari", "pip_rmsd",
-      "unmatched_max"
-    )], use.names = FALSE))))
-  }
+  ## Structural evidence lives in $persistence; $transitions is criterion-only.
+  expect_false("collision" %in% names(r$transitions))
+  expect_type(r$persistence$collision, "logical")
+  expect_true(any(is.finite(unlist(r$persistence[c(
+    "rmsd", "rmsd_max", "phi_min", "ari", "pip_rmsd", "unmatched_ssl"
+  )], use.names = FALSE))))
   expect_output(print(r), "group factors [(][+] 1 general")
   expect_output(print(summary(r)), "K_total")
 })

@@ -49,21 +49,32 @@ the measurement part (`Q_A`) and the structural part (`Q_B`).
   proportionality CVs, approximate higher-order parameters (second-order
   loadings per group factor), and testlet/special effect sizes
   (Zhang & Chen, 2024, Eq. 16).
-- **`pefa()`** / **`select_K_elbow()`** — sweep the number of factors and
-  select it with a relative ELBO-gain rule on one fixed criterion path. The
-  compact result carries two scalar tables: `$sweep` has one row per candidate,
-  and `$transitions` has one row per adjacent pair with ELBO/BIC gains and
-  descriptive stability diagnostics. Candidate matrices live separately in
-  K-named `$loadings` and `$pips` lists (`result$loadings[["4"]]`). Named
-  `$selected_K` and `$boundary` vectors report every requested cut. Transition
-  summaries include aggregate and maximum column RMSD, signed minimum
-  congruence, ARI, continuous PIP RMSD over mutually selectable matched cells,
-  a logical collision flag for repeated Equation-17 column matches, and a
-  separate maximum-unmatched-loading size diagnostic. Full candidate fits are
-  not retained: explicitly refit a selected `K` when downstream work needs a
-  complete model. The lean `$settings` list records only the controls needed
-  to interpret these results. Includes compact `print()`, `summary()`, and
-  `plot()` methods.
+- **`pefa()`** — sweep the number of factors over a fixed window and return an
+  **evidence object**. It selects no factor count, applies no threshold, vetoes
+  no comparison, and grades nothing; every quantity a downstream count rule,
+  persistence rule, threshold, horizon, or collision policy needs is present,
+  and composing them into a conclusion is yours. Three tables: `$sweep` has one
+  row per candidate (ELBO, nominal/hard/soft parameter counts, hard and soft
+  AIC/BIC, RMSEA/SRMR/CFI/TLI, and five independent component status–reason
+  pairs); `$transitions` has one row per adjacent pair with raw and
+  percent-of-largest gains on all five criterion paths; `$persistence` has one
+  row per *ordered* pair at every horizon, carrying congruence, pooled and
+  maximum aligned RMSD, ARI, PIP RMSD, unmatched-column size, collision
+  location and multiplicity, eligibility counts, and endpoint-convergence
+  facts. Candidate matrices live in K-named `$loadings` and `$pips` lists
+  (`result$loadings[["4"]]`), and `$provenance` carries SHA-256 identities for
+  the standardized data, `Q0`, settings, and the evidence payload.
+  Convergence is *recorded*, never used to suppress a number that is defined:
+  a candidate that stopped at `max_it` keeps its matrices and its structural
+  comparisons, flagged through `from_fit_ok`/`to_fit_ok`.
+- **`select_K_elbow()`** — the only packaged factor-count calculator, and one
+  `pefa()` never invokes. Applies a user-supplied sustained-drop rule to any
+  larger-is-better criterion path, returning `NA_integer_` rather than a
+  boundary consolation value when nothing qualifies.
+- **`persistence()`**, **`ssl()`** — pivot one structural metric into a
+  horizon triangle, and read per-candidate sums of squared loadings.
+  Compact `print()`, `summary()`, and `plot()` methods complete the set; none
+  of them announces a selected count, because none is chosen.
 - **`sim_fa()`** and **`sim_lvm()`** — two complementary data generators.
   `sim_fa()` is driven by the loading *pattern* (items per factor, alternating
   cross-loadings, minor factors) and can generate **higher-order/testlet**

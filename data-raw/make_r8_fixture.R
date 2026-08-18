@@ -1,0 +1,912 @@
+## ---------------------------------------------------------------------------
+## data-raw/make_r8_fixture.R
+##
+## Rebuilds inst/extdata/vbpm_r8_fixture.rds, the R8 integration fixture of
+## plan section 6.1.  Runnable standalone from the package root (or from
+## data-raw/):
+##
+##   Rscript data-raw/make_r8_fixture.R
+##
+## The fixture is a named list of SWEEPS.  Every loading and PIP matrix is
+## constructed by hand or from a seeded rnorm jitter -- no model is ever
+## fitted, so no result here depends on a BLAS.  Each member stores those
+## matrices together with the FROZEN expected $transitions, $persistence, and
+## pivoted persistence() matrices, so tests/testthat/test-r8-fixture.R re-runs
+## only the matcher and the two table builders.
+##
+## Two independent checks run before anything is frozen, because a fixture that
+## freezes a bug is worse than no fixture:
+##
+##   1. `check_facts()` compares every discrete pair fact of every edge against
+##      a hand-derived table written out below with the member that produced
+##      it.
+##   2. `check_reference()` recomputes all seventeen matcher fields with the
+##      naive reference implementation in this file -- direct formulas, no
+##      rescaling, explicit loops -- and requires agreement.
+##
+## data-raw is .Rbuildignore'd; nothing here ships in the package.
+## ---------------------------------------------------------------------------
+
+suppressPackageStartupMessages(library(vbpm))
+
+FIXTURE_VERSION <- "vbpm_r8_fixture_1"
+EVIDENCE_SCHEMA_ID <- "vbpm_pefa_evidence_1"
+
+METRICS <- c("phi_min", "rmsd", "rmsd_max", "ari", "pip_rmsd",
+             "unmatched_ssl", "n_collisions")
+
+DOUBLE_PAIR_COLS <- c("phi_min", "rmsd", "rmsd_max", "ari", "pip_rmsd",
+                      "unmatched_ssl")
+
+
+# ---- output location --------------------------------------------------
+
+find_root <- function() {
+  here <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
+  for (p in c(here, dirname(here))) {
+    if (file.exists(file.path(p, "DESCRIPTION")) &&
+        dir.exists(file.path(p, "R"))) {
+      return(p)
+    }
+  }
+  stop("Run this script from the vbpm package root or from data-raw/.",
+       call. = FALSE)
+}
+
+
+# ---- canonical shapes -------------------------------------------------
+
+J <- 8L
+ITEMS <- paste0("item_", seq_len(J))
+
+factor_names <- function(K0, K, bifactor) {
+  nm <- if (K0 > 0L) paste0("F", seq_len(K0)) else character(0)
+  if (K > K0) nm <- c(nm, paste0("F", seq.int(K0 + 1L, K)))
+  if (isTRUE(bifactor)) nm <- c("G", nm)
+  nm
+}
+
+## Assemble one stored loading matrix from its columns.  In bifactor mode the
+## first column supplied is the general factor, exactly as vbfa() stores it.
+lam_of <- function(cols, K0, bifactor = FALSE) {
+  m <- do.call(cbind, cols)
+  storage.mode(m) <- "double"
+  K <- ncol(m) - as.integer(isTRUE(bifactor))
+  dimnames(m) <- list(ITEMS, factor_names(K0, K, bifactor))
+  m
+}
+
+## Deterministic jitter: set.seed() inside, so the result never depends on the
+## order in which the members are built.
+jitter_lam <- function(m, seed, sd = 0.01) {
+  set.seed(seed)
+  out <- m + matrix(stats::rnorm(length(m), sd = sd), nrow(m), ncol(m))
+  dimnames(out) <- dimnames(m)
+  out
+}
+
+## Full-width design for one candidate: the backbone, the appended
+## regularized exploratory columns, and (bifactor) a leading general column.
+design_of <- function(Q0, K0, K, bifactor) {
+  Q <- if (K > K0) cbind(Q0, matrix(-1L, nrow(Q0), K - K0)) else Q0
+  if (isTRUE(bifactor)) Q <- cbind(matrix(-1L, nrow(Q0), 1L), Q)
+  matrix(as.integer(Q), nrow(Q0), K + as.integer(isTRUE(bifactor)))
+}
+
+## A plausible PIP payload: monotone in |loading|, inside [0, 1], with the
+## Q0-fixed cells pinned so that the matcher's "regularized at both endpoints"
+## rule has something real to exclude.
+pip_of <- function(lam, Q) {
+  a <- abs(lam)
+  p <- 0.02 + 0.94 * (a / max(a))
+  p[Q == 1L] <- 1
+  p[Q == 0L] <- 0
+  p <- pmin(1, pmax(0, p))
+  dim(p) <- dim(lam)
+  dimnames(p) <- dimnames(lam)
+  p
+}
+
+## Independent restatement of section 3.1: the smallest SSL among the K0
+## position-matched backbone columns, which in bifactor mode are the stored
+## columns 2:(K0 + 1).
+backbone_ssl_min_ref <- function(lam, K0, bifactor, loading_ok) {
+  if (K0 == 0L || !isTRUE(loading_ok)) return(NA_real_)
+  cols <- seq_len(K0) + as.integer(isTRUE(bifactor))
+  min(vapply(cols, function(j) sum(lam[, j]^2), numeric(1)))
+}
+
+
+# ---- synthetic candidate table ----------------------------------------
+
+## Criterion paths with diminishing gains on every retained path, so that
+## $transitions has something to normalize and select_K_elbow() has a shape.
+crit_paths <- function(n) {
+  take <- function(v) v[seq_len(n)]
+  ELBO <- take(c(-4000, -3700, -3610, -3585, -3578))
+  AIC <- take(c(8100, 7560, 7420, 7390, 7385))
+  BIC <- AIC + take(c(60, 84, 108, 132, 156))
+  list(
+    ELBO = as.double(ELBO),
+    t_nom = take(c(20, 28, 36, 44, 52)),
+    t_S = take(c(18.5, 26.0, 33.5, 41.0, 48.5)),
+    AIC = as.double(AIC), BIC = as.double(BIC),
+    AIC_S = AIC - take(c(4, 5, 6, 7, 8)),
+    BIC_S = BIC - take(c(12, 15, 18, 21, 24)),
+    RMSEA = take(c(.085, .062, .048, .041, .039)),
+    SRMR = take(c(.070, .055, .043, .038, .036)),
+    CFI = take(c(.900, .941, .968, .975, .977)),
+    TLI = take(c(.880, .928, .958, .966, .969)),
+    iter = take(c(140L, 210L, 265L, 320L, 380L))
+  )
+}
+
+build_sweep <- function(Ks, loadings, K0, bifactor,
+                        converged = NULL, loading_reason = NULL,
+                        pip_reason = NULL, elbo_reason = NULL,
+                        stats_reason = NULL) {
+  n <- length(Ks)
+  blank <- rep(NA_character_, n)
+  if (is.null(converged)) converged <- rep(TRUE, n)
+  if (is.null(loading_reason)) loading_reason <- blank
+  if (is.null(pip_reason)) pip_reason <- blank
+  if (is.null(elbo_reason)) elbo_reason <- blank
+  if (is.null(stats_reason)) stats_reason <- blank
+
+  cp <- crit_paths(n)
+  st <- function(reason) ifelse(is.na(reason), "ok", "unavailable")
+  ## Section 3.1.1: the fit component is "ok" exactly when the recognized
+  ## convergence flag normalizes to TRUE; a recognized non-converging flag is
+  ## `nonconverged`, an unrecognizable one is `malformed_fit`.
+  fit_status <- ifelse(converged %in% TRUE, "ok", "unavailable")
+  fit_reason <- ifelse(converged %in% TRUE, NA_character_,
+                       ifelse(is.na(converged), "malformed_fit",
+                              "nonconverged"))
+  ELBO <- cp$ELBO
+  ELBO[!is.na(elbo_reason)] <- NA_real_
+  loading_ok <- is.na(loading_reason)
+
+  data.frame(
+    K = as.integer(Ks), ELBO = ELBO,
+    t_nom = as.double(cp$t_nom), t = as.double(cp$t_nom),
+    t_S = as.double(cp$t_S),
+    AIC = cp$AIC, BIC = cp$BIC,
+    AIC_S = as.double(cp$AIC_S), BIC_S = as.double(cp$BIC_S),
+    RMSEA = as.double(cp$RMSEA), SRMR = as.double(cp$SRMR),
+    CFI = as.double(cp$CFI), TLI = as.double(cp$TLI),
+    iter = as.integer(cp$iter), secs = rep(0, n),
+    converged = converged,
+    backbone_ssl_min = vapply(
+      seq_len(n),
+      function(i) backbone_ssl_min_ref(loadings[[i]], K0, bifactor,
+                                       loading_ok[i]),
+      numeric(1)
+    ),
+    fit_status = fit_status, fit_reason = fit_reason,
+    loading_status = st(loading_reason), loading_reason = loading_reason,
+    pip_status = st(pip_reason), pip_reason = pip_reason,
+    elbo_status = st(elbo_reason), elbo_reason = elbo_reason,
+    stats_status = st(stats_reason), stats_reason = stats_reason,
+    stringsAsFactors = FALSE
+  )
+}
+
+
+# ---- naive reference matcher (second implementation) ------------------
+
+## Section 2, written the slow obvious way: no rescaling before the dot
+## product, explicit loops for the pooled RMSD and the PIP discrepancy, and a
+## contingency table built from factors rather than from max.col().  Its only
+## job is to disagree with R/pefa_match.R if either of them is wrong.
+ref_pair_facts <- function(lam_from, lam_to, pip_from, pip_to,
+                           reg_from, reg_to, K0, eps,
+                           from_ok, to_ok, pip_ok_from, pip_ok_to) {
+  Jn <- nrow(lam_from)
+  Kf <- ncol(lam_from)
+  Kt <- ncol(lam_to)
+  both <- from_ok && to_ok
+
+  nrm <- function(v) sqrt(sum(v * v))
+  cg <- function(a, b) {
+    if (nrm(a) == 0 || nrm(b) == 0) return(NA_real_)
+    min(1, abs(sum(a * b)) / (nrm(a) * nrm(b)))
+  }
+  sg <- function(a, b) if (sum(a * b) >= 0) 1 else -1
+  ar <- function(a, b, s) sqrt(sum((a - s * b)^2) / Jn)
+  ssl <- function(m, cols) vapply(cols, function(j) sum(m[, j]^2), numeric(1))
+
+  bb <- seq_len(K0)
+  sf <- if (Kf > K0) seq.int(K0 + 1L, Kf) else integer(0)
+  tf <- if (Kt > K0) seq.int(K0 + 1L, Kt) else integer(0)
+
+  es <- if (from_ok) sf[ssl(lam_from, sf) >= eps] else integer(0)
+  et <- if (to_ok) tf[ssl(lam_to, tf) >= eps] else integer(0)
+  source_ineligible_n <- if (from_ok) length(sf) - length(es) else NA_integer_
+  target_eligible_n <- if (to_ok) length(et) else NA_integer_
+
+  zero_backbone <- function(m) {
+    if (K0 == 0L) return(FALSE)
+    s <- ssl(m, bb)
+    any(is.finite(s) & s == 0)
+  }
+  backbone_degenerate <- if (K0 == 0L) {
+    FALSE
+  } else if ((from_ok && zero_backbone(lam_from)) ||
+             (to_ok && zero_backbone(lam_to))) {
+    TRUE
+  } else if (both) {
+    FALSE
+  } else {
+    NA
+  }
+
+  asg <- rep(NA_integer_, Kf)
+  if (both && length(es) && length(et)) {
+    for (i in es) {
+      a <- lam_from[, i]
+      ph <- vapply(et, function(j) cg(a, lam_to[, j]), numeric(1))
+      usable <- which(!is.na(ph))
+      if (!length(usable)) next
+      best <- usable[ph[usable] == max(ph[usable])]
+      if (length(best) > 1L) {
+        keys <- vapply(best, function(p) {
+          b <- lam_to[, et[p]]
+          ar(a, b, sg(a, b))
+        }, numeric(1))
+        if (!anyNA(keys)) best <- best[keys == min(keys)]
+      }
+      asg[i] <- et[best[1L]]
+    }
+  }
+
+  ps <- if (both) c(bb, which(!is.na(asg))) else integer(0)
+  pt <- if (both) c(bb, asg[!is.na(asg)]) else integer(0)
+  m <- length(ps)
+  n_pairs <- if (both) m else NA_integer_
+
+  phi_min <- NA_real_
+  rmsd <- NA_real_
+  rmsd_max <- NA_real_
+  if (m > 0L) {
+    phis <- numeric(m)
+    rms <- numeric(m)
+    for (p in seq_len(m)) {
+      a <- lam_from[, ps[p]]
+      b <- lam_to[, pt[p]]
+      phis[p] <- cg(a, b)
+      rms[p] <- ar(a, b, sg(a, b))
+    }
+    if (!anyNA(phis)) phi_min <- min(phis)
+    if (!anyNA(rms)) {
+      rmsd_max <- max(rms)
+      total <- 0
+      for (p in seq_len(m)) {
+        a <- lam_from[, ps[p]]
+        b <- lam_to[, pt[p]]
+        total <- total + sum((a - sg(a, b) * b)^2)
+      }
+      rmsd <- sqrt(total / (Jn * m))
+    }
+  }
+
+  collision <- NA
+  n_collisions <- NA_integer_
+  collision_targets <- NA_character_
+  collision_multiplicities <- NA_character_
+  unmatched_n <- NA_integer_
+  unmatched_ssl <- NA_real_
+  if (both) {
+    used <- asg[!is.na(asg)]
+    counts <- table(used)
+    reused <- sort(as.integer(names(counts)[counts > 1L]))
+    n_collisions <- length(reused)
+    collision <- n_collisions > 0L
+    collision_targets <- paste(reused, collapse = ",")
+    collision_multiplicities <- paste(
+      vapply(reused, function(j) sum(used == j), integer(1)), collapse = ","
+    )
+    unm <- tf[!(tf %in% used)]
+    unmatched_n <- length(unm)
+    unmatched_ssl <- if (unmatched_n > 0L) max(ssl(lam_to, unm)) else 0
+  }
+
+  ari <- NA_real_
+  if (both) {
+    pcf <- c(bb, es)
+    pct <- c(bb, et)
+    if (length(pcf) && length(pct) && Jn >= 2L) {
+      lab <- function(m2, cols) {
+        vapply(seq_len(Jn),
+               function(i) which.max(abs(m2[i, cols])), integer(1))
+      }
+      p <- factor(lab(lam_from, pcf), levels = seq_along(pcf))
+      q <- factor(lab(lam_to, pct), levels = seq_along(pct))
+      tb <- table(p, q)
+      c2 <- function(x) x * (x - 1) / 2
+      A <- sum(c2(tb))
+      B <- sum(c2(rowSums(tb)))
+      Cc <- sum(c2(colSums(tb)))
+      E <- B * Cc / c2(Jn)
+      D <- (B + Cc) / 2 - E
+      ari <- if (D == 0) 1 else min(1, max(-1, (A - E) / D))
+    }
+  }
+
+  pip_rmsd <- NA_real_
+  if (both && isTRUE(pip_ok_from) && isTRUE(pip_ok_to) && m > 0L) {
+    total <- 0
+    cnt <- 0L
+    for (p in seq_len(m)) {
+      for (i in seq_len(Jn)) {
+        if (reg_from[i, ps[p]] && reg_to[i, pt[p]]) {
+          total <- total + (pip_from[i, ps[p]] - pip_to[i, pt[p]])^2
+          cnt <- cnt + 1L
+        }
+      }
+    }
+    if (cnt > 0L) pip_rmsd <- sqrt(total / cnt)
+  }
+
+  list(
+    n_pairs = n_pairs, phi_min = phi_min, rmsd = rmsd, rmsd_max = rmsd_max,
+    ari = ari, pip_rmsd = pip_rmsd, unmatched_n = unmatched_n,
+    unmatched_ssl = unmatched_ssl, collision = collision,
+    n_collisions = n_collisions, collision_targets = collision_targets,
+    collision_multiplicities = collision_multiplicities,
+    source_ineligible_n = source_ineligible_n,
+    target_eligible_n = target_eligible_n,
+    backbone_degenerate = backbone_degenerate,
+    pair_status = if (both) "available" else "unavailable",
+    pair_reason = if (both) NA_character_ else "malformed_loading"
+  )
+}
+
+
+# ---- verification -----------------------------------------------------
+
+bail <- function(...) stop(paste0(...), call. = FALSE)
+
+fmt <- function(v) paste(format(v, trim = TRUE), collapse = " | ")
+
+## Hand-derived discrete facts, one row per ordered pair.
+check_facts <- function(name, pe, want) {
+  if (!identical(paste(pe$K_from, pe$K_to), paste(want$K_from, want$K_to))) {
+    bail(name, ": edge list disagrees with the hand table.")
+  }
+  for (nm in setdiff(names(want), c("K_from", "K_to"))) {
+    if (!identical(pe[[nm]], want[[nm]])) {
+      bail(name, ": hand-computed `", nm, "` disagrees with the builder.\n",
+           "  built: ", fmt(pe[[nm]]), "\n  hand:  ", fmt(want[[nm]]))
+    }
+  }
+  invisible(TRUE)
+}
+
+## Every field of every edge against the naive reference implementation.
+check_reference <- function(name, sweep, loadings, pips, Q0, K0, eps,
+                            bifactor, pe) {
+  Ks <- as.integer(sweep$K)
+  strip <- function(m) if (isTRUE(bifactor)) m[, -1L, drop = FALSE] else m
+  reg <- function(K) {
+    Q <- if (K > K0) cbind(Q0, matrix(-1L, nrow(Q0), K - K0)) else Q0
+    matrix(Q == -1L, nrow(Q0), K)
+  }
+  status_ok <- function(field, K) {
+    identical(sweep[[field]][match(K, Ks)], "ok")
+  }
+  row <- 0L
+  for (i in seq_along(Ks)) {
+    for (j in seq_along(Ks)) {
+      if (i >= j) next
+      row <- row + 1L
+      k <- Ks[i]
+      l <- Ks[j]
+      if (!identical(c(pe$K_from[row], pe$K_to[row]), c(k, l))) {
+        bail(name, ": row ", row, " is not the (", k, ", ", l, ") edge.")
+      }
+      ref <- ref_pair_facts(
+        strip(loadings[[as.character(k)]]), strip(loadings[[as.character(l)]]),
+        strip(pips[[as.character(k)]]), strip(pips[[as.character(l)]]),
+        reg(k), reg(l), K0, eps,
+        status_ok("loading_status", k), status_ok("loading_status", l),
+        status_ok("pip_status", k), status_ok("pip_status", l)
+      )
+      for (nm in names(ref)) {
+        got <- pe[[nm]][row]
+        exp <- ref[[nm]]
+        agree <- if (nm %in% DOUBLE_PAIR_COLS) {
+          identical(is.na(got), is.na(exp)) &&
+            (is.na(got) || abs(got - exp) <= 1e-12 * max(1, abs(exp)))
+        } else {
+          identical(got, exp)
+        }
+        if (!agree) {
+          bail(name, ": edge (", k, ", ", l, ") field `", nm,
+               "` disagrees with the reference matcher.\n",
+               "  package:   ", fmt(got), "\n  reference: ", fmt(exp))
+        }
+      }
+    }
+  }
+  invisible(TRUE)
+}
+
+
+# ---- member assembly --------------------------------------------------
+
+as_stub <- function(sweep, tr, pe, loadings, pips, Q0, bifactor, eps) {
+  structure(
+    list(sweep = sweep, transitions = tr, persistence = pe,
+         loadings = loadings, pips = pips, Q0 = Q0,
+         settings = list(bifactor = bifactor, stability_eps = eps),
+         provenance = list()),
+    class = "pefa"
+  )
+}
+
+finish <- function(description, features, Q0, K0, bifactor, eps, Ks,
+                   loadings, pips, sweep, want) {
+  names(loadings) <- as.character(Ks)
+  names(pips) <- as.character(Ks)
+  tr <- vbpm:::.pefa_transitions_table(sweep)
+  pe <- vbpm:::.pefa_persistence_table(sweep, loadings, pips, Q0, K0, eps,
+                                       bifactor)
+  check_facts(description, pe, want)
+  check_reference(description, sweep, loadings, pips, Q0, K0, eps, bifactor,
+                  pe)
+  stub <- as_stub(sweep, tr, pe, loadings, pips, Q0, bifactor, eps)
+  pivots <- lapply(METRICS, function(mt) vbpm::persistence(stub, mt))
+  names(pivots) <- METRICS
+  list(
+    description = description,
+    features = features,
+    K0 = as.integer(K0),
+    bifactor = bifactor,
+    stability_eps = eps,
+    Q0 = Q0,
+    sweep = sweep,
+    loadings = loadings,
+    pips = pips,
+    expected = list(transitions = tr, persistence = pe, pivots = pivots)
+  )
+}
+
+## Build the PIP list that goes with a loading list, using each candidate's
+## own full-width design.
+pips_for <- function(loadings, Ks, Q0, K0, bifactor) {
+  lapply(seq_along(Ks), function(i) {
+    pip_of(loadings[[i]], design_of(Q0, K0, Ks[i], bifactor))
+  })
+}
+
+
+# ---- shared column shapes ---------------------------------------------
+
+Q0_2 <- matrix(-1L, J, 2L, dimnames = list(ITEMS, c("F1", "F2")))
+Q0_2[1:2, 1] <- 1L
+Q0_2[1:2, 2] <- 0L
+Q0_2[4:5, 2] <- 1L
+Q0_2[4:5, 1] <- 0L
+
+Q0_1 <- matrix(-1L, J, 1L, dimnames = list(ITEMS, "F1"))
+Q0_1[1:2, 1] <- 1L
+
+Q0_0 <- matrix(integer(0), J, 0L, dimnames = list(ITEMS, character(0)))
+
+b1 <- c(.85, .80, .75, 0, 0, 0, 0, 0)
+b2 <- c(0, 0, 0, .82, .78, .74, 0, 0)
+zero_col <- rep(0, J)
+
+e_a <- c(0, 0, 0, 0, 0, 0, .85, .60)   # SSL 1.0825
+s3 <- c(0, 0, 0, 0, 0, 0, .90, .30)    # SSL 0.9000
+s4 <- c(0, 0, 0, 0, 0, 0, .75, .45)    # SSL 0.7650
+t3 <- c(0, 0, 0, 0, 0, .60, 0, 0)      # SSL 0.3600
+t4 <- c(0, 0, 0, 0, 0, 0, .85, .35)    # SSL 0.8450
+t5 <- c(.50, 0, 0, 0, 0, 0, 0, 0)      # SSL 0.2500
+w1 <- c(0, 0, 0, 0, 0, 0, .15, .10)    # SSL 0.0325  (below the 0.10 screen)
+w2 <- c(.12, 0, 0, 0, 0, 0, 0, .08)    # SSL 0.0208  (below the 0.10 screen)
+
+EPS <- 0.10
+
+members <- list()
+
+
+# ---- 1. all_ok --------------------------------------------------------
+#
+# K0 = 2 over K = 2:5, every component "ok".  The k = K0 edges are (2,3),
+# (2,4) and (2,5): backbone-only comparisons with n_pairs == K0 and no
+# reduced-pair-set marker.  The (4,5) edge is the collision: sources F3 and F4
+# both sit on items 7-8, target F4 is the only item-7/8 column at K = 5, so
+# both choose it.
+
+lam <- list(
+  jitter_lam(lam_of(list(b1, b2), 2L), 1101),
+  jitter_lam(lam_of(list(b1, b2, e_a), 2L), 1102),
+  jitter_lam(lam_of(list(b1, b2, s3, s4), 2L), 1103),
+  jitter_lam(lam_of(list(b1, b2, t3, t4, t5), 2L), 1104)
+)
+Ks <- 2:5
+members$all_ok <- finish(
+  description = "all components ok; k = K0 edges and a collision edge",
+  features = c("all_ok", "k_equals_K0_edge", "collision_edge"),
+  Q0 = Q0_2, K0 = 2L, bifactor = FALSE, eps = EPS, Ks = Ks,
+  loadings = lam, pips = pips_for(lam, Ks, Q0_2, 2L, FALSE),
+  sweep = build_sweep(Ks, lam, 2L, FALSE),
+  want = data.frame(
+    K_from = c(2L, 2L, 2L, 3L, 3L, 4L),
+    K_to = c(3L, 4L, 5L, 4L, 5L, 5L),
+    r = c(1L, 2L, 3L, 1L, 2L, 1L),
+    n_pairs = c(2L, 2L, 2L, 3L, 3L, 4L),
+    unmatched_n = c(1L, 2L, 3L, 1L, 2L, 2L),
+    collision = c(FALSE, FALSE, FALSE, FALSE, FALSE, TRUE),
+    n_collisions = c(0L, 0L, 0L, 0L, 0L, 1L),
+    collision_targets = c("", "", "", "", "", "4"),
+    collision_multiplicities = c("", "", "", "", "", "2"),
+    source_ineligible_n = c(0L, 0L, 0L, 0L, 0L, 0L),
+    target_eligible_n = c(1L, 2L, 3L, 2L, 3L, 3L),
+    backbone_degenerate = rep(FALSE, 6),
+    from_fit_ok = rep(TRUE, 6), to_fit_ok = rep(TRUE, 6),
+    pair_status = rep("available", 6),
+    pair_reason = rep(NA_character_, 6),
+    stringsAsFactors = FALSE
+  )
+)
+
+
+# ---- 2. nonconverged_endpoint -----------------------------------------
+#
+# K = 3 stopped at max_it but returned a finite well-formed loading matrix.
+# fit_status is unavailable/nonconverged while every other component stays ok,
+# and both edges touching it stay fully computed, flagged only through
+# from_fit_ok / to_fit_ok.
+
+lam <- list(
+  jitter_lam(lam_of(list(b1, b2), 2L), 1201),
+  jitter_lam(lam_of(list(b1, b2, e_a), 2L), 1202),
+  jitter_lam(lam_of(list(b1, b2, s3, s4), 2L), 1203)
+)
+Ks <- 2:4
+members$nonconverged_endpoint <- finish(
+  description = "a nonconverged candidate whose pair metrics stay computed",
+  features = c("nonconverged_endpoint", "fully_computed_pairs"),
+  Q0 = Q0_2, K0 = 2L, bifactor = FALSE, eps = EPS, Ks = Ks,
+  loadings = lam, pips = pips_for(lam, Ks, Q0_2, 2L, FALSE),
+  sweep = build_sweep(Ks, lam, 2L, FALSE,
+                      converged = c(TRUE, FALSE, TRUE)),
+  want = data.frame(
+    K_from = c(2L, 2L, 3L), K_to = c(3L, 4L, 4L), r = c(1L, 2L, 1L),
+    n_pairs = c(2L, 2L, 3L),
+    unmatched_n = c(1L, 2L, 1L),
+    collision = c(FALSE, FALSE, FALSE),
+    n_collisions = c(0L, 0L, 0L),
+    collision_targets = c("", "", ""),
+    collision_multiplicities = c("", "", ""),
+    source_ineligible_n = c(0L, 0L, 0L),
+    target_eligible_n = c(1L, 2L, 2L),
+    backbone_degenerate = rep(FALSE, 3),
+    from_fit_ok = c(TRUE, TRUE, FALSE),
+    to_fit_ok = c(FALSE, TRUE, TRUE),
+    pair_status = rep("available", 3),
+    pair_reason = rep(NA_character_, 3),
+    stringsAsFactors = FALSE
+  )
+)
+
+
+# ---- 3. malformed_loading ---------------------------------------------
+#
+# K = 4 returned a wrongly shaped Lam, so its stored payload is the
+# expected-shape all-NA matrix and loading_status is
+# unavailable/malformed_loading -- while its fit converged and its PIP is
+# valid.  Its ELBO is separately unavailable, which makes both ELBO gains
+# nonfinite and exercises the empty-max() guard in .pefa_gain_pct().
+
+lam_ok3 <- jitter_lam(lam_of(list(b1, b2, e_a), 2L), 1301)
+lam_int4 <- jitter_lam(lam_of(list(b1, b2, s3, s4), 2L), 1302)
+lam_ok5 <- jitter_lam(lam_of(list(b1, b2, t3, t4, t5), 2L), 1303)
+lam_bad4 <- matrix(NA_real_, J, 4L, dimnames = dimnames(lam_int4))
+lam <- list(lam_ok3, lam_bad4, lam_ok5)
+Ks <- 3:5
+pips_ml <- list(
+  pip_of(lam_ok3, design_of(Q0_2, 2L, 3L, FALSE)),
+  pip_of(lam_int4, design_of(Q0_2, 2L, 4L, FALSE)),
+  pip_of(lam_ok5, design_of(Q0_2, 2L, 5L, FALSE))
+)
+members$malformed_loading <- finish(
+  description = "a malformed loading endpoint with an independently valid PIP",
+  features = c("malformed_loading_endpoint", "unavailable_pair",
+               "all_nonfinite_elbo_gain_path"),
+  Q0 = Q0_2, K0 = 2L, bifactor = FALSE, eps = EPS, Ks = Ks,
+  loadings = lam, pips = pips_ml,
+  sweep = build_sweep(
+    Ks, lam, 2L, FALSE,
+    loading_reason = c(NA, "malformed_loading", NA),
+    elbo_reason = c(NA, "nonfinite_elbo", NA)
+  ),
+  want = data.frame(
+    K_from = c(3L, 3L, 4L), K_to = c(4L, 5L, 5L), r = c(1L, 2L, 1L),
+    n_pairs = c(NA_integer_, 3L, NA_integer_),
+    unmatched_n = c(NA_integer_, 2L, NA_integer_),
+    collision = c(NA, FALSE, NA),
+    n_collisions = c(NA_integer_, 0L, NA_integer_),
+    collision_targets = c(NA_character_, "", NA_character_),
+    collision_multiplicities = c(NA_character_, "", NA_character_),
+    source_ineligible_n = c(0L, 0L, NA_integer_),
+    target_eligible_n = c(NA_integer_, 3L, 3L),
+    backbone_degenerate = c(NA, FALSE, NA),
+    from_fit_ok = rep(TRUE, 3), to_fit_ok = rep(TRUE, 3),
+    pair_status = c("unavailable", "available", "unavailable"),
+    pair_reason = c("malformed_loading", NA_character_, "malformed_loading"),
+    stringsAsFactors = FALSE
+  )
+)
+
+
+# ---- 4. degenerate_backbone -------------------------------------------
+#
+# The second backbone column of K = 3 has exact zero norm.  Both edges that
+# touch it keep pair_status "available" and lose only the congruence, while
+# the (2,4) edge in the same sweep keeps a finite phi_min for contrast.
+
+lam3_deg <- jitter_lam(lam_of(list(b1, b2, e_a), 2L), 1402)
+lam3_deg[, 2L] <- 0
+lam <- list(
+  jitter_lam(lam_of(list(b1, b2), 2L), 1401),
+  lam3_deg,
+  jitter_lam(lam_of(list(b1, b2, s3, s4), 2L), 1403)
+)
+Ks <- 2:4
+members$degenerate_backbone <- finish(
+  description = "a finite zero-norm backbone column at one endpoint",
+  features = c("degenerate_backbone", "metric_specific_availability"),
+  Q0 = Q0_2, K0 = 2L, bifactor = FALSE, eps = EPS, Ks = Ks,
+  loadings = lam, pips = pips_for(lam, Ks, Q0_2, 2L, FALSE),
+  sweep = build_sweep(Ks, lam, 2L, FALSE),
+  want = data.frame(
+    K_from = c(2L, 2L, 3L), K_to = c(3L, 4L, 4L), r = c(1L, 2L, 1L),
+    n_pairs = c(2L, 2L, 3L),
+    unmatched_n = c(1L, 2L, 1L),
+    collision = rep(FALSE, 3),
+    n_collisions = rep(0L, 3),
+    collision_targets = rep("", 3),
+    collision_multiplicities = rep("", 3),
+    source_ineligible_n = c(0L, 0L, 0L),
+    target_eligible_n = c(1L, 2L, 2L),
+    backbone_degenerate = c(TRUE, FALSE, TRUE),
+    from_fit_ok = rep(TRUE, 3), to_fit_ok = rep(TRUE, 3),
+    pair_status = rep("available", 3),
+    pair_reason = rep(NA_character_, 3),
+    stringsAsFactors = FALSE
+  )
+)
+
+
+# ---- 5. bifactor_thin_backbone ----------------------------------------
+#
+# K0 = 1 group backbone under bifactor = TRUE, so stored matrices carry K + 1
+# columns with G first.  The backbone column is small but nonzero (SSL ~ .06,
+# below the .10 screen it is never subject to) and the general column is
+# smaller still (SSL ~ .02), so backbone_ssl_min taken over stored columns
+# 1:K0 instead of 2:(K0 + 1) would return a different number.  The (3,4) edge
+# reuses GROUP target 2, which is STORED column 3.
+
+g_col <- c(.08, .08, .08, 0, 0, 0, 0, 0)   # SSL 0.0192, the general factor
+g1 <- c(.20, .10, .10, 0, 0, 0, 0, 0)      # SSL 0.0600, the thin backbone
+g2 <- c(0, 0, 0, .90, .30, 0, 0, 0)        # SSL 0.9000
+g3 <- c(0, 0, 0, .80, .40, 0, 0, 0)        # SSL 0.8000
+u2 <- c(0, 0, 0, .85, .35, 0, 0, 0)        # SSL 0.8450, reused target
+u3 <- c(0, 0, 0, 0, 0, .75, 0, 0)          # SSL 0.5625
+u4 <- c(0, 0, 0, 0, 0, 0, .60, .25)        # SSL 0.4225
+
+lam <- list(
+  jitter_lam(lam_of(list(g_col, g1), 1L, TRUE), 1501, sd = 0.004),
+  jitter_lam(lam_of(list(g_col, g1, g2), 1L, TRUE), 1502, sd = 0.004),
+  jitter_lam(lam_of(list(g_col, g1, g2, g3), 1L, TRUE), 1503, sd = 0.004),
+  jitter_lam(lam_of(list(g_col, g1, u2, u3, u4), 1L, TRUE), 1504, sd = 0.004)
+)
+Ks <- 1:4
+members$bifactor_thin_backbone <- finish(
+  description = paste("bifactor sweep with a small-but-nonzero backbone and a",
+                      "group-block collision"),
+  features = c("bifactor", "thin_backbone", "backbone_ssl_min_offset",
+               "k_equals_K0_edge", "collision_edge"),
+  Q0 = Q0_1, K0 = 1L, bifactor = TRUE, eps = EPS, Ks = Ks,
+  loadings = lam, pips = pips_for(lam, Ks, Q0_1, 1L, TRUE),
+  sweep = build_sweep(Ks, lam, 1L, TRUE),
+  want = data.frame(
+    K_from = c(1L, 1L, 1L, 2L, 2L, 3L),
+    K_to = c(2L, 3L, 4L, 3L, 4L, 4L),
+    r = c(1L, 2L, 3L, 1L, 2L, 1L),
+    n_pairs = c(1L, 1L, 1L, 2L, 2L, 3L),
+    unmatched_n = c(1L, 2L, 3L, 1L, 2L, 2L),
+    collision = c(FALSE, FALSE, FALSE, FALSE, FALSE, TRUE),
+    n_collisions = c(0L, 0L, 0L, 0L, 0L, 1L),
+    collision_targets = c("", "", "", "", "", "2"),
+    collision_multiplicities = c("", "", "", "", "", "2"),
+    source_ineligible_n = rep(0L, 6),
+    target_eligible_n = c(1L, 2L, 3L, 2L, 3L, 3L),
+    backbone_degenerate = rep(FALSE, 6),
+    from_fit_ok = rep(TRUE, 6), to_fit_ok = rep(TRUE, 6),
+    pair_status = rep("available", 6),
+    pair_reason = rep(NA_character_, 6),
+    stringsAsFactors = FALSE
+  )
+)
+
+
+# ---- 6. ineligible_source ---------------------------------------------
+#
+# The single exploratory column of K = 3 sits below the screen.  As a source
+# it is dropped from P_kl (source_ineligible_n = 1, a reduced pair set); as a
+# target it still counts in the unmatched set, which section 2.7 says includes
+# screened-out columns.
+
+lam <- list(
+  jitter_lam(lam_of(list(b1, b2), 2L), 1601),
+  jitter_lam(lam_of(list(b1, b2, w1), 2L), 1602, sd = 0.004),
+  jitter_lam(lam_of(list(b1, b2, s3, s4), 2L), 1603)
+)
+Ks <- 2:4
+members$ineligible_source <- finish(
+  description = "an exploratory source below the SSL screen",
+  features = c("ineligible_source", "reduced_pair_set",
+               "screened_target_counted_unmatched"),
+  Q0 = Q0_2, K0 = 2L, bifactor = FALSE, eps = EPS, Ks = Ks,
+  loadings = lam, pips = pips_for(lam, Ks, Q0_2, 2L, FALSE),
+  sweep = build_sweep(Ks, lam, 2L, FALSE),
+  want = data.frame(
+    K_from = c(2L, 2L, 3L), K_to = c(3L, 4L, 4L), r = c(1L, 2L, 1L),
+    n_pairs = c(2L, 2L, 2L),
+    unmatched_n = c(1L, 2L, 2L),
+    collision = rep(FALSE, 3),
+    n_collisions = rep(0L, 3),
+    collision_targets = rep("", 3),
+    collision_multiplicities = rep("", 3),
+    source_ineligible_n = c(0L, 0L, 1L),
+    target_eligible_n = c(0L, 2L, 2L),
+    backbone_degenerate = rep(FALSE, 3),
+    from_fit_ok = rep(TRUE, 3), to_fit_ok = rep(TRUE, 3),
+    pair_status = rep("available", 3),
+    pair_reason = rep(NA_character_, 3),
+    stringsAsFactors = FALSE
+  )
+)
+
+
+# ---- 7. scarce_targets ------------------------------------------------
+#
+# K = 4 has two exploratory columns and both are below the screen, so an
+# eligible source at K = 3 has nowhere to go: the (3,4) edge keeps the
+# backbone-only measurement plus target_eligible_n = 0.
+
+lam <- list(
+  jitter_lam(lam_of(list(b1, b2, e_a), 2L), 1701),
+  jitter_lam(lam_of(list(b1, b2, w1, w2), 2L), 1702, sd = 0.004),
+  jitter_lam(lam_of(list(b1, b2, t3, t4, t5), 2L), 1703)
+)
+Ks <- 3:5
+members$scarce_targets <- finish(
+  description = "an eligible source with zero eligible exploratory targets",
+  features = c("scarce_targets", "reduced_pair_set", "ineligible_source"),
+  Q0 = Q0_2, K0 = 2L, bifactor = FALSE, eps = EPS, Ks = Ks,
+  loadings = lam, pips = pips_for(lam, Ks, Q0_2, 2L, FALSE),
+  sweep = build_sweep(Ks, lam, 2L, FALSE),
+  want = data.frame(
+    K_from = c(3L, 3L, 4L), K_to = c(4L, 5L, 5L), r = c(1L, 2L, 1L),
+    n_pairs = c(2L, 3L, 2L),
+    unmatched_n = c(2L, 2L, 3L),
+    collision = rep(FALSE, 3),
+    n_collisions = rep(0L, 3),
+    collision_targets = rep("", 3),
+    collision_multiplicities = rep("", 3),
+    source_ineligible_n = c(0L, 0L, 2L),
+    target_eligible_n = c(0L, 3L, 3L),
+    backbone_degenerate = rep(FALSE, 3),
+    from_fit_ok = rep(TRUE, 3), to_fit_ok = rep(TRUE, 3),
+    pair_status = rep("available", 3),
+    pair_reason = rep(NA_character_, 3),
+    stringsAsFactors = FALSE
+  )
+)
+
+
+# ---- 8. k0_empty_pairs ------------------------------------------------
+#
+# Fully exploratory with the only source column below the screen: P_kl is
+# empty, so the four matched/PIP metrics are typed NA while collision is a
+# known clean zero and the unmatched evidence is still computed.
+
+v1 <- c(.80, .70, 0, 0, 0, 0, 0, 0)   # SSL 1.1300
+v2 <- c(0, 0, 0, .75, .65, 0, 0, 0)   # SSL 0.9850
+lam <- list(
+  jitter_lam(lam_of(list(w1), 0L), 1801, sd = 0.004),
+  jitter_lam(lam_of(list(v1, v2), 0L), 1802)
+)
+Ks <- 1:2
+members$k0_empty_pairs <- finish(
+  description = "K0 = 0 with an empty scored pair set",
+  features = c("k0_zero", "empty_pair_set", "reduced_pair_set"),
+  Q0 = Q0_0, K0 = 0L, bifactor = FALSE, eps = EPS, Ks = Ks,
+  loadings = lam, pips = pips_for(lam, Ks, Q0_0, 0L, FALSE),
+  sweep = build_sweep(Ks, lam, 0L, FALSE),
+  want = data.frame(
+    K_from = 1L, K_to = 2L, r = 1L,
+    n_pairs = 0L,
+    unmatched_n = 2L,
+    collision = FALSE,
+    n_collisions = 0L,
+    collision_targets = "",
+    collision_multiplicities = "",
+    source_ineligible_n = 1L,
+    target_eligible_n = 2L,
+    backbone_degenerate = FALSE,
+    from_fit_ok = TRUE, to_fit_ok = TRUE,
+    pair_status = "available",
+    pair_reason = NA_character_,
+    stringsAsFactors = FALSE
+  )
+)
+
+
+# ---- 9. k0_nonempty_pairs ---------------------------------------------
+#
+# The same fully exploratory shape with every column eligible, so the matched
+# metrics are ordinary finite numbers.
+
+v1a <- c(.80, .70, .20, 0, 0, 0, 0, 0)
+v1b <- c(.78, .72, .15, 0, 0, 0, 0, 0)
+v1c <- c(.76, .70, .18, 0, 0, 0, 0, 0)
+v2c <- c(0, 0, 0, .72, .68, 0, 0, 0)
+v3 <- c(0, 0, 0, 0, 0, .70, .30, 0)
+lam <- list(
+  jitter_lam(lam_of(list(v1a), 0L), 1901),
+  jitter_lam(lam_of(list(v1b, v2), 0L), 1902),
+  jitter_lam(lam_of(list(v1c, v2c, v3), 0L), 1903)
+)
+Ks <- 1:3
+members$k0_nonempty_pairs <- finish(
+  description = "K0 = 0 with a nonempty scored pair set",
+  features = c("k0_zero", "nonempty_pair_set"),
+  Q0 = Q0_0, K0 = 0L, bifactor = FALSE, eps = EPS, Ks = Ks,
+  loadings = lam, pips = pips_for(lam, Ks, Q0_0, 0L, FALSE),
+  sweep = build_sweep(Ks, lam, 0L, FALSE),
+  want = data.frame(
+    K_from = c(1L, 1L, 2L), K_to = c(2L, 3L, 3L), r = c(1L, 2L, 1L),
+    n_pairs = c(1L, 1L, 2L),
+    unmatched_n = c(1L, 2L, 1L),
+    collision = rep(FALSE, 3),
+    n_collisions = rep(0L, 3),
+    collision_targets = rep("", 3),
+    collision_multiplicities = rep("", 3),
+    source_ineligible_n = rep(0L, 3),
+    target_eligible_n = c(2L, 3L, 3L),
+    backbone_degenerate = rep(FALSE, 3),
+    from_fit_ok = rep(TRUE, 3), to_fit_ok = rep(TRUE, 3),
+    pair_status = rep("available", 3),
+    pair_reason = rep(NA_character_, 3),
+    stringsAsFactors = FALSE
+  )
+)
+
+
+# ---- write ------------------------------------------------------------
+
+fixture <- list(
+  fixture_version = FIXTURE_VERSION,
+  evidence_schema_id = EVIDENCE_SCHEMA_ID,
+  metrics = METRICS,
+  double_pair_cols = DOUBLE_PAIR_COLS,
+  members = members
+)
+
+root <- find_root()
+dir.create(file.path(root, "inst", "extdata"), recursive = TRUE,
+           showWarnings = FALSE)
+out_file <- file.path(root, "inst", "extdata", "vbpm_r8_fixture.rds")
+saveRDS(fixture, out_file, version = 3L, compress = "xz")
+
+cat("wrote ", out_file, "\n", sep = "")
+cat("members: ", paste(names(members), collapse = ", "), "\n", sep = "")
+cat("persistence rows: ",
+    sum(vapply(members, function(m) nrow(m$expected$persistence), integer(1))),
+    "\n", sep = "")
