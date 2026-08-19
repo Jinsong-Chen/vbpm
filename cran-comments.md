@@ -35,25 +35,31 @@ psychometric measurement models:
 
 ## Test environments
 
-<!-- PLACEHOLDER: replace with the actual submission-environment run before
-     tagging. Do not carry a candidate-run result into the final file. -->
-
-* PLACEHOLDER — submission environment (OS, R version, check invocation)
+* Windows 11 x64 (build 26200), R 4.5.1 (2025-06-13 ucrt),
+  platform x86_64-w64-mingw32, invoked as
+  `R CMD check --as-cran --run-donttest vbpm_0.9.0.tar.gz` against the
+  tarball built from a clean detached checkout of the tagged commit.
 
 ## R CMD check results
 
-<!-- PLACEHOLDER: fill from the exact-commit `R CMD check --as-cran
-     --run-donttest` run against the retained tarball. Every count and NOTE
-     text below must be copied from that log, not restated from memory. -->
+Status: 1 NOTE, 0 ERRORs, 0 WARNINGs.
 
-Status: PLACEHOLDER — NOTEs / ERRORs / WARNINGs from the exact-commit run.
+* `checking top-level files ... NOTE` /
+  `Files 'README.md' or 'NEWS.md' cannot be checked without 'pandoc' being
+  installed.` — environmental, not package-attributable. Pandoc 3.6.3 is
+  present on the machine and renders all four vignettes during the same
+  check, but the checking subprocess does not pick it up from this Windows
+  shell, so the two markdown files are skipped. No other NOTE was reported;
+  in particular `checking CRAN incoming feasibility` returned OK.
 
-* PLACEHOLDER — verbatim text of each NOTE, with a one-line explanation of
-  whether it is package-attributable or environmental.
-
-Compiled installation, examples, the full test suite, Rd validation, all four
-vignettes, and indexed PDF-manual generation must all pass on that run before
-the tag is created.
+Compiled installation, examples under `--run-donttest`, the full test suite
+(801 expectations, 0 failures, 0 errors, 0 warnings, 0 skips), Rd validation,
+re-building of all four vignettes, and both the PDF and HTML manuals all
+passed on that run. The exact tarball was additionally installed into an empty
+temporary library and exercised there: the package resolves from that library,
+reports version 0.9.0, exports exactly `fit_stats`, `pefa`, `sim_fa`,
+`sim_lvm`, `special_effects`, `ssl`, `vbfa`, `vbmimic`, and the compiled QUIC
+path returns a finite objective.
 
 ## Notes for the reviewer
 
