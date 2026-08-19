@@ -52,6 +52,8 @@ resolves it. Here we anchor two items per factor in the measurement part and
 leave the whole structural part to the data:
 
 ```{r design}
+## Q_A is an AZ (anchor-zero) design: each anchor is specified (1) on its own
+## factor and fixed to zero on the other two
 Q_A <- matrix(-1L, 18, 3)
 for (k in 1:3) {
   a <- which(rep(1:3, each = 6) == k)[1:2]
@@ -60,6 +62,12 @@ for (k in 1:3) {
 }
 Q_B <- matrix(-1L, 3, 9)     # structural selection is the question
 ```
+
+AZ (anchor-zero) and AO (anchor-only) are the two anchor conventions `vbpm`'s
+documentation uses throughout: AO codes each anchor's intended cell `1` and
+leaves its cells on the other factors `-1`, while AZ additionally fixes those
+cells to `0`. AZ is the stronger claim, and it is what anchors the measurement
+part here; `vignette("bifactor")` compares the two.
 
 ## Fit and read
 
@@ -76,15 +84,23 @@ round(fit$B, 2)
 round(fit$pi_B, 2)
 ```
 
-Compare against the generating design (up to factor relabeling, which is
-inherent to exploratory fits):
+Compare PIP-based selection with the generating design:
 
 ```{r recovery}
-est_blocks  <- apply(abs(fit$B) > .15, 1, function(r) which(r))
-true_blocks <- apply(B != 0, 1, function(r) which(r))
-est_blocks
-true_blocks
+selected <- fit$pi_B >= .5
+table(truth = B != 0, selected = selected)
 ```
+
+Read that table both ways. All nine generating coefficients are selected — no
+false negatives — but so are two of the eighteen true zeros, and not
+marginally: both sit at PIP 1.00 in the matrix above (`B[2, 3]` and
+`B[3, 4]`, each a factor picking up a covariate from a neighbouring block).
+Exploratory structural selection at this `N` is therefore not free of false
+positives, and a PIP at the ceiling is not on its own evidence that a
+coefficient is real. Magnitude is the useful second filter here: the two false
+positives are estimated at -0.18 and -0.14, below every one of the nine true
+coefficients, whose smallest estimate is 0.25 against a generating value of
+0.30.
 
 The measurement side reads exactly as in `vbfa()`:
 
@@ -144,10 +160,7 @@ vbmimic(Y, Xm, Q_A, Q_B)
   `ELBO`, `objective`, ...) and a single `n_active_coef` — the count of
   soft-selected measurement plus structural coefficients, not a full
   parameter count, and not to be fed to an information criterion. `pefa()`
-  has no such accommodation: it sweeps `vbfa()` over a window from a single
-  backbone `Q0`, not a measurement/structural pair, so there is no MIMIC
-  factor-count evidence to return. An
-  implemented ELBO for `vbmimic()` is on the roadmap.
+  sweeps `vbfa()` from one backbone `Q0`; it does not sweep MIMIC models.
 
 ## References
 

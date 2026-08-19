@@ -21,9 +21,10 @@ spike-and-slab priors select the rest from the data.
 This vignette walks the factor-analysis side of the package: designing a `Q`
 matrix, fitting with `vbfa()`, reading the fit, computing fit statistics with
 `fit_stats()`, and local-dependence (residual-correlation) estimation.
-Choosing the number of factors is covered in `vignette("pefa")`; bifactor and
-higher-order structures are covered in `vignette("bifactor")`. It ends with an
-empirical example, a look at missing data, and a recipe for turning *graded*
+Factor-count evidence over a window of `K` — which `pefa()` reports without
+applying any count rule of its own — is covered in `vignette("pefa")`; bifactor
+and higher-order structures are covered in `vignette("bifactor")`. It ends with
+an empirical example, a look at missing data, and a recipe for turning *graded*
 prior knowledge into a `Q` matrix.
 
 ## The design matrix Q
@@ -40,6 +41,14 @@ A fully confirmatory model has no `-1`; a fully exploratory one is all `-1`
 (plus enough anchors to identify the factors). Everything between is the
 partially confirmatory continuum.
 
+Two anchor conventions recur throughout `vbpm`'s documentation, and both appear
+in this vignette. **AO (anchor-only)** codes each anchor's intended cell `1` and
+leaves that anchor's cells on the *other* factors `-1`: it asserts only where
+the anchor does load. **AZ (anchor-zero)** additionally fixes those other anchor
+cells to `0`, asserting that an anchor of one factor has no loading on any
+other. AZ is the stronger claim. `vignette("bifactor")` compares the two
+side by side.
+
 ## Simulate, design, fit
 
 `sim_fa()` generates factor-analytic data from a loading *pattern*: `K` factors,
@@ -49,7 +58,9 @@ partially confirmatory continuum.
 sim <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
 Y <- sim$dat
 
-## two anchors per factor; everything else left to the data
+## an AZ (anchor-zero) design: two anchors per factor, each specified (1) on
+## its own factor and fixed to zero on the other two; every non-anchor row is
+## left entirely to the data
 Q <- matrix(-1L, ncol(Y), 3)
 for (k in 1:3) {
   a <- which(rep(1:3, each = 6) == k)[1:2]
@@ -60,6 +71,12 @@ for (k in 1:3) {
 fit <- vbfa(Y, Q)
 fit
 ```
+
+The six anchor rows are what makes this AZ rather than AO: they contribute six
+`1` cells and twelve fixed zeros, leaving only the 36 cells of the twelve
+non-anchor rows for the spike-and-slab prior to choose between — the
+denominator the summary reports. For the AO version, drop the `Q[a, ] <- 0L`
+line and those twelve cross-factor anchor cells stay `-1`.
 
 Typing the fit's name gives the compact summary above — the object carries an
 S3 class (`vbpm_fit`), but it is still an ordinary list underneath and every
@@ -79,55 +96,10 @@ active <- (Q == 1) | (Q == -1 & fit$pi >= .5)
 table(truth = sim$MLA != 0, active = active)
 ```
 
-Two properties worth knowing. The estimator is **deterministic** — fixed
-initialization, no random numbers — so there is no seed to set and two runs are
-bit-identical. And the default `v0` is a decreasing *vector*, a warm-started
-regularization path (Jin, Chen, Yan, & Zhang, 2026); a scalar `v0 = 0.001`
-reproduces the fixed-spike estimator of Jin & Chen (2025) exactly. A third option is a gentler, longer, log-spaced
-path, useful when a harder model fails to converge. All three run to
-convergence below, on the same (smaller, for speed) data, with the total
-iteration count, ELBO, and the largest loading discrepancy against the default
-path:
-
-```{r v0path}
-sim2 <- sim_fa(N = 300, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
-Y2 <- sim2$dat
-Q2 <- matrix(-1L, ncol(Y2), 3)
-for (k in 1:3) {
-  a <- which(rep(1:3, each = 6) == k)[1:2]
-  Q2[a, ] <- 0L
-  Q2[a, k] <- 1L
-}
-
-f_default <- vbfa(Y2, Q2)                                # (a) default 4-stage path
-f_fixed   <- vbfa(Y2, Q2, v0 = 0.001)                     # (b) scalar fixed spike
-f_gentle  <- vbfa(Y2, Q2,                                 # (c) gentle 8-stage path
-                   v0 = exp(seq(log(0.05), log(0.001), length.out = 8)))
-
-data.frame(
-  path = c("default (4-stage)", "fixed spike (v0 = 0.001)", "gentle (8-stage)"),
-  iterations = c(f_default$iter, f_fixed$iter, f_gentle$iter),
-  ELBO = round(c(f_default$ELBO, f_fixed$ELBO, f_gentle$ELBO), 2),
-  max_abs_Lam_diff_vs_default = round(c(
-    0,
-    max(abs(f_fixed$Lam  - f_default$Lam)),
-    max(abs(f_gentle$Lam - f_default$Lam))), 3),
-  mean_abs_Lam_diff_vs_default = round(c(
-    0,
-    mean(abs(f_fixed$Lam  - f_default$Lam)),
-    mean(abs(f_gentle$Lam - f_default$Lam))), 4)
-)
-```
-
-On this easy, well-identified simulation all three land on the same solution.
-Read the two discrepancy columns together: the *largest* single-entry
-disagreement is a tenth or so of a loading, concentrated near the spike/slab
-boundary where a cell is close to being switched off, while the *mean*
-disagreement across the whole matrix is one to two orders of magnitude
-smaller. One boundary cell moves; the structure does not. Say this honestly: the regularization path earns its keep on
-*hard* landscapes — near-singular designs, weak signal, fits that fail to
-converge within `max_it` — not on easy ones like this. Prefer the gentle path
-over raising `max_it` when a fit misbehaves.
+The estimator is **deterministic**: it uses a fixed initialization and no random
+numbers, so there is no seed to set. The default `v0` is a four-stage,
+warm-started regularization path. It is the right starting point for ordinary
+use; `?vbfa` documents the advanced controls and the scalar fixed-spike form.
 
 ## Fit statistics
 
@@ -173,6 +145,10 @@ spike-and-slab prior on the residual precision, solved by QUIC
 `ld = TRUE`; by default the search is fully exploratory, or restrict it with a
 `J x J` design `Qe` using the same `-1/0/1` codes.
 
+The LD calls below use a shorter iteration limit and a looser tolerance only to
+keep vignette rendering quick. For an analysis, omit those two arguments and
+start from the documented defaults.
+
 ```{r ld}
 simLD <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, lac = .3, ecr = .3,
                 rseed = 2)
@@ -183,6 +159,13 @@ Poff <- abs(fLD$Psi); Poff[lower.tri(Poff, diag = TRUE)] <- 0
 which(Poff >= sort(Poff, decreasing = TRUE)[3], arr.ind = TRUE)
 simLD$ofd_ind
 ```
+
+All three of the largest estimated edges — items 3-4, 8-13, and 1-14 — are
+genuine planted pairs, so nothing spurious outranks a real residual
+correlation here. The other three planted pairs (2-7, 9-10, 15-16) have smaller
+estimated edges and fall outside the top three at this sample size: the
+graphical prior orders the residual dependencies it finds by strength, and
+reading only the top of that ordering will not exhaust them.
 
 For LD fits, `fit_stats()` uses the estimated residual covariance `W`. The
 returned `objective` is the terminal VECM criterion; `ELBO`
@@ -250,8 +233,13 @@ spike-penalty schedule, in units of `N`):
 ```{r ld-control}
 fCtrl <- vbfa(simLD$dat, Q, ld = TRUE, max_it = 300, tolVal = 1e-3,
               ld_control = list(xi0 = c(0.1, 0.5, 1)))
-fCtrl$flag
+fCtrl$converged   # TRUE if the final v0 stage met the tolerance
 ```
+
+`$converged` is the readable form of `$flag`, the raw `1`/`0` convergence
+indicator every fit also carries; both refer to the last `v0` stage, since
+`max_it` is a cap per stage rather than per fit. The coarser `xi0` path still
+converges here, which is exactly what to check whenever you shorten a path.
 
 `diag_penalty` (whether the residual precision diagonal is penalized by `xi1`;
 default `1`) lives in the same list, along with `xi1`, `quic_eps`,
@@ -281,12 +269,6 @@ different factor block — never on the missing item's own value.
 ```{r mar-sim}
 simM <- sim_fa(N = 400, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
 Ym0  <- simM$dat
-Qm   <- matrix(-1L, ncol(Ym0), 3)
-for (k in 1:3) {
-  a <- which(rep(1:3, each = 6) == k)[1:2]
-  Qm[a, ] <- 0L
-  Qm[a, k] <- 1L
-}
 
 ## items 5 and 11 go missing depending on the OBSERVED value of anchor items
 ## 1 and 7 (higher values make missingness more likely); the anchors
@@ -300,7 +282,7 @@ Ymar[stats::rbinom(nrow(Ym0), 1, p5)  == 1, 5]  <- NA
 Ymar[stats::rbinom(nrow(Ym0), 1, p11) == 1, 11] <- NA
 sum(is.na(Ymar))
 
-fMar <- vbfa(Ymar, Qm)
+fMar <- vbfa(Ymar, Q)
 fMar$preprocess$n_missing
 round(fMar$Lam[c(1, 5, 7, 11), ], 2)   # loadings recovered despite the missingness
 ```
@@ -310,7 +292,7 @@ close, with the largest discrepancy well within the range expected from
 losing part of two items' data:
 
 ```{r mar-sim-clean}
-fClean <- vbfa(Ym0, Qm)
+fClean <- vbfa(Ym0, Q)
 max(abs(fMar$Lam - fClean$Lam))    # largest discrepancy
 mean(abs(fMar$Lam - fClean$Lam))   # typical discrepancy is much smaller
 ```
@@ -318,7 +300,9 @@ mean(abs(fMar$Lam - fClean$Lam))   # typical discrepancy is much smaller
 ### Empirical: NLSY 1997
 
 `nlsy27` ships with the package: 3,458 respondents, 27 mixed-type items, and an
-initial three-factor design with two to three anchors per factor.
+initial three-factor design with two to three anchors per factor. Its `Q` is an
+AO design — the anchor cells are `1`, and every other cell, including the
+anchors' cells on the other two factors, is `-1`.
 
 The data are 1.12% incomplete, which exercises the missing-response path from
 above: the `NA`s are passed straight to `vbfa()` and imputed in-loop, with no
@@ -335,6 +319,15 @@ fn
 fn$preprocess$n_missing   # recorded on the fit
 round(fn$Lam, 2)
 ```
+
+What to look for in that matrix: every anchored item returns on the factor it
+was anchored to (items 1-2 on factor 1, 9-10 on factor 2, 22-24 on factor 3),
+and the unspecified rows fill in around them: items 4, 6, and 7 join factor 1,
+items 12 and 15-17 join factor 2, items 25-26 join factor 3.
+The solution is genuinely sparse rather than uniformly loaded: items 3 and
+18-21 stay under .25 in absolute value on all three factors, having found no
+strong home, and a scattering of moderate negative entries (items 5, 8, 11, 13,
+14, 27) marks items running opposite in direction to their factor's anchors.
 
 One caveat remains, and it is about response type rather than missingness: 17
 of the 27 items are polytomous and are treated here as continuous. A threshold
@@ -353,12 +346,16 @@ nrow(Yn) - sum(stats::complete.cases(Yn))   # respondents listwise deletion drop
 Prior knowledge is often *graded* rather than crisp — say, a membership score
 `S[j, k]` in `[0, 1]` for item `j` on factor `k`, from expert ratings, text
 similarity, or a clustering consensus. This kind of graded membership matrix is
-what the measurement literature calls a **"soft" Q matrix**. A practical
-thresholding rule turns such scores into a partially confirmatory (hard) `Q`:
+what the measurement literature calls a **"soft" Q matrix**. The illustrative
+analyst-chosen thresholds below turn such scores into a partially confirmatory
+(hard) `Q`; they are not package defaults:
 
-* **anchor** (`1`) where the evidence is strong: `S > .80`;
-* **leave to the data** (`-1`) where it is equivocal: `.20 <= S <= .80`;
+* **anchor** (`1`) where the evidence is strong: `S >= .80`;
+* **leave to the data** (`-1`) where it is equivocal: `.20 <= S < .80`;
 * **exclude** (`0`) where it is absent: `S < .20`.
+
+The three intervals partition `[0, 1]`, so the code below is a direct
+transcription of the rule and every score lands in exactly one code.
 
 ```{r softq}
 ## a toy graded membership matrix for the simulated items
@@ -366,24 +363,18 @@ set.seed(3)
 S <- matrix(runif(18 * 3, 0, .2), 18, 3)          # baseline noise
 S[cbind(1:18, rep(1:3, each = 6))] <- runif(18, .55, .95)  # true memberships
 
-Qsoft <- matrix(0L, 18, 3)
-Qsoft[S >= .20 & S <= .80] <- -1L
+Qsoft <- matrix(0L, 18, 3)          # S < .20 stays 0
+Qsoft[S >= .20 & S < .80] <- -1L
 Qsoft[S >= .80] <- 1L
 table(Qsoft)
 
 fsoft <- vbfa(Y, Qsoft)
-fsoft$flag
+fsoft$converged
 ```
 
-This costs no new machinery — it is simply a disciplined way to build `Q` — and
-it uses the graded information honestly: strong evidence anchors, equivocal
-evidence is *tested* rather than assumed, absence excludes. One honest
-limitation: the package's simulators (`sim_fa()`, `sim_lvm()`) cannot yet
-generate data *from* a soft Q — they take hard population patterns/matrices as
-input — so the workflow only runs in the direction shown above: threshold soft
-knowledge into a hard `-1/0/1` Q for *estimation*, not simulation. (A deeper
-version, in which the graded scores enter the prior itself as per-element
-inclusion probabilities, is on the package roadmap.)
+This is simply one transparent way to build the hard `-1/0/1` design that
+`vbfa()` accepts. The thresholds should come from the application, not from this
+example.
 
 ## References
 

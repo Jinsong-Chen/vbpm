@@ -552,24 +552,102 @@ test_that("a vbfa() failure aborts the call naming the K", {
                "PEFA candidate K = 3: vbfa\\(\\) failed: synthetic engine")
 })
 
-test_that("descriptive indices may be NA without erroring", {
+test_that("a legitimately undefined descriptive index is kept as NA_real_", {
+  ## NA means "this statistic's own definition does not apply" -- RMSEA and
+  ## TLI are undefined at df <= 0. It is preserved, not treated as a defect.
   d <- .mk()
   real <- vbpm::fit_stats
   local_mocked_bindings(
     fit_stats = function(object, ...) {
       out <- real(object, ...)
-      out[["RMSEA"]] <- NaN
+      out[["RMSEA"]] <- NA_real_
       out[["TLI"]] <- NA_real_
       out
     },
     .package = "vbpm")
   r <- pefa(d$Q0, d$Y, 2, 3, v0 = .001, max_it = 200, verbose = FALSE)
-  ## NaN and NA alike are normalized to the documented NA_real_ flavor.
   expect_identical(r$sweep$RMSEA, rep(NA_real_, 2L))
   expect_identical(r$sweep$TLI, rep(NA_real_, 2L))
   expect_false(any(is.nan(r$sweep$RMSEA)))
   expect_true(all(is.finite(r$sweep$SRMR)))
   expect_true(all(is.finite(r$sweep$AIC)))
+})
+
+test_that("a malformed descriptive index is named and refused", {
+  ## NaN and the infinities are engine defects, not undefined quantities, so
+  ## they are not laundered into an NA that would read as "undefined".
+  d <- .mk()
+  real <- vbpm::fit_stats
+  for (spec in list(list(f = "RMSEA", v = NaN), list(f = "TLI", v = Inf),
+                    list(f = "CFI", v = -Inf), list(f = "SRMR", v = NaN))) {
+    local({
+      field <- spec$f
+      value <- spec$v
+      local_mocked_bindings(
+        fit_stats = function(object, ...) {
+          out <- real(object, ...)
+          if (ncol(object$Lam) == 3L) out[[field]] <- value
+          out
+        },
+        .package = "vbpm")
+      expect_error(pefa(d$Q0, d$Y, 2, 3, v0 = .001, max_it = 200,
+                        verbose = FALSE),
+                   paste0("PEFA candidate K = 3: ", field,
+                          " is NaN or infinite"))
+    })
+  }
+})
+
+test_that("iter is validated before coercion", {
+  d <- .mk()
+  real_vbfa <- vbpm::vbfa
+  for (value in list(-1, .5, Inf, NaN, 2^31, TRUE, 1 + 0i)) {
+    local({
+      v <- value
+      local_mocked_bindings(
+        vbfa = function(...) {
+          out <- real_vbfa(...)
+          out$iter <- v
+          out
+        },
+        .package = "vbpm")
+      expect_error(pefa(d$Q0, d$Y, 2, 2, v0 = .001, max_it = 200,
+                        verbose = FALSE),
+                   "iter is not a representable nonnegative whole number")
+    })
+  }
+  ## A genuinely absent count is NA_integer_, not an error.
+  local_mocked_bindings(
+    vbfa = function(...) {
+      out <- real_vbfa(...)
+      out$iter <- NULL
+      out
+    },
+    .package = "vbpm")
+  r <- pefa(d$Q0, d$Y, 2, 2, v0 = .001, max_it = 200, verbose = FALSE)
+  expect_identical(r$sweep$iter, NA_integer_)
+})
+
+test_that("Q0 storage type is enforced before coercion", {
+  d <- .mk()
+  J <- nrow(d$Q0)
+  chr <- matrix(as.character(d$Q0), J, ncol(d$Q0))
+  lgl <- matrix(d$Q0 == 1L, J, ncol(d$Q0))
+  cpx <- matrix(as.complex(d$Q0), J, ncol(d$Q0))
+  for (bad in list(chr, lgl, cpx, as.data.frame(d$Q0),
+                   factor(as.character(d$Q0)))) {
+    expect_error(pefa(bad, d$Y, 2, 2, v0 = .001, max_it = 200,
+                      verbose = FALSE),
+                 "Q0 must be a real numeric or integer matrix")
+  }
+  ## Integer and double matrices of -1/0/1 remain acceptable, as does a
+  ## correctly typed zero-column backbone.
+  expect_s3_class(pefa(d$Q0, d$Y, 2, 2, v0 = .001, max_it = 200,
+                       verbose = FALSE), "pefa")
+  expect_s3_class(pefa(matrix(as.double(d$Q0), J, ncol(d$Q0)), d$Y, 2, 2,
+                       v0 = .001, max_it = 200, verbose = FALSE), "pefa")
+  expect_s3_class(pefa(matrix(0L, J, 0L), d$Y, 1, 2, v0 = .001, max_it = 200,
+                       verbose = FALSE), "pefa")
 })
 
 test_that("nonconverged candidates are retained under one aggregate warning", {

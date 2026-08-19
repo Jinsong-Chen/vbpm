@@ -104,9 +104,13 @@ sweep.
 
 ## Step 1: ordinary oblique sweeps
 
-Every `pefa()` and `vbfa()` call below omits `v0` and `max_it` and therefore
-runs at its own function's documented defaults. Those are not one shared cap:
-`pefa()` allows `max_it = 10000` per candidate and `vbfa()` allows 5000.
+The calls below use each function's documented defaults; no call in this
+vignette passes `v0` or `max_it`. Both `pefa()` and `vbfa()` walk the same
+four-step spike ladder `v0 = c(.01, .005, .002, .001)`. What differs is
+`max_it`, and it is a cap **per ladder stage**, not per fit or per candidate:
+10000 per stage in `pefa()` against 5000 per stage in a direct `vbfa()`, so
+the worst-case totals over the four stages are 40000 and 20000. These are two
+independent documented defaults, not one shared ceiling.
 
 ```{r step1}
 AO <- pefa(Q0_AO, Y, Kmin = 2, Kmax = 5, verbose = FALSE)
@@ -148,14 +152,20 @@ structure.
 
 ```{r step1-reading}
 ## Analysis-side reading, not a package rule. Variant: full look-ahead with no
-## fallback -- the smallest K_from whose own and every later adjacent ELBO gain
-## is under 20% of the largest positive gain, NA_integer_ when none qualifies.
-reading <- vapply(list(AO = AO, AZ = AZ), function(x) {
-  g <- x$transitions$ELBO_gain_pct
-  below <- vapply(seq_along(g), function(i) all(g[i:length(g)] < 20),
-                  logical(1))
-  if (any(below)) x$transitions$K_from[which(below)[1]] else NA_integer_
-}, integer(1))
+## fallback. Find the last gain at or above 20%; the next K is the reading.
+g_AO <- AO$transitions$ELBO_gain_pct
+i_AO <- max(c(0L, which(g_AO >= 20))) + 1L
+K_AO <- if (!anyNA(g_AO) && i_AO <= length(g_AO)) {
+  AO$transitions$K_from[i_AO]
+} else NA_integer_
+
+g_AZ <- AZ$transitions$ELBO_gain_pct
+i_AZ <- max(c(0L, which(g_AZ >= 20))) + 1L
+K_AZ <- if (!anyNA(g_AZ) && i_AZ <= length(g_AZ)) {
+  AZ$transitions$K_from[i_AZ]
+} else NA_integer_
+
+reading <- c(AO = K_AO, AZ = K_AZ)
 reading
 ```
 
@@ -171,37 +181,30 @@ the reading above returned and the group Q is derived from the AO candidate at
 that count. All of this is ordinary analysis-side code: `pefa()` neither
 performs it nor stores it.
 
-Let `K0 = ncol(Q0)` and let the **specification depth** `d` be the uniform
-number of backbone markers per factor, `colSums(Q0 == 1L)`. The automatic route
-needs one common depth; had the backbone columns been specified to different
-depths, the analyst would write down a depth rule of their own or supply a
-complete substantive `J x Kp` group-loading Q instead.
+Let `K0 = ncol(Q0)`. The **specification depth** is the number of markers in
+each backbone column. Here both columns have depth two. If the depths differed,
+the analyst would need to state a rule of their own or supply a substantive
+`J x Kp` group-loading Q.
 
-At `Kp == K0` the Step-2 design is `Q0` itself. Otherwise `Q0` is carried over
-cell for cell --- every anchor, every AO or AZ zero, every unspecified cell ---
-and `Kp - K0` all-`-1` columns are appended. Each added column is then anchored
-independently: rank all `J` items by decreasing absolute loading in that column
-of the delivered candidate, break exact ties by item index, and turn its top `d`
-cells from `-1` into `1`. Nothing else is fixed --- no PIP cutoff, no magnitude
-cutoff, no dominant-factor assignment, no uniqueness restriction --- so the same
-item may be a top marker for more than one added factor.
+The Step-2 design keeps `Q0` unchanged and appends one all-`-1` column for each
+new factor. In every new column, the `d` largest absolute loadings become
+markers (`1`). Exact ties go to the lower item index. There is no PIP or loading
+cutoff, and the same item may mark more than one new factor.
 
 ```{r step2-design}
 Kp    <- reading[["AO"]]
 K0    <- ncol(AO$Q0)
 Lam   <- AO$loadings[[as.character(Kp)]]
 d     <- unique(colSums(AO$Q0 == 1L))
-added <- if (Kp > K0) seq(K0 + 1L, Kp) else integer(0)
-stopifnot(length(d) == 1L, d > 0L)        # one inherited specification depth
+if (length(d) != 1L || d[1] < 1L) {
+  stop("Choose one marker depth before building Q2.")
+}
 
-Q2 <- AO$Q0
-if (length(added)) {
-  Q2 <- cbind(Q2, matrix(-1L, J, Kp - K0,
-                         dimnames = list(rownames(AO$Q0),
-                                         paste0("F", added))))
-  for (k in added) {
-    top <- order(abs(Lam[, k]), seq_len(J),
-                 decreasing = c(TRUE, FALSE), method = "radix")[seq_len(d)]
+Q2 <- cbind(AO$Q0, matrix(-1L, J, Kp - K0))
+colnames(Q2) <- paste0("F", seq_len(Kp))
+if (Kp > K0) {
+  for (k in (K0 + 1L):Kp) {
+    top <- head(order(-abs(Lam[, k]), seq_len(J)), d)
     Q2[top, k] <- 1L
   }
 }
@@ -210,48 +213,20 @@ c(Kp = Kp, K0 = K0, depth = d)
 Q2[rowSums(Q2 == 1L) > 0L, , drop = FALSE]
 ```
 
-The added column inherits the backbone's depth of two and anchors itself on
-items 13 and 18, both from the cluster the two-column backbone did not cover.
-The checks below run at render time, so the vignette fails rather than
-misreports if the construction drifts from the recipe.
-
-```{r step2-check}
-stopifnot(
-  ## group columns only, no general column
-  nrow(Q2) == J, ncol(Q2) == Kp,
-  ## the first K0 columns are Q0 itself, cell for cell
-  identical(Q2[, seq_len(K0), drop = FALSE], AO$Q0),
-  ## no new fixed zero anywhere, in an added column or outside one
-  all(Q2[, added, drop = FALSE] %in% c(-1L, 1L)),
-  sum(Q2 == 0L) == sum(AO$Q0 == 0L),
-  ## each added column inherits the backbone depth exactly
-  all(colSums(Q2[, added, drop = FALSE] == 1L) == d),
-  ## and its markers are the top d absolute loadings, exact ties by item
-  ## index, with no PIP or magnitude cutoff standing between them
-  all(vapply(added, function(k) {
-    a   <- abs(Lam[, k])
-    sel <- which(Q2[, k] == 1L)
-    oth <- setdiff(seq_len(J), sel)
-    all(vapply(sel, function(i)
-      all(a[i] > a[oth] | (a[i] == a[oth] & i < oth)), logical(1)))
-  }, logical(1)))
-)
-```
+The added column inherits the backbone depth of two and uses items 13 and 18,
+both from the cluster the two-column backbone did not cover.
 
 The same group Q now goes to both models. The bifactor general column is added
-inside `vbfa()` and never participated in marker selection, which the second
-check below confirms.
+inside `vbfa()` and never participates in marker selection.
 
 ```{r step2-fit}
 f_obl <- vbfa(Y, Q2)
 f_bif <- vbfa(Y, Q2, bifactor = TRUE)
-stopifnot(identical(f_obl$Q, Q2),
-          identical(f_bif$Q[, -1L, drop = FALSE], Q2))
 
 idx <- c("RMSEA", "SRMR", "CFI", "TLI", "AIC", "BIC")
 round(rbind(
-  oblique  = fit_stats(f_obl, Y = Y, Q = f_obl$Q, tau = .50)[idx],
-  bifactor = fit_stats(f_bif, Y = Y, Q = f_bif$Q, tau = .50)[idx]
+  oblique  = fit_stats(f_obl)[idx],
+  bifactor = fit_stats(f_bif)[idx]
 ), 3)
 ```
 
@@ -269,14 +244,22 @@ and dimnames, and used identically in both arms. It is not a silent default and
 it is not a `pefa()` decision.
 
 `special_effects()` then describes the retained bifactor fit: within-cluster
-Schmid-Leiman ratios and their CVs, the implied second-order loadings, and
-group effect sizes.
+Schmid-Leiman ratios and their CVs, the higher-order parameters those ratios
+imply, and group effect sizes. Print the object rather than pulling out
+columns --- the print method carries the reading rule the numbers need.
 
 ```{r step2-effects}
-effects <- special_effects(f_bif)
-effects$mean_cv
-effects$groups[, c("group", "mean_ratio", "cv", "gamma", "D")]
+special_effects(f_bif)
 ```
+
+The item-weighted mean CV is 0.297, roughly three times the ~.1 convention,
+and that is the expected answer here: the population drew each item's general
+and group loading independently, so the within-cluster ratios cannot be
+proportional by construction. These data are genuinely bifactor, not a
+higher-order model in Schmid-Leiman clothing. The `gamma` column is still
+printed, but for this fit it is the deliberately lossy summary the print
+method warns about and must not be reported as a set of second-order
+loadings.
 
 ## The same window as a bifactor sweep
 

@@ -182,12 +182,12 @@ removals in full.
 
 \examples{
 \donttest{
-sim <- sim_fa(N = 400, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
+sim <- sim_fa(N = 300, K = 3, ipf = 4, lam = .7, lac = .3, rseed = 1)
 Q0 <- matrix(-1L, ncol(sim$dat), 2)
-groups <- rep(1:3, each = 6)
+groups <- rep(1:3, each = 4)
 for (k in 1:2) Q0[which(groups == k)[1:2], k] <- 1L
 
-fit <- pefa(Q0, sim$dat, 2, 5, verbose = FALSE)
+fit <- pefa(Q0, sim$dat, 2, 4, verbose = FALSE)
 fit$sweep
 fit$transitions[, c("K_from", "K_to", "ELBO_gain_pct", "phi_min")]
 fit$persistence$phi

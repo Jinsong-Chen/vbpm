@@ -108,17 +108,40 @@
   if (value[["t"]] < 0 || value[["t"]] != round(value[["t"]])) {
     .pefa_stop_K(K, "t is not a nonnegative whole number")
   }
-  ## A nonfinite descriptive index becomes NA_real_.  That is a reported
-  ## value, not a defect; see the Identification section of ?pefa.
+  ## A descriptive index may be NA when its own definition does not apply --
+  ## RMSEA and TLI are undefined at df <= 0.  That legitimate NA is preserved.
+  ## NaN or an infinity is a malformed engine result rather than an undefined
+  ## quantity, so it is named and refused instead of being laundered into an
+  ## NA that would read as "undefined".
   descriptive <- value[.pefa_descriptive_stats]
-  descriptive[!is.finite(descriptive)] <- NA_real_
+  ## is.na() is TRUE for NaN, so the two must be separated explicitly:
+  ## a literal NA_real_ is kept, a NaN is refused.
+  bad <- is.nan(descriptive) |
+    (!is.na(descriptive) & !is.finite(descriptive))
+  if (any(bad)) {
+    .pefa_stop_K(K, paste0(paste(names(descriptive)[bad], collapse = ", "),
+                           " is NaN or infinite"))
+  }
 
   flag <- fit[["flag"]]
   converged <- length(flag) == 1L && is.numeric(flag) && !is.na(flag) &&
     is.finite(flag) && flag == 1
+  ## An absent iteration count is NA_integer_; a reported one that is not a
+  ## representable nonnegative whole number is malformed, not merely unusual,
+  ## so it is refused rather than coerced into -1L or 0L.
   iter <- fit[["iter"]]
-  iter <- if (length(iter) == 1L && is.numeric(iter) && !is.na(iter) &&
-              is.finite(iter)) as.integer(iter) else NA_integer_
+  if (is.null(iter)) {
+    iter <- NA_integer_
+  } else if (length(iter) == 1L && is.numeric(iter) && !is.complex(iter) &&
+             is.na(iter) && !is.nan(iter)) {
+    iter <- NA_integer_
+  } else if (length(iter) == 1L && is.numeric(iter) && !is.complex(iter) &&
+             is.finite(iter) && iter >= 0 && iter == round(iter) &&
+             iter <= .Machine$integer.max) {
+    iter <- as.integer(iter)
+  } else {
+    .pefa_stop_K(K, "iter is not a representable nonnegative whole number")
+  }
 
   row <- data.frame(
     K = as.integer(K),
@@ -392,12 +415,12 @@
 #'
 #' @examples
 #' \donttest{
-#' sim <- sim_fa(N = 400, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 1)
+#' sim <- sim_fa(N = 300, K = 3, ipf = 4, lam = .7, lac = .3, rseed = 1)
 #' Q0 <- matrix(-1L, ncol(sim$dat), 2)
-#' groups <- rep(1:3, each = 6)
+#' groups <- rep(1:3, each = 4)
 #' for (k in 1:2) Q0[which(groups == k)[1:2], k] <- 1L
 #'
-#' fit <- pefa(Q0, sim$dat, 2, 5, verbose = FALSE)
+#' fit <- pefa(Q0, sim$dat, 2, 4, verbose = FALSE)
 #' fit$sweep
 #' fit$transitions[, c("K_from", "K_to", "ELBO_gain_pct", "phi_min")]
 #' fit$persistence$phi
@@ -417,8 +440,13 @@ pefa <- function(Q0, Y, Kmin, Kmax,
                  v0 = c(.01, .005, .002, .001), max_it = 10000,
                  convChk = FALSE, tolVal = 1e-4, tau = .50,
                  rank_adjust = FALSE, rank_max_J = 100, verbose = TRUE) {
+  ## Check Q0's type on the ORIGINAL object.  as.matrix() would turn a data
+  ## frame or factor into something acceptable, and the %in% test below
+  ## coerces, so character "1"/"0"/"-1" and logicals would otherwise pass.
+  if (!is.matrix(Q0) || !is.numeric(Q0) || is.complex(Q0)) {
+    stop("Q0 must be a real numeric or integer matrix.", call. = FALSE)
+  }
   Y <- as.matrix(Y)
-  Q0 <- as.matrix(Q0)
   J <- ncol(Y)
   K0 <- ncol(Q0)
   if (!is.numeric(Y) || is.complex(Y) || nrow(Y) < 1L || J < 1L) {

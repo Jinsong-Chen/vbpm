@@ -17,10 +17,10 @@
 ## rescaling below divides by this rather than by a raw magnitude, because
 ## dividing a double by an exact power of two only shifts its exponent: the
 ## scaled arithmetic reproduces the unscaled result bit for bit wherever the
-## unscaled one does not overflow, so removing the overflow moves no number an
-## ordinary fixture pins.  log2()/floor() can only misjudge at the subnormal
-## edge, where a zero or infinite divisor would be worse than an inexact one,
-## so the value itself is the fallback.
+## unscaled one neither overflows nor underflows, so removing either moves no
+## number an ordinary fixture pins.  log2()/floor() can only misjudge at the
+## subnormal edge, where a zero or infinite divisor would be worse than an
+## inexact one, so the value itself is the fallback.
 .pefa_pow2_scale <- function(x) {
   if (!is.finite(x) || x <= 0) return(1)
   p <- 2^floor(log2(x))
@@ -112,21 +112,21 @@
     a <- lam_from[, src_free[pos]]
     signs <- vapply(tgt_free, function(j) .pefa_sign(a, lam_to[, j]),
                     numeric(1))
+    ## One common power-of-two basis for this source and every target it may
+    ## take, so the whole competing field is ranked on the same footing (note
+    ## section 4).  Both ends of the double range manufacture a false exact tie
+    ## otherwise: two astronomically distant targets share an Inf, and two
+    ## astronomically near ones share a 0, and either hands the choice to the
+    ## tie rule, which then resolves on congruence or index a distance had
+    ## already settled.  Dividing by an exact power of two only shifts
+    ## exponents, so a scaled SSE reproduces its unscaled value bit for bit
+    ## wherever that value is representable, and one positive divisor common to
+    ## the whole field is order preserving -- the mathematical ranking, exact
+    ## ties included, is the unscaled one.
+    scale <- .pefa_pow2_scale(max(abs(a), abs(lam_to[, tgt_free])))
     sse <- vapply(seq_along(tgt_free), function(t) {
-      .pefa_sse(a, lam_to[, tgt_free[t]], signs[t], 1)
+      .pefa_sse(a, lam_to[, tgt_free[t]], signs[t], scale)
     }, numeric(1))
-    ## The unscaled SSE is exact wherever it is representable, and a target
-    ## whose SSE overflows is astronomically far, so it can never beat a finite
-    ## competitor.  Only an all-overflow field needs help, and recomputing that
-    ## field on one common power-of-two basis is what stops two extreme finite
-    ## targets from sharing an Inf and manufacturing a tie for the tie rule to
-    ## resolve arbitrarily.
-    if (all(is.infinite(sse))) {
-      scale <- .pefa_pow2_scale(max(abs(a), abs(lam_to[, tgt_free])))
-      sse <- vapply(seq_along(tgt_free), function(t) {
-        .pefa_sse(a, lam_to[, tgt_free[t]], signs[t], scale)
-      }, numeric(1))
-    }
     best <- which(sse == min(sse))
     if (length(best) > 1L) {
       ## An exact distance tie goes to the larger finite absolute congruence,

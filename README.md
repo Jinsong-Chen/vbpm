@@ -268,9 +268,9 @@ As of 0.9.0:
   unspecified the model converges cleanly but the solution can be rotationally
   ambiguous. Anchor at least one part.
 
-Both estimators reproduce their published references bit-for-bit, and the
-`vbfa` guarantee is enforced by a stored-reference regression test that runs on
-every `R CMD check`.
+`vbfa()` reproduces its published reference output bit-for-bit; a
+stored-reference regression test checks that result during every
+`R CMD check`.
 
 See `NEWS.md` for the per-version changelog.
 

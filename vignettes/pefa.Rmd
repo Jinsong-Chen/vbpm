@@ -15,23 +15,43 @@ library(vbpm)
 `pefa()` fits one partially exploratory factor model for every integer `K` in a
 fixed consecutive window and reports what it measured: a candidate table, the
 adjacent criterion gains, and the direct structural comparison of every ordered
-pair of candidates. It **chooses nothing**. There is no factor count, cut,
-threshold, persistence horizon, collision policy, or stopping rule inside the
-package, and no argument that would add one.
+pair of candidates. It **chooses nothing**: there is no count, cut, threshold,
+or stopping rule inside the package, and no argument that would add one.
 
-This vignette walks one sweep end to end. The example is deliberately an
-*overextraction* example: the population has three factors, the window runs to
-seven, and the point is to see what the three tables look like when the extra
-columns are surplus. Bifactor sweeps and the step that follows a count are in
+This vignette walks one sweep end to end, deliberately an *overextraction*
+example: the population has three factors and the window runs to seven, so the
+point is what the three tables look like when the extra columns are surplus.
+Bifactor sweeps and the step that follows a count are in
 `vignette("bifactor")`.
+
+## Decision inventory
+
+Six things must be decided before a factor count comes out of a sweep. The
+package decides none of them; each line below names the field that carries the
+evidence.
+
+* **The window.** `Kmin:Kmax` bounds every number under it; a reading at the
+  edge of `$sweep$K` is a reading about the window.
+* **The criterion.** `$sweep` carries `ELBO`, `AIC`, `BIC`, and four
+  descriptive indices side by side and ranks none of them.
+* **The count rule and its variant.** `$transitions$ELBO_gain_pct` and
+  `BIC_gain_pct` are the raw material; the cut, the look-ahead depth, and the
+  boundary fallback are yours.
+* **The collision policy.** `$transitions$collision` and
+  `$persistence$collision` record target reuse; whether reuse disqualifies a
+  candidate is your call.
+* **The persistence horizon.** A row of `$persistence$phi` says how far a
+  candidate's columns survive; how far they must survive is not in the object.
+* **The tie-break.** When two criterion paths disagree, nothing arbitrates:
+  `$sweep` reports both.
 
 ## One sweep
 
 Three factors correlated at 0.5, six items each with main loadings of 0.7, and
 two cross-loadings of 0.3 per factor with alternating signs --- the `sim_fa()`
 defaults. The backbone is **anchor-only (AO)**: two anchors per backbone factor
-get their intended cell fixed to `1`, and every other cell stays `-1`,
-meaning regularized and otherwise unspecified.
+get their intended cell fixed to `1`, and every other cell stays `-1`
+(regularized, otherwise unspecified).
 
 ```{r sweep}
 sim <- sim_fa(N = 500, K = 3, ipf = 6, lam = .7, lac = .3, rseed = 11)
@@ -46,15 +66,19 @@ p <- pefa(Q0, Y, Kmin = 2, Kmax = 7, verbose = FALSE)
 p
 ```
 
+`persistence 3 x 6 x 6` in that header means three 6 x 6 matrices, one per
+measure, not a three-dimensional array.
+
 The backbone has `K0 = 2` columns, so the window may start no lower than 2.
 For each candidate `K`, `pefa()` appends `K - K0` fully regularized columns to
-`Q0` and fits that design with `vbfa()`. The first two group columns keep the
-backbone's identity by position; the rest are exploratory.
+`Q0` and fits that design with `vbfa()`; the first two group columns keep the
+backbone's identity by position, the rest are exploratory.
 
 The call omits `v0` and `max_it`, so every candidate is fitted at the
 documented `pefa()` defaults: the four-step spike ladder
-`c(.01, .005, .002, .001)` and `max_it = 10000`. Those are `pefa()`'s own
-defaults, and `vbfa()` has its own.
+`c(.01, .005, .002, .001)` and `max_it = 10000`, a cap **per ladder stage**
+rather than per fit. `vbfa()` defaults to the same ladder and differs only in
+that cap, at 5000.
 
 The object has exactly seven components and class `"pefa"`.
 
@@ -65,8 +89,7 @@ names(p$settings)
 ```
 
 `$settings` holds the resolved fitting and fit-statistic controls only --- no
-threshold, rule, or provenance record. Candidate matrices are stored in two
-K-named lists.
+threshold or rule. Candidate matrices are stored in two K-named lists.
 
 ```{r matrices}
 names(p$loadings)
@@ -89,16 +112,17 @@ One row per `K`, always the same eleven columns. `AIC` and `BIC` are the
 hard-selection values at the resolved `tau` and `t` is their effective
 parameter count. `RMSEA`, `SRMR`, `CFI`, and `TLI` are descriptive and may be
 `NA` when their own definition does not apply --- `RMSEA` and `TLI` need
-positive degrees of freedom. A candidate that ran to `max_it` is retained with
-`converged = FALSE` and one aggregate warning; every candidate converged here.
+positive degrees of freedom. `converged` reflects the last ladder stage only: a
+candidate whose last stage ran to `max_it` is retained with `converged = FALSE`
+and one aggregate warning, and `iter` totals the iterations over all four
+stages. Every candidate converged here.
 
-Read down the columns. ELBO peaks at `K = 3` (-10936.65) and falls afterwards.
-BIC is minimized there too (21709.40) and rises monotonically, and so is AIC
-(21519.83) --- at the default spike ladder the three criteria agree on this
-data set. The descriptive indices point the same way rather than adding
-discrimination: RMSEA is 0.017 at `K = 3` and larger at every later candidate,
-SRMR is 0.035 and never lower afterwards, and CFI and TLI peak there at 0.996
-and 0.995.
+ELBO peaks at `K = 3` (-10936.65) and falls afterwards. BIC is minimized at the
+same candidate, 21709.40, and rises at every later one. AIC is minimized there
+as well, at 21519.83, and also rises monotonically --- at the default spike
+ladder the three criteria agree on this data set. The descriptive indices point
+the same way rather than adding discrimination: RMSEA (0.017) and SRMR (0.035)
+are lowest at `K = 3`, and CFI and TLI peak there at 0.996 and 0.995.
 
 ## Adjacent transitions
 
@@ -111,28 +135,23 @@ that positive favors `K_to`: the raw gains are `ELBO_to - ELBO_from` and
 `BIC_from - BIC_to`, and each is divided by the largest positive gain on its
 own path and multiplied by 100. Here the largest positive gain on both paths is
 the `2 -> 3` step, so that row is 100 and every later row is negative. If a
-path has no positive gain at all, its whole percentage column is `NA`; the raw
-criteria stay in `$sweep` and are never duplicated here.
+path has no positive gain at all, its whole percentage column is `NA`.
 
-The remaining seven columns are the structural facts for that pair. Backbone
-columns are paired by position; each exploratory source column then
-independently selects the exploratory target column that minimizes the
-sign-aligned squared distance `||a - s b||^2`, where `s = 1` when `a'b >= 0`
-and `-1` otherwise. That is Equation 17 of Chen (2023) made invariant to
-whole-column reflection. Absolute Tucker congruence breaks exact distance ties
-and is otherwise only a reported shape diagnostic; the smaller target index
-settles anything still tied.
+The remaining seven columns describe structural change. Backbone columns are
+paired by position. Each exploratory source column is paired with the closest
+target after allowing a whole-column sign flip. See `?pefa` for the exact
+distance and tie rules.
 
 The assignment is independent, not one-to-one, so two sources may pick the same
-target. That reuse is a **collision**, recorded rather than repaired: the
-`5 -> 6` and `6 -> 7` rows both carry it here.
+target. That reuse is a **collision**, recorded rather than repaired; the
+`5 -> 6` and `6 -> 7` rows carry it here.
 
 ## Persistence, read directly
 
-`$persistence` is a list of three upper-triangular matrices over the fitted `K`
-values. There is no accessor function: `phi` (holding `phi_min`), `rmsd`
-(holding **`rmsd_max`**, the weakest-column value, not the pooled `rmsd` of
-`$transitions`), and the logical collision mask are read with `$`.
+There is no accessor function. The three upper-triangular matrices over the
+fitted `K` values are read with `$`: `phi` (holding `phi_min`), `rmsd` (holding
+**`rmsd_max`**, the weakest-column value, not the pooled `rmsd` of
+`$transitions`), and the logical collision mask.
 
 ```{r persistence}
 names(p$persistence)
@@ -142,37 +161,39 @@ p$persistence$collision
 ```
 
 Every cell above the diagonal is a **direct** comparison of its two endpoint
-loading matrices. Nothing is chained through the candidates in between, so the
-`3 -> 7` cell is a genuine comparison of the three-factor and seven-factor
-solutions rather than a product of four adjacent steps. The diagonal and lower
-triangle are typed `NA`.
+loading matrices, not a product of the adjacent steps between them: `3 -> 7`
+compares the three- and seven-factor solutions themselves. The diagonal and
+lower triangle are typed `NA`.
 
 Read the `K = 3` row across: 0.996 against `K = 4`, 0.990 against `K = 5`,
-0.989 against `K = 6`, and then 0.789 against `K = 7`. Every column of the
-three-factor solution keeps a near-copy in the four-, five-, and six-factor
-solutions, where the weakest-column RMSD stays at 0.039, 0.059, and 0.062. The
-seven-factor cell is the exception, at RMSD 0.253.
+0.989 against `K = 6`, and then 0.789 against `K = 7`. Because `phi_min` is a
+weakest-link statistic, 0.989 says the *worst*-matched of the three columns
+still has a near-copy three candidates on, with the weakest-column RMSD no
+worse than 0.062. That is what a high persistence row buys: one number retires
+"the structure moved when I added a column" for the whole range out to
+`K = 6`. Only the seven-factor cell breaks the row, at RMSD 0.253.
 
 The `K = 2` row never exceeds 0.052 anywhere, and the two-factor loading matrix
 says why.
 
 ```{r k2}
-round(p$loadings[["2"]][c(1, 7, 8, 13), ], 2)
+round(p$loadings[["2"]][c(1, 7, 8, 13, 17, 18), ], 2)
 ```
 
 Backbone columns are compared by *position*, and at `K = 2` the second backbone
 column is not holding what it holds from `K = 3` on. Items 13-18 have taken it
-over, while its own anchors --- items 7 and 8 --- sit at 0.02 and 0.08 and have
-been absorbed into the first column alongside cluster 1. Its congruence with the
-second column of the three-factor solution is 0.041, and that one weak pair is
-the whole of `phi_min` for every `2 -> K` cell. Specifying an anchor cell leaves
-it free to be estimated; it does not force the column to be about that cluster
-when there are too few columns to go round.
+over --- the three shown load 0.69, 0.70, and 0.67 on it --- while its own
+anchors, items 7 and 8, sit at 0.02 and 0.08, absorbed into the first column
+alongside cluster 1. Its congruence with the second column of the three-factor
+solution is 0.041, and that one weak pair is the whole of `phi_min` for every
+`2 -> K` cell. Specifying an anchor cell leaves it free to be estimated; it
+does not force the column to be about that cluster when there are too few
+columns to go round.
 
-The collision mask is `TRUE` in three cells --- `5 -> 6`, `5 -> 7`, and
-`6 -> 7` --- where two or more source columns selected the same target. Those
-cells sit at `phi_min` 0.998, 0.284, and 0.294, which is the first sign that a
-collision is not by itself bad news about the structure.
+The collision mask is `TRUE` at `5 -> 6`, `5 -> 7`, and `6 -> 7`, where two or
+more source columns selected the same target. Those cells sit at `phi_min`
+0.998, 0.284, and 0.294 --- a first sign that a collision is not by itself bad
+news about the structure.
 
 ## Column strength
 
@@ -184,94 +205,85 @@ rule.
 ssl(p)
 ```
 
-This is what `phi_min` needs to be read against. `phi_min` is a **weakest-link**
-statistic over *every* source column, including one the fit has driven to near
-zero. Such a column has no shape, so it matches whichever target has the
-smallest norm and contributes an essentially arbitrary congruence; two such
-columns typically select the same target and raise `collision`. A low
-`phi_min` next to a near-empty column in `ssl()` means "this candidate contains
-a column with nothing in it", not "the retained structure moved". The `4 -> 5`
-row is exactly that case: its `phi_min` is 0.656, yet its pooled `rmsd` is
-0.030 and its `ari` is 1 --- not one item changed its dominant column. What
-produced 0.656 is a source column of squared length 0.003 matching a target
-column of squared length 0.007, two columns of nothing sitting next to three
-columns near 3. The `5 -> 6` and `6 -> 7` collisions come from those same
-near-empty columns, which all select the same smallest-norm target.
+This is what a *low* `phi_min` needs to be read against. `phi_min` is a
+**weakest-link** statistic over *every* source column, including one the fit
+has driven to near zero. Such a column has no shape: it matches whichever
+target has the smallest norm, contributes an arbitrary congruence, and, because
+two of them pick the same target, raises `collision`. The `4 -> 5` row is
+exactly that case --- `phi_min` 0.656 from a source column of squared length
+0.003 matching a target of 0.007 --- while its pooled `rmsd` is 0.030 and its
+`ari` is 1: not one item changed its dominant column. The `5 -> 6` and `6 -> 7`
+collisions come from the same near-empty columns.
 
-`unmatched_ssl` is on the same scale. It is the largest sum of squared loadings
-among the exploratory target columns that no exploratory source selected ---
-the size of the biggest column the smaller candidate did *not* account for.
-Across the adjacent rows it reads 3.049, 0.003, 0.007, 0.005, 0.642. At
-`2 -> 3` the surplus column carries 3.05, indistinguishable from the three
-genuine columns of the three-factor solution (3.08, 3.14, 3.05): the two-factor
-candidate really was missing a factor. At `3 -> 4`, `4 -> 5`, and `5 -> 6` the
-surplus is under 0.01, because each of those candidates adds a column with
-nothing in it and leaves the three real columns where they were.
+`unmatched_ssl` is on the same scale: the largest sum of squared loadings among
+the exploratory target columns that no exploratory source selected, the biggest
+column the smaller candidate did *not* account for. Across the adjacent rows it
+reads 3.049, 0.003, 0.007, 0.005, 0.642. At `2 -> 3` the surplus column carries
+3.05, indistinguishable from the three genuine columns of the three-factor
+solution (3.08, 3.14, 3.05): the two-factor candidate really was missing a
+factor. At `3 -> 4`, `4 -> 5`, and `5 -> 6` it is under 0.01: each of those
+candidates adds a column with nothing in it and leaves the three real columns
+alone.
 
 `6 -> 7` breaks that pattern, and `ssl(p)` shows why. The seven-factor candidate
-does not append an empty column: it shatters the third cluster into pieces of
+does append two empty columns --- `F6` and `F7`, both at 0.003 --- but neither
+of them is the *surplus* one. `unmatched_ssl` here is 0.642, which is exactly
+`ssl(p)[["7"]]["F3"]`, and the third cluster has been broken into pieces of
 1.853, 0.642, and 0.570.
 
 ```{r k7}
 round(p$loadings[["7"]][13:18, 3:5], 2)
 ```
 
-Items 17 and 18 have each been given a column of their own. That is a
-genuinely different structure, and it is what drives the `3 -> 7` congruence
-down to 0.789 after three cells at 0.989 or better. The `6 -> 7` value of 0.294
-is a separate matter: like `4 -> 5`, it is two empty columns being compared.
+Items 17 and 18 have each been given a column of their own --- a genuinely
+different structure, and what drives the `3 -> 7` congruence down to 0.789
+after three cells at 0.989 or better. The `6 -> 7` value of 0.294 is a separate
+matter: like `4 -> 5`, it is two empty columns being compared.
 
 ## What the three readings say here
 
 The criterion path, the persistence row, and `unmatched_ssl` against `ssl()`
 point the same way in this example.
 
-* ELBO, AIC, and BIC all turn at `K = 3`, and every later adjacent gain on both
-  percentage paths is negative.
-* The three-factor solution's columns persist into `K = 4`, `5`, and `6` at
-  congruence 0.989 or better, so nothing in that range displaces the structure
-  it found --- the extra columns are added beside it.
-* The first added column (at `K = 3`) carries a full factor's worth of loading,
-  3.05; the columns added at `K = 4`, `5`, and `6` carry less than 0.01 each.
+* ELBO, AIC, and BIC all turn at `K = 3`, and every later adjacent gain is
+  negative on both percentage paths.
+* The three-factor columns persist into `K = 4`, `5`, and `6` at congruence
+  0.989 or better: the extra columns are added beside that structure.
+* The column added at `K = 3` carries 3.05, a full factor's worth; those added
+  at `K = 4`, `5`, and `6` carry under 0.01 each.
 
 The population had three factors, so the reading is right. **It is still the
-reader's inference, not a package verdict.** `pefa()` reported six candidate
-rows of eleven numbers, five transition rows, and three triangles; the sentence
-"the structure is three-dimensional and the later columns are surplus" was
-composed here, in the vignette, out of those numbers. Two of those numbers point
-the other way if read alone: `phi_min` is 0.656 at `4 -> 5` and 0.294 at
-`6 -> 7`, which looks like structural instability until `ssl()` shows that both
-values belong to columns with nothing in them. Nothing in the object arbitrates.
+reader's inference, not a package verdict.** The sentence "the structure is
+three-dimensional and the later columns are surplus" was composed here, in the
+vignette, out of six candidate rows, five transition rows, and three triangles.
+Two of those numbers point the other way if read alone: `phi_min` is 0.656 at
+`4 -> 5` and 0.294 at `6 -> 7`, structural instability until `ssl()` shows that
+both belong to columns with nothing in them.
 
 ## One analysis-side count rule
 
-A count rule belongs to the analysis. Here is one, in full, as ordinary local
-code:
+Here is one count rule, in full, as ordinary local code:
 
 ```{r reading}
 ## Analysis-side reading, not a package rule. Variant: full look-ahead with no
-## fallback -- the smallest K_from whose own and every later adjacent ELBO gain
-## is under 20% of the largest positive gain on that path, and NA_integer_ when
-## no such K exists.
+## fallback. Find the last gain at or above 20%; the next K is the reading.
 g <- p$transitions$ELBO_gain_pct
-below <- vapply(seq_along(g), function(i) all(g[i:length(g)] < 20), logical(1))
-if (any(below)) p$transitions$K_from[which(below)[1]] else NA_integer_
+last_large <- max(c(0L, which(g >= 20)))
+if (anyNA(g) || last_large == length(g)) {
+  NA_integer_
+} else {
+  p$transitions$K_from[last_large + 1L]
+}
 ```
 
-Stating the variant matters, because the variants disagree. A *capped*
-look-ahead rule inspects only a fixed number of following gains and can return
-a count where the full-look-ahead rule returns `NA_integer_`; a rule with a
-boundary fallback returns an endpoint where this one returns `NA_integer_`. For
-`K = 4:6` with scores `c(0, 100, 105)`, a 10% cut, and two sustained gains, the
-capped rule delivers `K = 5` and the full-look-ahead rule delivers
-`NA_integer_`. An unlabelled reading copied out of a vignette would quietly
-become a default; `vbpm` does not have one.
+Stating the variant matters: a capped look-ahead or a boundary fallback can
+give a different answer on the same path, and an unlabelled reading copied out
+of a vignette quietly becomes a default.
 
-Substituting `BIC_gain_pct` for `ELBO_gain_pct` above returns `3` as well on
-this path. Both percentage columns are relative to the largest positive gain
-*in this fitted window*, so widening the window can change the denominator and
-therefore the reading. Version 0.9.0 has no reassembly API: a wider window
-means another `pefa()` call over the whole wider window.
+Substituting `BIC_gain_pct` above returns `3` as well. Both percentage columns
+are relative to the largest positive gain *in this fitted window*, so widening
+the window changes the denominator and can change the reading; 0.9.0 has no
+reassembly API, so a wider window means another `pefa()` call.
 
 ## Display methods
 
@@ -280,13 +292,12 @@ summary(p)
 ```
 
 `summary()` returns exactly `window`, `sweep`, `transitions`, `persistence`,
-`ssl`, `settings`, and `nonconverged_K`. Its print method suffixes a
-persistence value with `*` wherever the parallel collision cell is `TRUE` and
-labels the marker; that is display formatting only, and the stored numeric and
-logical matrices are untouched.
+`ssl`, `settings`, and `nonconverged_K`. Its print method marks a persistence
+value with `*` wherever the parallel collision cell is `TRUE`; that is display
+formatting only, and the stored matrices are untouched.
 
-The plot methods are descriptive trajectories. None of them draws a threshold
-line or marks a selected count, because there is nothing to mark.
+The plot methods are descriptive trajectories, with no threshold line and no
+marked count.
 
 ```{r plots, fig.width=7, fig.height=4.5}
 plot(p, type = "objective", criterion = "ELBO")
@@ -294,22 +305,23 @@ plot(p, type = "gain", criterion = "BIC", pct = TRUE)
 plot(p, type = "fit")
 ```
 
+The ELBO path turns visibly at `K = 3`, and both fit panels turn with it. The
+gain view is indexed by `K_to`, so its point at `x = 3` is the `2 -> 3` step,
+not the three-factor candidate; `pct = TRUE` reads the stored percentage
+column, and the default `pct = FALSE` recomputes the raw oriented gains from
+`$sweep`.
+
 ## Scope
 
-What `pefa()` returns is measurement. It carries no validated threshold: the
-20% cut above is an illustration, and no persistence or congruence value in
-this package has been calibrated against an error rate. It performs no
-automatic window extension, writes no checkpoint, saves nothing to disk, and
-offers no resume or recovery path --- a failed or malformed candidate aborts
-the whole call with an error naming its `K`, and a nonconverged but
-well-formed candidate is retained and reported. It makes no cross-version
-promise about a saved object; the package version and session used for an
-analysis belong in that analysis's own run record.
+What `pefa()` returns is measurement. No persistence or congruence value here
+has been calibrated against an error rate, the 20% cut above is an
+illustration, and there is no automatic window extension. A failed or
+malformed candidate aborts the call with an error naming its `K`; a
+nonconverged but well-formed one is retained and reported.
 
-The reading shown above is a property of this simulated example --- 500
-observations, main loadings of 0.7, three clean clusters, and an anchored
-backbone. Read it as a demonstration of how the three tables behave under
-overextraction, not as evidence about how they behave at weaker signal.
+The reading above is a property of this simulated example --- 500 observations,
+main loadings of 0.7, three clean clusters, an anchored backbone --- and not
+evidence about how these tables behave at weaker signal.
 
 ## References
 

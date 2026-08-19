@@ -26,9 +26,15 @@
 #' summary (model type, dimensions, convergence, ELBO, active loadings).
 #' Second, functions receiving a fit can **recognize what it is**: this is
 #' how [fit_stats()] knows a bifactor fit from an oblique one without being told
-#' (the fit carries its own `orthogonal` and `ld` settings), and how it
-#' refuses a [vbmimic()] fit rather than computing meaningless statistics
-#' on it.
+#' (the fit carries its own `orthogonal` and `ld` settings), and how it sends a
+#' [vbmimic()] fit to its own method. That method, `fit_stats.vbmimic()`,
+#' returns a populated but deliberately limited result -- `NA` for every
+#' SEM-like index, plus a single `n_active_coef` count of soft-selected
+#' measurement and structural coefficients -- because the MIMIC objective and
+#' joint covariance derivation those indices need are not available yet. It is
+#' the family fallback `fit_stats.vbpm_fit()` that stops instead of computing
+#' something meaningless, and it applies to classes with no method of their
+#' own.
 #'
 #' @section Why the family shares a parent class:
 #' The specific class (`"vbfa"`, `"vbmimic"`) comes first, the family class

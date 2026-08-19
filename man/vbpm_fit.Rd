@@ -29,9 +29,15 @@ floods the screen with every matrix in the object, but shows a compact
 summary (model type, dimensions, convergence, ELBO, active loadings).
 Second, functions receiving a fit can \strong{recognize what it is}: this is
 how \code{\link[=fit_stats]{fit_stats()}} knows a bifactor fit from an oblique one without being told
-(the fit carries its own \code{orthogonal} and \code{ld} settings), and how it
-refuses a \code{\link[=vbmimic]{vbmimic()}} fit rather than computing meaningless statistics
-on it.
+(the fit carries its own \code{orthogonal} and \code{ld} settings), and how it sends a
+\code{\link[=vbmimic]{vbmimic()}} fit to its own method. That method, \code{fit_stats.vbmimic()},
+returns a populated but deliberately limited result -- \code{NA} for every
+SEM-like index, plus a single \code{n_active_coef} count of soft-selected
+measurement and structural coefficients -- because the MIMIC objective and
+joint covariance derivation those indices need are not available yet. It is
+the family fallback \code{fit_stats.vbpm_fit()} that stops instead of computing
+something meaningless, and it applies to classes with no method of their
+own.
 }
 
 \section{Why the family shares a parent class}{

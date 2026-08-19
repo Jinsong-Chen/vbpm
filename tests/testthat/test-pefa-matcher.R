@@ -495,6 +495,35 @@ test_that("extreme finite columns do not overflow into a manufactured tie", {
   expect_equal(f2$rmsd, f$rmsd)
 })
 
+test_that("extreme finite columns do not underflow into a manufactured tie", {
+  ## The mirror image of the overflow case.  Both unscaled aligned distances
+  ## underflow to exactly 0, and both congruences are exactly 1, so without
+  ## rescaling the tie rule would fall through to the index and take the first
+  ## -- strictly farther -- target.  On a common power-of-two basis the nearer
+  ## target is still strictly nearer.
+  a <- c(1e-200, 0)
+  far <- c(3e-200, 0)     # aligned distance (2e-200)^2, 4x the other
+  near <- c(2e-200, 0)    # aligned distance (1e-200)^2
+  expect_identical(sum((a - far)^2), 0)
+  expect_identical(sum((a - near)^2), 0)
+  ## The same two distances on a common basis, where they are representable
+  ## and strictly ordered 4 to 1.
+  sse <- function(b) sum(((a - b) / 2^-664)^2)
+  expect_gt(sse(far), sse(near))
+
+  f <- .cmp(cbind(a), cbind(far, near))
+  ## Both leftover SSLs underflow to 0, so the RMSDs are what read out the
+  ## choice: 1e-200 / sqrt(2) for `near`, twice that for `far`.
+  expect_equal(f$rmsd, 1e-200 / sqrt(2))
+  expect_equal(f$rmsd_max, 1e-200 / sqrt(2))
+  expect_false(f$rmsd == 2e-200 / sqrt(2))
+  expect_false(f$collision)
+
+  ## Reversing the target order reverses nothing: the choice is a distance,
+  ## not an index accident.
+  expect_identical(.cmp(cbind(a), cbind(near, far))$rmsd, f$rmsd)
+})
+
 test_that("a huge but representable RMSD is formed instead of Inf", {
   ## The aligned sum of squares is 2e600 and cannot be held in a double, but
   ## the RMSD that comes out of it can, so scaling has to happen before the
