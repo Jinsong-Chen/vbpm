@@ -1,7 +1,7 @@
 # vbpm 0.9.1
 
-Test-portability release. No user-visible behaviour, no estimator change, and
-no change to any number a fit returns; 0.9.0 was rejected at CRAN's incoming
+Test-portability release. No executable estimator or API behaviour changed,
+and no number a fit returns changed; 0.9.0 was rejected at CRAN's incoming
 checks and never reached the archive.
 
 * The frozen r1.1 regression test compared `vbfa()` output to its stored
@@ -13,8 +13,8 @@ checks and never reached the archive.
   The test now asserts agreement at a strict relative `tolerance = 1e-8`,
   which remains sensitive to material regression, and keeps the iteration
   count exact, since a different stopping point means the path itself
-  changed. Bitwise identity is no longer asserted anywhere: it is a property
-  of a single build, not of the estimator.
+  changed. The frozen-reference output is no longer asserted bitwise; that
+  property depends on the build.
 
 * The `pefa` and `bifactor` vignettes replace their illustrative count rule
   with a declared analysis-side reader: dual ELBO/BIC count paths, three named
@@ -28,14 +28,16 @@ checks and never reached the archive.
   refusal itself is unchanged; only the stated reason was stale.
 
   This is the sole change to `R/` since 0.9.0 and it is comment-only: one
-  roxygen sentence rewritten, no executable line. `src/` and `data/` are byte-identical to
-  0.9.0, so every number a fit returns is unchanged and results produced under
-  0.9.0 reproduce exactly under 0.9.1.
+  roxygen sentence rewritten, no executable line. `src/` and `data/` are
+  byte-identical to 0.9.0, so every number a fit returns is unchanged and
+  results produced under 0.9.0 reproduce exactly under 0.9.1 in the same
+  computational environment.
 
 # vbpm 0.9.0
 
 First public release. It was submitted to CRAN but not accepted, so it never
-reached the archive; see 0.9.1. `pefa()` is now a **measurement-only** factor-count sweep:
+reached the archive; see 0.9.1. `pefa()` is now a **measurement-only**
+factor-count sweep:
 it fits every `K` in a fixed consecutive window, reports candidate and
 between-candidate quantities, and chooses nothing. This completes an arc
 running through 0.8.0 (removed the `stable` verdict), 0.8.1 (removed

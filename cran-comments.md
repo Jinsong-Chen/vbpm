@@ -10,8 +10,9 @@ One test compared `vbfa()` output to a stored reference with
 last one or two ulps are not portable; Debian disagreed in the sixteenth
 significant digit on four values (797 tests passed). The test now asserts
 agreement at a strict relative `tolerance = 1e-8`, which remains sensitive to
-material regression. Bitwise identity is no longer asserted anywhere, being a
-property of a single build. No estimator or user-visible behaviour changed.
+material regression. The frozen-reference output is no longer asserted
+bitwise; that property depends on the build. No executable estimator or API
+behaviour changed.
 
 ## Test environments
 
