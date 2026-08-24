@@ -39,6 +39,22 @@ psychometric measurement models:
   platform x86_64-w64-mingw32, invoked as
   `R CMD check --as-cran --run-donttest vbpm_0.9.0.tar.gz` against the
   tarball built from a clean detached checkout of the tagged commit.
+* The same tarball re-checked on that platform with R-devel's stricter
+  check options forced on (`_R_CHECK_LENGTH_1_CONDITION_`,
+  `_R_CHECK_S3_METHODS_NOT_REGISTERED_`,
+  `_R_CHECK_NATIVE_ROUTINE_REGISTRATION_`, `_R_CHECK_PRAGMAS_`,
+  `_R_CHECK_COMPILATION_FLAGS_`, `_R_CHECK_RD_VALIDATE_RD2HTML_`,
+  `_R_CHECK_DEPENDS_ONLY_`, `_R_CLASS_MATRIX_ARRAY_`). No additional
+  NOTE, WARNING or ERROR appeared; compiled code, compilation flags,
+  pragmas, foreign function calls, and Rd validation were all OK.
+* Linux, `x86_64-conda-linux-gnu`, R 4.5.1: this exact release was used to
+  produce the held-out validation results of a companion manuscript, so the
+  compiled QUIC/RcppArmadillo code builds and runs there. A cross-platform
+  refit agreed with the Windows run in BIC to within 1.5e-11.
+* win-builder R-devel was submitted twice and both builds were collected and
+  processed, but the result emails did not reach the maintainer address, so
+  no win-builder log is quoted here. The macOS builder was unavailable
+  (HTTP 502 from its backend on three attempts over four hours).
 
 ## R CMD check results
 
