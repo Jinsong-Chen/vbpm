@@ -31,18 +31,42 @@ congruence <- function(Le, Lt) {
            sqrt(sum(Le[, perm[k]]^2) * sum(Lt[, k]^2)), numeric(1))
 }
 
-test_that("vbfa(v0 = 0.001) reproduces the frozen r1.1 estimator bit-for-bit", {
+test_that("vbfa(v0 = 0.001) reproduces the frozen r1.1 estimator", {
   ## THE regression test protecting the paper-1 artifact. The fixture stores
   ## both the data and the reference outputs of vbfa_r1.1.R (CS repo), so this
   ## cannot be invalidated by generator drift; regenerate only via
   ## dev/make_r11_fixture.R and only if the reference itself is re-frozen.
+  ##
+  ## Numerical agreement is asserted at a tolerance rather than bitwise. The
+  ## estimator runs through compiled BLAS/LAPACK, whose SIMD and FMA choices
+  ## differ between platforms, so the last one or two ulps are not portable --
+  ## a reference frozen under one BLAS will not reproduce exactly under
+  ## another. The tolerance is still eight orders of magnitude tighter than
+  ## any change of estimator would produce, so the guard keeps its power.
+  ## Bitwise identity is checked separately below, where it is meaningful.
+  ref <- readRDS(test_path("fixtures", "vbfa_r11_ref.rds"))
+  f <- vbfa(ref$Y, ref$Q, v0 = 0.001, max_it = 1500)
+  expect_equal(unname(f$Lam), unname(ref$Lam), tolerance = 1e-8)
+  expect_equal(unname(f$Phi), unname(ref$Phi), tolerance = 1e-8)
+  expect_equal(unname(f$PsiInv), unname(ref$PsiInv), tolerance = 1e-8)
+  expect_equal(f$ELBO, ref$ELBO, tolerance = 1e-8)
+  ## The iteration count is discrete and must match exactly: a different
+  ## stopping point means the path itself changed, not just its rounding.
+  expect_identical(f$iter, ref$iter)     # 79, matching CS smoke test T1
+})
+
+test_that("the frozen r1.1 reference reproduces bitwise on the reference BLAS", {
+  ## Bit-for-bit identity is a property of one build, not of the estimator, so
+  ## it is verified only where the reference was frozen and skipped on CRAN's
+  ## heterogeneous platforms. Run it with NOT_CRAN=true, which is what
+  ## devtools::test() sets; a bare R CMD check skips it.
+  skip_on_cran()
   ref <- readRDS(test_path("fixtures", "vbfa_r11_ref.rds"))
   f <- vbfa(ref$Y, ref$Q, v0 = 0.001, max_it = 1500)
   expect_identical(unname(f$Lam), unname(ref$Lam))
   expect_identical(unname(f$Phi), unname(ref$Phi))
   expect_identical(unname(f$PsiInv), unname(ref$PsiInv))
   expect_identical(f$ELBO, ref$ELBO)
-  expect_identical(f$iter, ref$iter)     # 79, matching CS smoke test T1
 })
 
 test_that("scalar v0 = 0.001 reproduces the fixed-spike estimator deterministically", {

@@ -260,30 +260,93 @@ Two of those numbers point the other way if read alone: `phi_min` is 0.656 at
 `4 -> 5` and 0.294 at `6 -> 7`, structural instability until `ssl()` shows that
 both belong to columns with nothing in them.
 
-## One analysis-side count rule
+## Analysis-side count profiles
 
-Here is one count rule, in full, as ordinary local code:
+A count reading needs more than a percentage cutoff. The criterion, score
+orientation, gain fraction, sustain length, crossing scope, strictness, path
+requirements, and boundary behavior all belong to the analysis. Here are four
+ordinary profile rows and one local reader. The reader scans strictly after the
+last maximum-gain transition, requires the full sustain window, and has no
+boundary fallback.
 
 ```{r reading}
-## Analysis-side reading, not a package rule. Variant: full look-ahead with no
-## fallback. Find the last gain at or above 20%; the next K is the reading.
-g <- p$transitions$ELBO_gain_pct
-last_large <- max(c(0L, which(g >= 20)))
-if (anyNA(g) || last_large == length(g)) {
-  NA_integer_
-} else {
-  p$transitions$K_from[last_large + 1L]
+count_profiles <- data.frame(
+  profile_id = c("r8_elbo_20_s1", "elbo_20_s2",
+                 "pefa_fit_elbo_10_s2", "bic_20_s1"),
+  criterion = c("ELBO", "ELBO", "ELBO", "BIC"),
+  gain_fraction = c(.20, .20, .10, .20),
+  sustain = c(1L, 2L, 2L, 1L),
+  stringsAsFactors = FALSE
+)
+
+read_count_profile <- function(K, score, gain_fraction, sustain,
+                               converged = rep(TRUE, length(K))) {
+  usable <- length(K) >= 2L && !anyNA(K) &&
+    identical(K, seq.int(min(K), max(K))) &&
+    length(score) == length(K) && all(is.finite(score)) &&
+    length(converged) == length(K) && all(converged %in% TRUE)
+  if (!usable)
+    return(c(count_path_usable = FALSE, K_hat = NA_integer_))
+
+  gain <- diff(score)
+  gain_max <- max(gain)
+  if (!is.finite(gain_max) || gain_max <= 0)
+    return(c(count_path_usable = TRUE, K_hat = NA_integer_))
+
+  first_after_peak <- max(which(gain == gain_max)) + 1L
+  last_start <- length(gain) - sustain + 1L
+  if (first_after_peak > last_start)
+    return(c(count_path_usable = TRUE, K_hat = NA_integer_))
+
+  for (i in seq.int(first_after_peak, last_start)) {
+    if (all(gain[i:(i + sustain - 1L)] < gain_fraction * gain_max))
+      return(c(count_path_usable = TRUE, K_hat = K[i]))
+  }
+  c(count_path_usable = TRUE, K_hat = NA_integer_)
+}
+
+read_one <- function(profile, K, ELBO, BIC, converged) {
+  score <- if (profile$criterion == "ELBO") ELBO else -BIC
+  read_count_profile(K, score, profile$gain_fraction,
+                     profile$sustain, converged)
 }
 ```
 
-Stating the variant matters: a capped look-ahead or a boundary fallback can
-give a different answer on the same path, and an unlabelled reading copied out
-of a vignette quietly becomes a default.
+The profiles make materially different readings on a small artificial path:
 
-Substituting `BIC_gain_pct` above returns `3` as well. Both percentage columns
-are relative to the largest positive gain *in this fitted window*, so widening
-the window changes the denominator and can change the reading; 0.9.0 has no
-reassembly API, so a wider window means another `pefa()` call.
+```{r count-profile-contrast}
+toy_K <- 2:7
+toy_ELBO <- cumsum(c(0, 100, 15, 25, 5, 5))
+toy_BIC <- -cumsum(c(0, 100, 30, 15, 5, 5))
+
+toy_readings <- vapply(seq_len(nrow(count_profiles)), function(i) {
+  read_one(count_profiles[i, ], toy_K, toy_ELBO, toy_BIC,
+           rep(TRUE, length(toy_K)))[["K_hat"]]
+}, integer(1))
+setNames(toy_readings, count_profiles$profile_id)
+```
+
+The same four rows happen to agree at three in the fitted example:
+
+```{r fitted-count-profiles}
+fitted_readings <- vapply(seq_len(nrow(count_profiles)), function(i) {
+  read_one(count_profiles[i, ], p$sweep$K, p$sweep$ELBO, p$sweep$BIC,
+           p$sweep$converged)[["K_hat"]]
+}, integer(1))
+setNames(fitted_readings, count_profiles$profile_id)
+```
+
+`r8_elbo_20_s1` is R8's formal Step-1 count profile; its BIC reading is
+sensitivity evidence. `pefa_fit_elbo_10_s2` represents the PEFA-fit paper's
+mainly descriptive sustained-drop heuristic. These are study-owned profiles,
+not **vbpm** defaults. A capped look-ahead or a boundary fallback can give a
+different answer on the same path, and an unlabelled reading copied from a
+vignette can quietly become a de facto default.
+
+Gain fractions are relative to the largest positive gain in the declared
+window. Widening that window can change the denominator and the reading;
+**vbpm** 0.9.0 has no reassembly API, so a wider window requires another
+complete `pefa()` call.
 
 ## Display methods
 
@@ -313,9 +376,9 @@ column, and the default `pct = FALSE` recomputes the raw oriented gains from
 
 ## Scope
 
-What `pefa()` returns is measurement. No persistence or congruence value here
-has been calibrated against an error rate, the 20% cut above is an
-illustration, and there is no automatic window extension. A failed or
+What `pefa()` returns is measurement. The named profiles above illustrate
+analysis-owned readings; they do not become package selectors or defaults, and
+there is no automatic window extension. A failed or
 malformed candidate aborts the call with an error naming its `K`; a
 nonconverged but well-formed one is retained and reported.
 

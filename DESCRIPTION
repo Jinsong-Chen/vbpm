@@ -1,7 +1,7 @@
 Package: vbpm
 Type: Package
 Title: Variational Bayes Psychometric Models
-Version: 0.9.0
+Version: 0.9.1
 Authors@R: c(
     person("Jinsong", "Chen", email = "jinsong.chen@live.com",
            role = c("aut", "cre"),

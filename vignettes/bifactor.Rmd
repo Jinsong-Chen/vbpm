@@ -151,40 +151,112 @@ candidate is the three-factor one plus a thin extra column, not a different
 structure.
 
 ```{r step1-reading}
-## Analysis-side reading, not a package rule. Variant: full look-ahead with no
-## fallback. Find the last gain at or above 20%; the next K is the reading.
-g_AO <- AO$transitions$ELBO_gain_pct
-i_AO <- max(c(0L, which(g_AO >= 20))) + 1L
-K_AO <- if (!anyNA(g_AO) && i_AO <= length(g_AO)) {
-  AO$transitions$K_from[i_AO]
-} else NA_integer_
+## Analysis-side count profile, not a package rule: ELBO, 20%, sustain one,
+## strict crossing after the last maximum gain, full look-ahead, no fallback.
+read_count <- function(x, cut = .20) {
+  K <- x$sweep$K
+  score <- x$sweep$ELBO
+  usable <- length(K) >= 2L && !anyNA(K) &&
+    identical(K, seq.int(min(K), max(K))) &&
+    length(score) == length(K) && all(is.finite(score))
+  if (!usable)
+    return(c(count_path_usable = FALSE, K_hat = NA_integer_))
 
-g_AZ <- AZ$transitions$ELBO_gain_pct
-i_AZ <- max(c(0L, which(g_AZ >= 20))) + 1L
-K_AZ <- if (!anyNA(g_AZ) && i_AZ <= length(g_AZ)) {
-  AZ$transitions$K_from[i_AZ]
-} else NA_integer_
+  gain <- diff(score)
+  gain_max <- max(gain)
+  if (!is.finite(gain_max) || gain_max <= 0)
+    return(c(count_path_usable = TRUE, K_hat = NA_integer_))
 
-reading <- c(AO = K_AO, AZ = K_AZ)
-reading
+  first_after_peak <- max(which(gain == gain_max)) + 1L
+  hit <- which(seq_along(gain) >= first_after_peak & gain < cut * gain_max)
+  K_hat <- if (length(hit)) K[hit[1L]] else NA_integer_
+  c(count_path_usable = TRUE, K_hat = K_hat)
+}
+
+## One local persistence profile: minimum absolute phi >= .80, direct horizon
+## r = 2, sources 2:3, and a collision veto on every required edge.
+read_persistence <- function(x, sources = 2:3, cutoff = .80, horizon = 2L) {
+  phi <- x$persistence$phi
+  collision <- x$persistence$collision
+  state <- vapply(sources, function(k) {
+    targets <- k + seq_len(horizon)
+    if (!all(as.character(k) %in% rownames(phi)) ||
+        !all(as.character(targets) %in% colnames(phi)))
+      return(NA)
+    value <- phi[as.character(k), as.character(targets)]
+    clash <- collision[as.character(k), as.character(targets)]
+    if (anyNA(value) || anyNA(clash)) NA else
+      all(value >= cutoff & !clash)
+  }, logical(1))
+
+  persistent <- which(state %in% TRUE)
+  if (!length(persistent)) {
+    resolution <- if (all(state %in% FALSE)) "absent" else "unresolved"
+    K_p <- NA_integer_
+  } else {
+    top <- max(persistent)
+    higher <- seq.int(top + 1L, length(state))
+    resolved <- top == length(state) || all(state[higher] %in% FALSE)
+    resolution <- if (resolved) "selected" else "unresolved"
+    K_p <- if (resolved) sources[top] else NA_integer_
+  }
+  list(K_p = K_p, resolution = resolution,
+       source_state = setNames(state, sources))
+}
+
+read_profile <- function(x) {
+  count <- read_count(x)
+  persistence <- read_persistence(x)
+  usable <- as.logical(count[["count_path_usable"]])
+  K_hat <- as.integer(count[["K_hat"]])
+  K_p <- persistence$K_p
+  layer <- if (identical(persistence$resolution, "selected") && usable &&
+               is.finite(K_hat) && identical(K_hat, K_p)) {
+    "L1"
+  } else if (identical(persistence$resolution, "selected") && usable) {
+    "L2"
+  } else if (identical(persistence$resolution, "absent") && usable) {
+    "L3"
+  } else {
+    "unclassified"
+  }
+  c(K_hat = K_hat, K_p = K_p, layer = layer)
+}
+
+profile <- rbind(AO = read_profile(AO), AZ = read_profile(AZ))
+profile
 ```
 
-Both deliver three. That agreement is a fact about this sample and window; the
-AIC minimum at four is in the same evidence and disagrees, and no part of
-`pefa()` arbitrates between them.
+Both count paths return three, and the displayed `.80/r2` profile also selects
+three in both backbones, so both readings are L1 here. That agreement is a fact
+about this sample, source set, horizon, cutoff, and window. The AIC minimum at
+four is in the same evidence and disagrees, and no part of `pefa()` arbitrates
+between them. The profile is tutorial analysis code: `.80/r2` was retained as a
+scenario-bound practical default in one simulation study, not made a `vbpm`
+default. Shallower `.85/r1` and deeper `.70/r3` readings, or matched
+maximum-RMSD companions, remain legitimate declared sensitivity profiles.
+
+A horizon is always direct: $r=2$ asks separately for `K -> K + 1` and
+`K -> K + 2`, never for a chain through the intervening fit. Horizons one
+through four are constructed the same way, but source `K` requires the fitted
+endpoint `K + r`. A known collision vetoes that edge for this profile. If every
+declared source resolves nonpersistent the result is L3; unavailable evidence
+that prevents resolution is unclassified, not L3.
 
 ## Step 2: a comparison derived from Step 1
 
-Step 1 delivers a count and a loading matrix. Step 2 is built out of *that*
-result, not out of a design written down independently, so `Kp` is the count
-the reading above returned and the group Q is derived from the AO candidate at
-that count. All of this is ordinary analysis-side code: `pefa()` neither
-performs it nor stores it.
+The criterion path supplies the descriptive count $\widehat K$. The persistence
+profile separately supplies $K_p$ and the layer. Only L1 or L2 delivers a
+candidate to Step 2, and then $K_{\mathrm{step2}}=K_p$. Thus
+$K_{\mathrm{step2}}$ is literally $K_p$ conditional on L1/L2 delivery; it is
+neither another selector nor the true population count. The group Q below is
+derived from the AO candidate at that delivered count. All of this is ordinary
+analysis-side code: `pefa()` neither performs it nor stores it.
 
 Let `K0 = ncol(Q0)`. The **specification depth** is the number of markers in
 each backbone column. Here both columns have depth two. If the depths differed,
 the analyst would need to state a rule of their own or supply a substantive
-`J x Kp` group-loading Q.
+`J x K_step2` group-loading Q.
 
 The Step-2 design keeps `Q0` unchanged and appends one all-`-1` column for each
 new factor. In every new column, the `d` largest absolute loadings become
@@ -192,24 +264,26 @@ markers (`1`). Exact ties go to the lower item index. There is no PIP or loading
 cutoff, and the same item may mark more than one new factor.
 
 ```{r step2-design}
-Kp    <- reading[["AO"]]
-K0    <- ncol(AO$Q0)
-Lam   <- AO$loadings[[as.character(Kp)]]
+if (!profile["AO", "layer"] %in% c("L1", "L2"))
+  stop("The declared profile did not deliver a Step-2 proposal.")
+K_step2 <- as.integer(profile["AO", "K_p"])
+K0      <- ncol(AO$Q0)
+Lam     <- AO$loadings[[as.character(K_step2)]]
 d     <- unique(colSums(AO$Q0 == 1L))
 if (length(d) != 1L || d[1] < 1L) {
   stop("Choose one marker depth before building Q2.")
 }
 
-Q2 <- cbind(AO$Q0, matrix(-1L, J, Kp - K0))
-colnames(Q2) <- paste0("F", seq_len(Kp))
-if (Kp > K0) {
-  for (k in (K0 + 1L):Kp) {
+Q2 <- cbind(AO$Q0, matrix(-1L, J, K_step2 - K0))
+colnames(Q2) <- paste0("F", seq_len(K_step2))
+if (K_step2 > K0) {
+  for (k in (K0 + 1L):K_step2) {
     top <- head(order(-abs(Lam[, k]), seq_len(J)), d)
     Q2[top, k] <- 1L
   }
 }
 
-c(Kp = Kp, K0 = K0, depth = d)
+c(K_step2 = K_step2, K0 = K0, depth = d)
 Q2[rowSums(Q2 == 1L) > 0L, , drop = FALSE]
 ```
 
@@ -237,7 +311,7 @@ a test against an unrestricted alternative, and it is conditional on the count
 and the markers that Step 1 delivered. A thin margin, or a margin that flips
 when the Step-1 count changes, should be reported rather than resolved.
 
-An analyst may instead supply a substantive `J x Kp` group-loading Q of their
+An analyst may instead supply a substantive `J x K_step2` group-loading Q of their
 own, never one containing the bifactor general column. That is a different
 analysis design: it should be labelled as such, recorded, validated for codes
 and dimnames, and used identically in both arms. It is not a silent default and

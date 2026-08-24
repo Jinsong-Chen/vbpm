@@ -1,6 +1,16 @@
 # cran-comments
 
-New submission. No earlier version of vbpm has been on CRAN.
+New submission. No earlier version of vbpm has been on CRAN. This is a
+resubmission of 0.9.0, which failed the Debian incoming check.
+
+## The 0.9.0 failure and the fix
+
+One test compared `vbfa()` output to a stored reference with
+`expect_identical()`. The estimator runs through compiled BLAS/LAPACK, so the
+last one or two ulps are not portable; Debian disagreed in the sixteenth
+significant digit on four values (797 tests passed). The test now asserts
+agreement at `tolerance = 1e-8`, and bitwise identity is checked in a separate
+`skip_on_cran()` test. No estimator or user-visible behaviour changed.
 
 ## Test environments
 
@@ -9,19 +19,16 @@ New submission. No earlier version of vbpm has been on CRAN.
 
 ## R CMD check results
 
-0 ERRORs, 0 WARNINGs.
-
-The only NOTEs were the expected "New submission" and a local one reporting
-that pandoc was not visible to the checking subprocess, so `README.md` and
-`NEWS.md` were skipped; both render cleanly under pandoc 3.6.3 and the note
-should not arise on your machines.
+0 ERRORs, 0 WARNINGs, 1 NOTE (new submission).
 
 ## Notes for the reviewer
 
-* Possibly mis-spelled words in DESCRIPTION: `vbfa` and `vbmimic` are the
-  package's estimator functions, `QUIC` is the sparse inverse-covariance
-  algorithm behind the optional local-dependence branch, and `MIMIC` is the
-  standard multiple-indicators multiple-causes acronym.
+* Possibly mis-spelled words in DESCRIPTION. `Guo`, `Jin`, `Yan` and `Zhang`
+  are author surnames in the cited references. `vbfa` and `vbmimic` are the
+  package's estimator functions. `QUIC` is the sparse inverse-covariance
+  algorithm behind the optional local-dependence branch, `MIMIC` is the
+  standard multiple-indicators multiple-causes acronym, and `Variational` and
+  `bifactor` are the usual spellings of those terms in this literature.
 
 * The included `nlsy27` data are derived from the public National
   Longitudinal Survey of Youth 1997 (U.S. Bureau of Labor Statistics) and were
