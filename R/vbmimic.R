@@ -88,8 +88,9 @@
 #'   limited result: `n_active_coef` (soft-selected measurement and structural
 #'   coefficients) plus typed `NA` for every covariance-based index and
 #'   parameter count, with an explanatory `note` attribute. [pefa()] does not
-#'   accept `vbmimic` fits at all, because factor-number selection needs a
-#'   comparable objective.
+#'   accept `vbmimic` fits at all: its sweep reports criterion gains across a
+#'   factor-count window, which requires one comparable objective for every
+#'   candidate in that window.
 #'
 #' @references
 #' Jin, Y., & Chen, J. (2025). Regularized variational Bayesian approximations

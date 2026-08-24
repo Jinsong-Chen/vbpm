@@ -107,8 +107,9 @@ bound, and the bound's implementable closed form has not been assembled.
 limited result: \code{n_active_coef} (soft-selected measurement and structural
 coefficients) plus typed \code{NA} for every covariance-based index and
 parameter count, with an explanatory \code{note} attribute. \code{\link[=pefa]{pefa()}} does not
-accept \code{vbmimic} fits at all, because factor-number selection needs a
-comparable objective.
+accept \code{vbmimic} fits at all: its sweep reports criterion gains across a
+factor-count window, which requires one comparable objective for every
+candidate in that window.
 }
 \examples{
 ## 3 factors, 18 items, 9 covariates in disjoint blocks of 3

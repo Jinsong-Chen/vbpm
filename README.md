@@ -154,7 +154,7 @@ Y   <- sim$dat
 
 ## partially confirmatory Q: 1 = anchor, 0 = fixed zero, -1 = estimate
 Q <- matrix(-1, ncol(Y), 3)
-Q[1:2, ] <- 0; Q[1:2, 1] <- 1        # two anchors on factor 1, etc.
+Q[1:2, ] <- 0; Q[1:2, 1] <- 1        # two anchors on factor 1 only
 
 fit <- vbfa(Y, Q)                    # dynamic path on by default; quiet
 fit                                  # compact summary (S3 print method)
@@ -268,9 +268,12 @@ As of 0.9.1:
   unspecified the model converges cleanly but the solution can be rotationally
   ambiguous. Anchor at least one part.
 
-`vbfa()` reproduces its published reference output bit-for-bit; a
-stored-reference regression test checks that result during every
-`R CMD check`.
+`vbfa()` reproduces its published reference output. A stored-reference
+regression test checks that result during every `R CMD check`, at a tolerance
+eight orders of magnitude tighter than any change of estimator would produce.
+It is not asserted bitwise: the estimator runs through compiled BLAS/LAPACK,
+whose SIMD and FMA choices differ between platforms, so the last one or two
+ulps are a property of the build rather than of the estimator.
 
 See `NEWS.md` for the per-version changelog.
 

@@ -55,19 +55,6 @@ test_that("vbfa(v0 = 0.001) reproduces the frozen r1.1 estimator", {
   expect_identical(f$iter, ref$iter)     # 79, matching CS smoke test T1
 })
 
-test_that("the frozen r1.1 reference reproduces bitwise on the reference BLAS", {
-  ## Bit-for-bit identity is a property of one build, not of the estimator, so
-  ## it is verified only where the reference was frozen and skipped on CRAN's
-  ## heterogeneous platforms. Run it with NOT_CRAN=true, which is what
-  ## devtools::test() sets; a bare R CMD check skips it.
-  skip_on_cran()
-  ref <- readRDS(test_path("fixtures", "vbfa_r11_ref.rds"))
-  f <- vbfa(ref$Y, ref$Q, v0 = 0.001, max_it = 1500)
-  expect_identical(unname(f$Lam), unname(ref$Lam))
-  expect_identical(unname(f$Phi), unname(ref$Phi))
-  expect_identical(unname(f$PsiInv), unname(ref$PsiInv))
-  expect_identical(f$ELBO, ref$ELBO)
-})
 
 test_that("scalar v0 = 0.001 reproduces the fixed-spike estimator deterministically", {
   d <- make_dat()

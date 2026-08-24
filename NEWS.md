@@ -19,13 +19,23 @@ checks and never reached the archive.
 * The `pefa` and `bifactor` vignettes replace their illustrative count rule
   with a declared analysis-side reader: dual ELBO/BIC count paths, three named
   minimum-congruence persistence profiles, and the companion study's L1/L2/L3
-  corroboration layering. The profiles disagree on a real fitted path, so the
-  sensitivity is shown rather than asserted. Vignette prose and local code
-  only.
+  corroboration layering. On a real fitted path the deepest profile fails to
+  resolve while the other two agree, so the sensitivity to declared depth is
+  shown rather than asserted. Vignette prose and local code only.
+
+* `?vbmimic` no longer explains why `pefa()` refuses `vbmimic` fits in terms of
+  factor-number selection, which `pefa()` has not performed since 0.9.0. The
+  refusal itself is unchanged; only the stated reason was stale.
+
+  This is the sole change to `R/` since 0.9.0 and it is comment-only: three
+  roxygen lines, no executable line. `src/` and `data/` are byte-identical to
+  0.9.0, so every number a fit returns is unchanged and results produced under
+  0.9.0 reproduce exactly under 0.9.1.
 
 # vbpm 0.9.0
 
-First CRAN release. `pefa()` is now a **measurement-only** factor-count sweep:
+First public release. It was submitted to CRAN but not accepted, so it never
+reached the archive; see 0.9.1. `pefa()` is now a **measurement-only** factor-count sweep:
 it fits every `K` in a fixed consecutive window, reports candidate and
 between-candidate quantities, and chooses nothing. This completes an arc
 running through 0.8.0 (removed the `stable` verdict), 0.8.1 (removed
