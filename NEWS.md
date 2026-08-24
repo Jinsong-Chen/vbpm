@@ -16,10 +16,12 @@ checks and never reached the archive.
   itself changed. Bitwise identity moved to a separate `skip_on_cran()` test
   for the build where the reference was frozen.
 
-* The `pefa` and `bifactor` vignettes replace their single illustrative count
-  rule with named analysis-side count and persistence profiles, including the
-  ones the companion study declares, and show two profiles disagreeing on the
-  same path. Vignette prose and local code only.
+* The `pefa` and `bifactor` vignettes replace their illustrative count rule
+  with a declared analysis-side reader: dual ELBO/BIC count paths, three named
+  minimum-congruence persistence profiles, and the companion study's L1/L2/L3
+  corroboration layering. The profiles disagree on a real fitted path, so the
+  sensitivity is shown rather than asserted. Vignette prose and local code
+  only.
 
 # vbpm 0.9.0
 

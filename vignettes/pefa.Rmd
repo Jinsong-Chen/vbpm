@@ -260,93 +260,165 @@ Two of those numbers point the other way if read alone: `phi_min` is 0.656 at
 `4 -> 5` and 0.294 at `6 -> 7`, structural instability until `ssl()` shows that
 both belong to columns with nothing in them.
 
-## Analysis-side count profiles
+## Analysis-side dual-count and persistence profiles
 
-A count reading needs more than a percentage cutoff. The criterion, score
-orientation, gain fraction, sustain length, crossing scope, strictness, path
-requirements, and boundary behavior all belong to the analysis. Here are four
-ordinary profile rows and one local reader. The reader scans strictly after the
-last maximum-gain transition, requires the full sustain window, and has no
-boundary fallback.
+The following compact reader illustrates one declared analysis. ELBO and BIC
+are co-primary descriptive count paths: each uses a 20% gain cutoff, sustain
+one, a strict scan after the last maximum gain, the **full fitted window**, and
+no boundary fallback. Their finite readings form
+$C_{20}=\{\widehat K_{ELBO},\widehat K_{BIC}\}$ after absent values are removed.
+Neither path breaks a tie or outranks the other.
+
+The same reader applies three scenario-bound minimum-congruence profiles:
+`.85/r1`, `.80/r2`, and `.70/r3`, with `.80/r2` labelled the practical default
+for the motivating study. Each source is compared directly with every endpoint
+through `K + r`; no adjacent chain is substituted. A known collision vetoes
+that edge. The common declared source set is `2:4`, chosen so the deepest
+profile has all required endpoints in the fitted window. $K_p$ is the highest
+persistent source only after every higher declared source has resolved
+nonpersistent.
 
 ```{r reading}
-count_profiles <- data.frame(
-  profile_id = c("r8_elbo_20_s1", "elbo_20_s2",
-                 "pefa_fit_elbo_10_s2", "bic_20_s1"),
-  criterion = c("ELBO", "ELBO", "ELBO", "BIC"),
-  gain_fraction = c(.20, .20, .10, .20),
-  sustain = c(1L, 2L, 2L, 1L),
-  stringsAsFactors = FALSE
+profile_specs <- data.frame(
+  profile = c(".85/r1", ".80/r2", ".70/r3"),
+  phi_cut = c(.85, .80, .70), r = 1:3,
+  practical_default = c(FALSE, TRUE, FALSE)
 )
+profile_sources <- 2:4
 
-read_count_profile <- function(K, score, gain_fraction, sustain,
-                               converged = rep(TRUE, length(K))) {
-  usable <- length(K) >= 2L && !anyNA(K) &&
-    identical(K, seq.int(min(K), max(K))) &&
-    length(score) == length(K) && all(is.finite(score)) &&
-    length(converged) == length(K) && all(converged %in% TRUE)
-  if (!usable)
-    return(c(count_path_usable = FALSE, K_hat = NA_integer_))
+read_sweep <- function(x, phi_cut, r, sources) {
+  K <- as.integer(x$sweep$K)
+  converged <- x$sweep$converged
 
-  gain <- diff(score)
-  gain_max <- max(gain)
-  if (!is.finite(gain_max) || gain_max <= 0)
-    return(c(count_path_usable = TRUE, K_hat = NA_integer_))
-
-  first_after_peak <- max(which(gain == gain_max)) + 1L
-  last_start <- length(gain) - sustain + 1L
-  if (first_after_peak > last_start)
-    return(c(count_path_usable = TRUE, K_hat = NA_integer_))
-
-  for (i in seq.int(first_after_peak, last_start)) {
-    if (all(gain[i:(i + sustain - 1L)] < gain_fraction * gain_max))
-      return(c(count_path_usable = TRUE, K_hat = K[i]))
+  read_count <- function(score) {
+    usable <- length(K) >= 2L && all(is.finite(K)) && all(diff(K) == 1L) &&
+      length(score) == length(K) && all(is.finite(score)) &&
+      is.logical(converged) && all(converged %in% TRUE)
+    if (!usable) return(list(usable = FALSE, Khat = NA_integer_))
+    gain <- diff(score)
+    gain_max <- max(gain)
+    if (!(gain_max > 0)) return(list(usable = TRUE, Khat = NA_integer_))
+    peak <- max(which(gain == gain_max))
+    hit <- which(seq_along(gain) > peak & gain < .20 * gain_max)
+    list(usable = TRUE,
+         Khat = if (length(hit)) K[hit[1L]] else NA_integer_)
   }
-  c(count_path_usable = TRUE, K_hat = NA_integer_)
+
+  ELBO <- read_count(x$sweep$ELBO)
+  BIC <- read_count(-x$sweep$BIC)
+  C20 <- sort(unique(c(ELBO$Khat, BIC$Khat)[
+    is.finite(c(ELBO$Khat, BIC$Khat))]))
+
+  phi <- x$persistence$phi
+  collision <- x$persistence$collision
+  conv <- setNames(converged, K)
+  state <- vapply(sources, function(k) {
+    targets <- k + seq_len(r)
+    edge <- vapply(targets, function(target) {
+      from <- as.character(k); to <- as.character(target)
+      if (!from %in% rownames(phi) || !to %in% colnames(phi) ||
+          !isTRUE(conv[[from]]) || !isTRUE(conv[[to]]) ||
+          is.na(collision[from, to])) return(NA_integer_)
+      if (isTRUE(collision[from, to])) return(0L)
+      value <- phi[from, to]
+      if (!is.finite(value)) NA_integer_ else as.integer(value >= phi_cut)
+    }, integer(1))
+    if (any(edge %in% 0L)) 0L else
+      if (length(edge) && all(edge %in% 1L)) 1L else NA_integer_
+  }, integer(1))
+
+  persistent <- which(state == 1L)
+  if (!length(state)) {
+    resolution <- "unresolved"
+    Kp <- NA_integer_
+  } else if (!length(persistent)) {
+    resolution <- if (all(state %in% 0L)) "nonpersistent" else "unresolved"
+    Kp <- NA_integer_
+  } else {
+    top <- max(persistent)
+    higher <- if (top < length(state)) state[(top + 1L):length(state)] else 0L
+    resolution <- if (all(higher %in% 0L)) "persistent" else "unresolved"
+    Kp <- if (resolution == "persistent") sources[top] else NA_integer_
+  }
+
+  hit_ELBO <- is.finite(Kp) && is.finite(ELBO$Khat) && ELBO$Khat == Kp
+  hit_BIC <- is.finite(Kp) && is.finite(BIC$Khat) && BIC$Khat == Kp
+  support <- if (hit_ELBO && hit_BIC) "both" else if (hit_ELBO) "ELBO only" else
+    if (hit_BIC) "BIC only" else "none"
+  any_count_usable <- ELBO$usable || BIC$usable
+  layer <- if (resolution == "persistent" && Kp %in% C20) "L1" else
+    if (resolution == "persistent" && any_count_usable) "L2" else
+    if (resolution == "nonpersistent") "L3" else
+      "unclassified"
+  gap <- if (resolution == "persistent" && length(C20))
+    min(abs(C20 - Kp)) else NA_real_
+
+  list(Khat_ELBO = ELBO$Khat, Khat_BIC = BIC$Khat, C20 = C20,
+       count_usable = c(ELBO = ELBO$usable, BIC = BIC$usable),
+       support = support, Kp = Kp, source_state = setNames(state, sources),
+       resolution = resolution, layer = layer, g_CP = gap)
 }
 
-read_one <- function(profile, K, ELBO, BIC, converged) {
-  score <- if (profile$criterion == "ELBO") ELBO else -BIC
-  read_count_profile(K, score, profile$gain_fraction,
-                     profile$sustain, converged)
+profile_row <- function(x, spec) {
+  z <- read_sweep(x, spec$phi_cut, spec$r, profile_sources)
+  data.frame(profile = spec$profile, practical_default = spec$practical_default,
+             Khat_ELBO = z$Khat_ELBO, Khat_BIC = z$Khat_BIC,
+             C20 = if (length(z$C20)) paste0("{", paste(z$C20,
+               collapse = ","), "}") else "{}",
+             support = z$support, Kp = z$Kp, layer = z$layer,
+             g_CP = z$g_CP, row.names = NULL)
 }
+
+profile_results <- do.call(rbind, lapply(seq_len(nrow(profile_specs)),
+  function(i) profile_row(p, profile_specs[i, ])))
+profile_results
+
+## A declared source at the upper edge cannot persist without its endpoint.
+short_window <- read_sweep(p, phi_cut = .85, r = 1L, sources = 7L)
+data.frame(profile = ".85/r1", declared_source = 7L,
+           required_endpoint = 8L, resolution = short_window$resolution,
+           layer = short_window$layer)
 ```
 
-The profiles make materially different readings on a small artificial path:
+Here both gain paths read three, so $C_{20}=\{3\}$. The three structural rows
+also select three and receive L1 with descriptive support from both criteria.
+The support label records whether one or both count paths corroborate $K_p$; it
+does not rank the paths or select the structure.
 
-```{r count-profile-contrast}
-toy_K <- 2:7
-toy_ELBO <- cumsum(c(0, 100, 15, 25, 5, 5))
-toy_BIC <- -cumsum(c(0, 100, 30, 15, 5, 5))
+Agreement across all three declared profiles is **within-family robustness** to
+these particular cutoff/depth combinations. It is not evidence that three is
+the population truth, a validation result, or a package decision. Conversely,
+profile disagreement would describe sensitivity within this family rather than
+identify which row is true.
 
-toy_readings <- vapply(seq_len(nrow(count_profiles)), function(i) {
-  read_one(count_profiles[i, ], toy_K, toy_ELBO, toy_BIC,
-           rep(TRUE, length(toy_K)))[["K_hat"]]
-}, integer(1))
-setNames(toy_readings, count_profiles$profile_id)
-```
+The final printed row is the short-window counterexample. Source 7 under
+`.85/r1` needs the direct `7 -> 8` endpoint, but this fit stops at 7; its
+persistence resolution and layer are therefore `unresolved` and `unclassified`,
+not L3 and not a reason to shrink the declared source set.
 
-The same four rows happen to agree at three in the fitted example:
+L1 means that a selected $K_p$ belongs to finite $C_{20}$. L2 means that $K_p$
+is selected but does not belong to $C_{20}$ while at least one count path is
+usable. L3 requires every declared source to resolve nonpersistent regardless
+of count-path usability. All remaining cases are unclassified. The displayed
+$g_{CP}=\min_{\widehat K\in C_{20}}|\widehat K-K_p|$ is corroboration only,
+never a persistence or delivery criterion, and is undefined when there is no
+finite count reading. Algebraically, $g_{CP}=0$ merely restates the L1
+membership condition $K_p\in C_{20}$; only positive gap magnitudes add a
+descriptive measure of how far an L2 count disagreement lies.
 
-```{r fitted-count-profiles}
-fitted_readings <- vapply(seq_len(nrow(count_profiles)), function(i) {
-  read_one(count_profiles[i, ], p$sweep$K, p$sweep$ELBO, p$sweep$BIC,
-           p$sweep$converged)[["K_hat"]]
-}, integer(1))
-setNames(fitted_readings, count_profiles$profile_id)
-```
+If an analysis continues to Step 2, only an L1/L2 delivery is eligible and then
+$K_{\mathrm{step2}}=K_p$. Thus the Step-2 count is $K_p$ conditional on
+delivery, not another count selector; `vignette("bifactor")` shows the design
+construction.
 
-`r8_elbo_20_s1` is R8's formal Step-1 count profile; its BIC reading is
-sensitivity evidence. `pefa_fit_elbo_10_s2` represents the PEFA-fit paper's
-mainly descriptive sustained-drop heuristic. These are study-owned profiles,
-not **vbpm** defaults. A capped look-ahead or a boundary fallback can give a
-different answer on the same path, and an unlabelled reading copied from a
-vignette can quietly become a de facto default.
-
-Gain fractions are relative to the largest positive gain in the declared
-window. Widening that window can change the denominator and the reading;
-**vbpm** 0.9.0 has no reassembly API, so a wider window requires another
-complete `pefa()` call.
+These definitions, including the three profiles and the practical-default
+label, belong to this analysis rather than **vbpm**. A different declared
+source set, horizon, cutoff, collision policy, or window can change the result,
+and an unlabelled reading copied from a vignette can quietly become a de facto
+default. Gain fractions are relative to the largest positive gain in the full
+declared window. Widening that window can change the denominator and the
+reading; **vbpm** 0.9.1 has no reassembly API, so a wider window requires
+another complete `pefa()` call.
 
 ## Display methods
 

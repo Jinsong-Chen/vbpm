@@ -151,101 +151,140 @@ candidate is the three-factor one plus a thin extra column, not a different
 structure.
 
 ```{r step1-reading}
-## Analysis-side count profile, not a package rule: ELBO, 20%, sustain one,
-## strict crossing after the last maximum gain, full look-ahead, no fallback.
-read_count <- function(x, cut = .20) {
-  K <- x$sweep$K
-  score <- x$sweep$ELBO
-  usable <- length(K) >= 2L && !anyNA(K) &&
-    identical(K, seq.int(min(K), max(K))) &&
-    length(score) == length(K) && all(is.finite(score))
-  if (!usable)
-    return(c(count_path_usable = FALSE, K_hat = NA_integer_))
+## Analysis-owned profiles. ELBO and BIC each use the full fitted window,
+## a 20% gain cutoff, sustain one, a post-peak strict crossing, and no fallback.
+profile_specs <- data.frame(
+  profile = c(".85/r1", ".80/r2", ".70/r3"),
+  phi_cut = c(.85, .80, .70), r = 1:3,
+  practical_default = c(FALSE, TRUE, FALSE)
+)
+profile_sources <- 2:3
 
-  gain <- diff(score)
-  gain_max <- max(gain)
-  if (!is.finite(gain_max) || gain_max <= 0)
-    return(c(count_path_usable = TRUE, K_hat = NA_integer_))
+read_sweep <- function(x, phi_cut, r, sources) {
+  K <- as.integer(x$sweep$K)
+  converged <- x$sweep$converged
 
-  first_after_peak <- max(which(gain == gain_max)) + 1L
-  hit <- which(seq_along(gain) >= first_after_peak & gain < cut * gain_max)
-  K_hat <- if (length(hit)) K[hit[1L]] else NA_integer_
-  c(count_path_usable = TRUE, K_hat = K_hat)
-}
+  read_count <- function(score) {
+    usable <- length(K) >= 2L && all(is.finite(K)) && all(diff(K) == 1L) &&
+      length(score) == length(K) && all(is.finite(score)) &&
+      is.logical(converged) && all(converged %in% TRUE)
+    if (!usable) return(list(usable = FALSE, Khat = NA_integer_))
+    gain <- diff(score)
+    gain_max <- max(gain)
+    if (!(gain_max > 0)) return(list(usable = TRUE, Khat = NA_integer_))
+    peak <- max(which(gain == gain_max))
+    hit <- which(seq_along(gain) > peak & gain < .20 * gain_max)
+    list(usable = TRUE,
+         Khat = if (length(hit)) K[hit[1L]] else NA_integer_)
+  }
 
-## One local persistence profile: minimum absolute phi >= .80, direct horizon
-## r = 2, sources 2:3, and a collision veto on every required edge.
-read_persistence <- function(x, sources = 2:3, cutoff = .80, horizon = 2L) {
+  ELBO <- read_count(x$sweep$ELBO)
+  BIC <- read_count(-x$sweep$BIC)
+  C20 <- sort(unique(c(ELBO$Khat, BIC$Khat)[
+    is.finite(c(ELBO$Khat, BIC$Khat))]))
+
   phi <- x$persistence$phi
   collision <- x$persistence$collision
+  conv <- setNames(converged, K)
   state <- vapply(sources, function(k) {
-    targets <- k + seq_len(horizon)
-    if (!all(as.character(k) %in% rownames(phi)) ||
-        !all(as.character(targets) %in% colnames(phi)))
-      return(NA)
-    value <- phi[as.character(k), as.character(targets)]
-    clash <- collision[as.character(k), as.character(targets)]
-    if (anyNA(value) || anyNA(clash)) NA else
-      all(value >= cutoff & !clash)
-  }, logical(1))
+    targets <- k + seq_len(r)
+    edge <- vapply(targets, function(target) {
+      from <- as.character(k); to <- as.character(target)
+      if (!from %in% rownames(phi) || !to %in% colnames(phi) ||
+          !isTRUE(conv[[from]]) || !isTRUE(conv[[to]]) ||
+          is.na(collision[from, to])) return(NA_integer_)
+      if (isTRUE(collision[from, to])) return(0L)
+      value <- phi[from, to]
+      if (!is.finite(value)) NA_integer_ else as.integer(value >= phi_cut)
+    }, integer(1))
+    if (any(edge %in% 0L)) 0L else
+      if (length(edge) && all(edge %in% 1L)) 1L else NA_integer_
+  }, integer(1))
 
-  persistent <- which(state %in% TRUE)
-  if (!length(persistent)) {
-    resolution <- if (all(state %in% FALSE)) "absent" else "unresolved"
-    K_p <- NA_integer_
+  persistent <- which(state == 1L)
+  if (!length(state)) {
+    resolution <- "unresolved"
+    Kp <- NA_integer_
+  } else if (!length(persistent)) {
+    resolution <- if (all(state %in% 0L)) "nonpersistent" else "unresolved"
+    Kp <- NA_integer_
   } else {
     top <- max(persistent)
-    higher <- seq.int(top + 1L, length(state))
-    resolved <- top == length(state) || all(state[higher] %in% FALSE)
-    resolution <- if (resolved) "selected" else "unresolved"
-    K_p <- if (resolved) sources[top] else NA_integer_
+    higher <- if (top < length(state)) state[(top + 1L):length(state)] else 0L
+    resolution <- if (all(higher %in% 0L)) "persistent" else "unresolved"
+    Kp <- if (resolution == "persistent") sources[top] else NA_integer_
   }
-  list(K_p = K_p, resolution = resolution,
-       source_state = setNames(state, sources))
+
+  hit_ELBO <- is.finite(Kp) && is.finite(ELBO$Khat) && ELBO$Khat == Kp
+  hit_BIC <- is.finite(Kp) && is.finite(BIC$Khat) && BIC$Khat == Kp
+  support <- if (hit_ELBO && hit_BIC) "both" else if (hit_ELBO) "ELBO only" else
+    if (hit_BIC) "BIC only" else "none"
+  any_count_usable <- ELBO$usable || BIC$usable
+  layer <- if (resolution == "persistent" && Kp %in% C20) "L1" else
+    if (resolution == "persistent" && any_count_usable) "L2" else
+    if (resolution == "nonpersistent") "L3" else
+      "unclassified"
+  gap <- if (resolution == "persistent" && length(C20))
+    min(abs(C20 - Kp)) else NA_real_
+
+  list(Khat_ELBO = ELBO$Khat, Khat_BIC = BIC$Khat, C20 = C20,
+       count_usable = c(ELBO = ELBO$usable, BIC = BIC$usable),
+       support = support, Kp = Kp, source_state = setNames(state, sources),
+       resolution = resolution, layer = layer, g_CP = gap)
 }
 
-read_profile <- function(x) {
-  count <- read_count(x)
-  persistence <- read_persistence(x)
-  usable <- as.logical(count[["count_path_usable"]])
-  K_hat <- as.integer(count[["K_hat"]])
-  K_p <- persistence$K_p
-  layer <- if (identical(persistence$resolution, "selected") && usable &&
-               is.finite(K_hat) && identical(K_hat, K_p)) {
-    "L1"
-  } else if (identical(persistence$resolution, "selected") && usable) {
-    "L2"
-  } else if (identical(persistence$resolution, "absent") && usable) {
-    "L3"
-  } else {
-    "unclassified"
-  }
-  c(K_hat = K_hat, K_p = K_p, layer = layer)
+profile_row <- function(x, backbone, spec) {
+  z <- read_sweep(x, spec$phi_cut, spec$r, profile_sources)
+  data.frame(backbone = backbone, profile = spec$profile,
+             practical_default = spec$practical_default,
+             Khat_ELBO = z$Khat_ELBO, Khat_BIC = z$Khat_BIC,
+             C20 = if (length(z$C20)) paste0("{", paste(z$C20,
+               collapse = ","), "}") else "{}",
+             support = z$support, Kp = z$Kp, layer = z$layer,
+             g_CP = z$g_CP, row.names = NULL)
 }
 
-profile <- rbind(AO = read_profile(AO), AZ = read_profile(AZ))
-profile
+sweeps <- list(AO = AO, AZ = AZ)
+profiles <- do.call(rbind, lapply(names(sweeps), function(backbone)
+  do.call(rbind, lapply(seq_len(nrow(profile_specs)), function(i)
+    profile_row(sweeps[[backbone]], backbone, profile_specs[i, ])))))
+profiles
 ```
 
-Both count paths return three, and the displayed `.80/r2` profile also selects
-three in both backbones, so both readings are L1 here. That agreement is a fact
-about this sample, source set, horizon, cutoff, and window. The AIC minimum at
-four is in the same evidence and disagrees, and no part of `pefa()` arbitrates
-between them. The profile is tutorial analysis code: `.80/r2` was retained as a
-scenario-bound practical default in one simulation study, not made a `vbpm`
-default. Shallower `.85/r1` and deeper `.70/r3` readings, or matched
-maximum-RMSD companions, remain legitimate declared sensitivity profiles.
+ELBO and BIC are co-primary count readings here: each uses the 20% rule with
+sustain one over all of `K = 2:5`, and finite readings form $C_{20}$. The
+`support` column says descriptively whether both, only ELBO, only BIC, or
+neither corroborates $K_p$; it does not rank the paths. The three structural
+profiles are analysis-owned and scenario-bound. `.80/r2` was retained as the
+practical default in one simulation study, not made a **vbpm** default.
+The profiles share one declared source set, so the comparison is like-for-like;
+here it is `2:3` because this demonstration window is short. Because this short window ends at five, `.70/r3` lacks the
+`3 -> 6` edge and is therefore unclassified rather than silently searching a
+smaller source universe. Fitting through `K = 6` would resolve that row.
 
-A horizon is always direct: $r=2$ asks separately for `K -> K + 1` and
-`K -> K + 2`, never for a chain through the intervening fit. Horizons one
-through four are constructed the same way, but source `K` requires the fitted
-endpoint `K + r`. A known collision vetoes that edge for this profile. If every
-declared source resolves nonpersistent the result is L3; unavailable evidence
-that prevents resolution is unclassified, not L3.
+Within either backbone, agreement among the simultaneously displayed resolved
+profiles is **within-family robustness** to these declared cutoff/depth choices,
+not evidence of population truth, validation, or a package-selected count.
+Disagreement identifies sensitivity within the family; it does not say which
+profile is true. The `.70/r3` row is also a concrete short-window unresolved
+example, not structural nonpersistence.
+
+L1 means that selected $K_p$ belongs to finite $C_{20}$. L2 means that selected
+$K_p$ does not belong to $C_{20}$ while at least one count path is usable. L3
+requires all declared sources to resolve nonpersistent regardless of count-path
+usability; otherwise the row is unclassified. The displayed
+$g_{CP}=\min_{\widehat K\in C_{20}}|\widehat K-K_p|$ is corroboration only,
+never a decision criterion, and is undefined without a finite count. Here
+$g_{CP}=0$ algebraically restates L1 membership; only a positive L2 gap has
+descriptive magnitude. A horizon is always direct: $r=2$ asks separately for
+`K -> K + 1` and `K -> K + 2`,
+never for a chain through the intervening fit. A known collision vetoes its
+edge, and the reader selects only the highest persistent source whose higher
+declared sources have all resolved nonpersistent.
 
 ## Step 2: a comparison derived from Step 1
 
-The criterion path supplies the descriptive count $\widehat K$. The persistence
+The two criterion paths supply descriptive finite set $C_{20}$. A persistence
 profile separately supplies $K_p$ and the layer. Only L1 or L2 delivers a
 candidate to Step 2, and then $K_{\mathrm{step2}}=K_p$. Thus
 $K_{\mathrm{step2}}$ is literally $K_p$ conditional on L1/L2 delivery; it is
@@ -264,9 +303,11 @@ markers (`1`). Exact ties go to the lower item index. There is no PIP or loading
 cutoff, and the same item may mark more than one new factor.
 
 ```{r step2-design}
-if (!profile["AO", "layer"] %in% c("L1", "L2"))
+default_AO <- profiles[profiles$backbone == "AO" &
+                       profiles$profile == ".80/r2", , drop = FALSE]
+if (nrow(default_AO) != 1L || !default_AO$layer %in% c("L1", "L2"))
   stop("The declared profile did not deliver a Step-2 proposal.")
-K_step2 <- as.integer(profile["AO", "K_p"])
+K_step2 <- as.integer(default_AO$Kp)
 K0      <- ncol(AO$Q0)
 Lam     <- AO$loadings[[as.character(K_step2)]]
 d     <- unique(colSums(AO$Q0 == 1L))
@@ -356,11 +397,10 @@ In this example the bifactor sweep is much less sharp than the ordinary one.
 
 * `ELBO_gain_pct` is `NA` for every row. ELBO is highest at the window's lower
   edge and falls at every step, so that path contains no positive gain and its
-  whole percentage column is `NA` by construction. The Step-1 reading has no
-  defined path to consume; a rule that reads that column must decide for itself
-  what an all-`NA` path means, which is exactly the kind of decision the
-  package leaves outside. `BIC_gain_pct` does have a positive step, at
-  `3 -> 4`, and normalizes to it.
+  whole percentage column is `NA` by construction. The declared reader above
+  treats the complete finite raw ELBO path as usable but returns no finite
+  `Khat_ELBO`; that convention belongs to the analysis, not the package.
+  `BIC_gain_pct` does have a positive step, at `3 -> 4`, and normalizes to it.
 * `phi_min` is 0.998 or better in every cell that involves `K = 2` and 0.990 at
   `4 -> 5`, then drops to 0.444 and 0.519 in the two cells that start at
   `K = 3`. No `rmsd_max` cell exceeds 0.122, so no column moved far in absolute
