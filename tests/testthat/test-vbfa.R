@@ -41,9 +41,8 @@ test_that("vbfa(v0 = 0.001) reproduces the frozen r1.1 estimator", {
   ## estimator runs through compiled BLAS/LAPACK, whose SIMD and FMA choices
   ## differ between platforms, so the last one or two ulps are not portable --
   ## a reference frozen under one BLAS will not reproduce exactly under
-  ## another. The tolerance is still eight orders of magnitude tighter than
-  ## any change of estimator would produce, so the guard keeps its power.
-  ## Bitwise identity is checked separately below, where it is meaningful.
+  ## another. The tolerance is strict in relative terms and remains sensitive
+  ## to material regression, so the guard keeps its power.
   ref <- readRDS(test_path("fixtures", "vbfa_r11_ref.rds"))
   f <- vbfa(ref$Y, ref$Q, v0 = 0.001, max_it = 1500)
   expect_equal(unname(f$Lam), unname(ref$Lam), tolerance = 1e-8)

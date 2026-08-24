@@ -269,8 +269,8 @@ As of 0.9.1:
   ambiguous. Anchor at least one part.
 
 `vbfa()` reproduces its published reference output. A stored-reference
-regression test checks that result during every `R CMD check`, at a tolerance
-eight orders of magnitude tighter than any change of estimator would produce.
+regression test checks that result during every `R CMD check`, at a strict
+relative tolerance of `1e-8` that remains sensitive to material regression.
 It is not asserted bitwise: the estimator runs through compiled BLAS/LAPACK,
 whose SIMD and FMA choices differ between platforms, so the last one or two
 ulps are a property of the build rather than of the estimator.

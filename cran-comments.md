@@ -9,8 +9,9 @@ One test compared `vbfa()` output to a stored reference with
 `expect_identical()`. The estimator runs through compiled BLAS/LAPACK, so the
 last one or two ulps are not portable; Debian disagreed in the sixteenth
 significant digit on four values (797 tests passed). The test now asserts
-agreement at `tolerance = 1e-8`, and bitwise identity is checked in a separate
-`skip_on_cran()` test. No estimator or user-visible behaviour changed.
+agreement at a strict relative `tolerance = 1e-8`, which remains sensitive to
+material regression. Bitwise identity is no longer asserted anywhere, being a
+property of a single build. No estimator or user-visible behaviour changed.
 
 ## Test environments
 

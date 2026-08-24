@@ -10,11 +10,11 @@ checks and never reached the archive.
   differ between platforms, so a reference frozen under one BLAS reproduces
   only to within an ulp or two under another. CRAN's Debian pre-test
   disagreed in the sixteenth significant digit on four values and failed.
-  The test now asserts agreement at `tolerance = 1e-8` -- still eight orders
-  of magnitude tighter than any change of estimator would produce -- and keeps
-  the iteration count exact, since a different stopping point means the path
-  itself changed. Bitwise identity moved to a separate `skip_on_cran()` test
-  for the build where the reference was frozen.
+  The test now asserts agreement at a strict relative `tolerance = 1e-8`,
+  which remains sensitive to material regression, and keeps the iteration
+  count exact, since a different stopping point means the path itself
+  changed. Bitwise identity is no longer asserted anywhere: it is a property
+  of a single build, not of the estimator.
 
 * The `pefa` and `bifactor` vignettes replace their illustrative count rule
   with a declared analysis-side reader: dual ELBO/BIC count paths, three named
@@ -27,8 +27,8 @@ checks and never reached the archive.
   factor-number selection, which `pefa()` has not performed since 0.9.0. The
   refusal itself is unchanged; only the stated reason was stale.
 
-  This is the sole change to `R/` since 0.9.0 and it is comment-only: three
-  roxygen lines, no executable line. `src/` and `data/` are byte-identical to
+  This is the sole change to `R/` since 0.9.0 and it is comment-only: one
+  roxygen sentence rewritten, no executable line. `src/` and `data/` are byte-identical to
   0.9.0, so every number a fit returns is unchanged and results produced under
   0.9.0 reproduce exactly under 0.9.1.
 
